@@ -3,23 +3,8 @@ import XCTest
 
 @MainActor
 final class SettingsStoreTests: XCTestCase {
-  private var defaults: UserDefaults!
-  private var suiteName: String!
-
-  override func setUp() {
-    super.setUp()
-    suiteName = "LexiRayTests-\(UUID().uuidString)"
-    defaults = UserDefaults(suiteName: suiteName)
-  }
-
-  override func tearDown() {
-    defaults.removePersistentDomain(forName: suiteName)
-    defaults = nil
-    suiteName = nil
-    super.tearDown()
-  }
-
-  func testSettingsPersistProviderChoice() {
+  func testSettingsPersistProviderChoice() throws {
+    let defaults = try makeDefaults()
     let store = SettingsStore(defaults: defaults)
     store.preferredProvider = .openAICompatible
     store.targetLanguage = "ja"
@@ -30,7 +15,8 @@ final class SettingsStoreTests: XCTestCase {
     XCTAssertEqual(reloaded.targetLanguage, "ja")
   }
 
-  func testResetProviderSettingsRestoresDefaults() {
+  func testResetProviderSettingsRestoresDefaults() throws {
+    let defaults = try makeDefaults()
     let store = SettingsStore(defaults: defaults)
     store.preferredProvider = .openAICompatible
     store.openAIAPIKey = "secret"
@@ -39,5 +25,12 @@ final class SettingsStoreTests: XCTestCase {
 
     XCTAssertEqual(store.preferredProvider, .mock)
     XCTAssertEqual(store.openAIAPIKey, "")
+  }
+
+  private func makeDefaults() throws -> UserDefaults {
+    let suiteName = "LexiRayTests-\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    defaults.removePersistentDomain(forName: suiteName)
+    return defaults
   }
 }
