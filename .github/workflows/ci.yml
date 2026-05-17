@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-test:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 16.4
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app || sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+
+      - name: Install tools
+        run: brew install xcodegen swiftformat
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: SwiftFormat lint
+        run: swiftformat --lint .
+
+      - name: Test
+        run: |
+          xcodebuild test \
+            -project LexiRay.xcodeproj \
+            -scheme LexiRay \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO
+
