@@ -14,6 +14,8 @@ final class TextSelectionService: TextSelectionReading {
   private let clipboardReader = ClipboardSelectionReader()
 
   func readSelectedText() async -> SelectionReadResult {
+    let accessibilityTrusted = PermissionService.isAccessibilityTrusted
+
     if let text = accessibilityReader.readSelectedText() {
       AppLog.selection.info("Read selection through Accessibility")
       return SelectionReadResult(text: text, source: .accessibility)
@@ -30,7 +32,8 @@ final class TextSelectionService: TextSelectionReading {
     }
 
     AppLog.selection.warning("No selected text could be read")
-    return .unavailable
+    let reason: SelectionFailureReason = accessibilityTrusted ? .copyFailed : .accessibilityPermissionMissing
+    return SelectionReadResult(text: nil, source: .unavailable, failureReason: reason)
   }
 }
 
@@ -115,22 +118,34 @@ private final class BrowserSelectionReader {
 private final class ClipboardSelectionReader {
   func copyCurrentSelection() async -> String? {
     let pasteboard = NSPasteboard.general
-    let previousString = pasteboard.string(forType: .string)
+    let previousItems = pasteboard.pasteboardItems?.map(Self.copyPasteboardItem)
     let previousChangeCount = pasteboard.changeCount
 
     pasteboard.clearContents()
     sendCommandC()
 
-    try? await Task.sleep(nanoseconds: 180_000_000)
+    try? await Task.sleep(nanoseconds: 320_000_000)
 
     let copiedText = pasteboard.string(forType: .string)?.nonEmptyTrimmed
 
-    if let previousString, pasteboard.changeCount != previousChangeCount {
+    if pasteboard.changeCount != previousChangeCount {
       pasteboard.clearContents()
-      pasteboard.setString(previousString, forType: .string)
+      if let previousItems, !previousItems.isEmpty {
+        pasteboard.writeObjects(previousItems)
+      }
     }
 
     return copiedText
+  }
+
+  private static func copyPasteboardItem(_ item: NSPasteboardItem) -> NSPasteboardItem {
+    let copy = NSPasteboardItem()
+    for type in item.types {
+      if let data = item.data(forType: type) {
+        copy.setData(data, forType: type)
+      }
+    }
+    return copy
   }
 
   private func sendCommandC() {

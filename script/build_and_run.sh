@@ -16,7 +16,43 @@ if ! command -v xcodegen >/dev/null 2>&1; then
   exit 127
 fi
 
-pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+kill_existing_app() {
+  (pgrep -x "$APP_NAME" || true) | while read -r pid; do
+    [[ -n "$pid" ]] || continue
+    kill "$pid" >/dev/null 2>&1 || true
+  done
+
+  sleep 1
+
+  (pgrep -x "$APP_NAME" || true) | while read -r pid; do
+    [[ -n "$pid" ]] || continue
+    kill -9 "$pid" >/dev/null 2>&1 || true
+  done
+}
+
+keep_only_workspace_app() {
+  (pgrep -x "$APP_NAME" || true) | while read -r pid; do
+    [[ -n "$pid" ]] || continue
+    process_path="$(ps -p "$pid" -o args=)"
+    case "$process_path" in
+      "$APP_BUNDLE"/Contents/MacOS/"$APP_NAME") ;;
+      *) kill "$pid" >/dev/null 2>&1 || true ;;
+    esac
+  done
+
+  sleep 1
+
+  (pgrep -x "$APP_NAME" || true) | while read -r pid; do
+    [[ -n "$pid" ]] || continue
+    process_path="$(ps -p "$pid" -o args=)"
+    case "$process_path" in
+      "$APP_BUNDLE"/Contents/MacOS/"$APP_NAME") ;;
+      *) kill -9 "$pid" >/dev/null 2>&1 || true ;;
+    esac
+  done
+}
+
+kill_existing_app
 
 xcodegen generate
 xcodebuild \
@@ -50,10 +86,10 @@ case "$MODE" in
     open_app
     sleep 2
     pgrep -x "$APP_NAME" >/dev/null
+    keep_only_workspace_app
     ;;
   *)
     echo "usage: $0 [run|--debug|--logs|--telemetry|--verify]" >&2
     exit 2
     ;;
 esac
-

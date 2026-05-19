@@ -2,9 +2,31 @@ import AppKit
 import ApplicationServices
 import Foundation
 
+protocol PermissionChecking {
+  var isAccessibilityTrusted: Bool { get }
+
+  @discardableResult
+  func requestAccessibilityIfNeeded(prompt: Bool) -> Bool
+}
+
+struct SystemPermissionChecker: PermissionChecking {
+  var isAccessibilityTrusted: Bool {
+    PermissionService.isAccessibilityTrusted
+  }
+
+  @discardableResult
+  func requestAccessibilityIfNeeded(prompt: Bool) -> Bool {
+    PermissionService.requestAccessibilityIfNeeded(prompt: prompt)
+  }
+}
+
 enum PermissionService {
   static var isAccessibilityTrusted: Bool {
     AXIsProcessTrusted()
+  }
+
+  static var isScreenCaptureTrusted: Bool {
+    CGPreflightScreenCaptureAccess()
   }
 
   @discardableResult
@@ -21,6 +43,19 @@ enum PermissionService {
 
   static func openAutomationSettings() {
     openSettings(path: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")
+  }
+
+  @discardableResult
+  static func requestScreenCaptureIfNeeded() -> Bool {
+    guard !isScreenCaptureTrusted else {
+      return true
+    }
+
+    return CGRequestScreenCaptureAccess()
+  }
+
+  static func openScreenCaptureSettings() {
+    openSettings(path: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
   }
 
   private static func openSettings(path: String) {

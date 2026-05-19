@@ -4,6 +4,7 @@ import SwiftUI
 struct LexiRayApp: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
   @StateObject private var controller = LexiRayController.shared
+  @StateObject private var settings = LexiRayController.shared.settings
 
   var body: some Scene {
     WindowGroup("LexiRay", id: "main") {
@@ -13,13 +14,25 @@ struct LexiRayApp: App {
     .defaultSize(width: 820, height: 560)
 
     Settings {
-      SettingsView(settings: controller.settings)
+      SettingsView(settings: settings)
         .frame(width: 520)
     }
 
-    MenuBarExtra("LexiRay", systemImage: "text.magnifyingglass") {
+    MenuBarExtra("LexiRay", image: "MenuBarIcon", isInserted: showsMenuBarIcon) {
       MenuBarView(controller: controller)
     }
     .menuBarExtraStyle(.menu)
+  }
+
+  private var showsMenuBarIcon: Binding<Bool> {
+    Binding(
+      get: { settings.showsMenuBarIcon },
+      set: { newValue in
+        guard settings.showsMenuBarIcon != newValue else {
+          return
+        }
+        settings.showsMenuBarIcon = newValue
+      }
+    )
   }
 }

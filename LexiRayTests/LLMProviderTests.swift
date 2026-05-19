@@ -1,0 +1,301 @@
+@testable import LexiRay
+import XCTest
+
+@MainActor
+final class LLMProviderTests: XCTestCase {
+  func testOpenAIChatCompletionsRequestAndResponse() async throws {
+    let client = MockHTTPClient(responseJSON: #"{"choices":[{"message":{"role":"assistant","content":"你好"}}]}"#)
+    let provider = OpenAIChatCompletionsProvider(
+      configuration: makeConfiguration(provider: .openAIChatCompletions, baseURL: "https://api.example.test/v1/"),
+      client: client
+    )
+
+    let result = try await provider.translate(makeRequest())
+
+    XCTAssertEqual(result.translatedText, "你好")
+    XCTAssertEqual(client.request?.url?.absoluteString, "https://api.example.test/v1/chat/completions")
+    XCTAssertEqual(client.request?.value(forHTTPHeaderField: "Authorization"), "Bearer test-key")
+    XCTAssertEqual(try client.stringBodyValue("model"), "test-model")
+  }
+
+  func testOpenAIChatCompletionsStreamsDeltas() async throws {
+    let client = MockHTTPClient(
+      responseJSON: "{}",
+      streamLines: [
+        #"data: {"choices":[{"delta":{"content":"你"}}]}"#,
+        "",
+        #"data: {"choices":[{"delta":{"content":"好"}}]}"#,
+        "",
+        "data: [DONE]",
+        ""
+      ]
+    )
+    let provider = OpenAIChatCompletionsProvider(
+      configuration: makeConfiguration(provider: .openAIChatCompletions),
+      client: client
+    )
+
+    let (partials, result) = try await collectStream(from: provider)
+
+    XCTAssertEqual(partials, ["你", "你好"])
+    XCTAssertEqual(result?.translatedText, "你好")
+    XCTAssertEqual(try client.boolBodyValue("stream"), true)
+  }
+
+  func testOpenAIResponsesRequestAndResponse() async throws {
+    let client = MockHTTPClient(responseJSON: #"{"output":[{"content":[{"type":"output_text","text":"你好"}]}]}"#)
+    let provider = OpenAIResponsesProvider(
+      configuration: makeConfiguration(provider: .openAIResponses),
+      client: client
+    )
+
+    let result = try await provider.translate(makeRequest())
+
+    XCTAssertEqual(result.translatedText, "你好")
+    XCTAssertEqual(client.request?.url?.absoluteString, "https://api.example.test/v1/responses")
+    XCTAssertEqual(client.request?.value(forHTTPHeaderField: "Authorization"), "Bearer test-key")
+    XCTAssertEqual(try client.stringBodyValue("input"), "hello")
+  }
+
+  func testOpenAIResponsesSkipsOutputItemsWithoutTextContent() async throws {
+    let client = MockHTTPClient(responseJSON: #"{"output":[{"type":"reasoning"},{"content":[{"type":"output_text","text":"你好"}]}]}"#)
+    let provider = OpenAIResponsesProvider(
+      configuration: makeConfiguration(provider: .openAIResponses),
+      client: client
+    )
+
+    let result = try await provider.translate(makeRequest())
+
+    XCTAssertEqual(result.translatedText, "你好")
+  }
+
+  func testOpenAIResponsesStreamsDeltasAndFinalText() async throws {
+    let client = MockHTTPClient(
+      responseJSON: "{}",
+      streamLines: [
+        "event: response.output_text.delta",
+        #"data: {"type":"response.output_text.delta","delta":"你"}"#,
+        "",
+        "event: response.output_text.delta",
+        #"data: {"type":"response.output_text.delta","delta":"好"}"#,
+        "",
+        "event: response.output_text.done",
+        #"data: {"type":"response.output_text.done","text":"你好"}"#,
+        "",
+        "event: response.completed",
+        #"data: {"type":"response.completed"}"#,
+        ""
+      ]
+    )
+    let provider = OpenAIResponsesProvider(
+      configuration: makeConfiguration(provider: .openAIResponses),
+      client: client
+    )
+
+    let (partials, result) = try await collectStream(from: provider)
+
+    XCTAssertEqual(partials, ["你", "你好", "你好"])
+    XCTAssertEqual(result?.translatedText, "你好")
+    XCTAssertEqual(try client.boolBodyValue("stream"), true)
+  }
+
+  func testAnthropicMessagesRequestAndResponse() async throws {
+    let client = MockHTTPClient(responseJSON: #"{"content":[{"type":"text","text":"你好"}]}"#)
+    let provider = AnthropicMessagesProvider(
+      configuration: makeConfiguration(provider: .anthropicMessages),
+      client: client
+    )
+
+    let result = try await provider.translate(makeRequest())
+
+    XCTAssertEqual(result.translatedText, "你好")
+    XCTAssertEqual(client.request?.url?.absoluteString, "https://api.example.test/v1/messages")
+    XCTAssertEqual(client.request?.value(forHTTPHeaderField: "x-api-key"), "test-key")
+    XCTAssertEqual(client.request?.value(forHTTPHeaderField: "anthropic-version"), "2023-06-01")
+    XCTAssertEqual(try client.stringBodyValue("model"), "test-model")
+  }
+
+  func testAnthropicMessagesStreamsTextDeltas() async throws {
+    let client = MockHTTPClient(
+      responseJSON: "{}",
+      streamLines: [
+        "event: content_block_delta",
+        #"data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"你"}}"#,
+        "",
+        "event: ping",
+        #"data: {"type":"ping"}"#,
+        "",
+        "event: content_block_delta",
+        #"data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"好"}}"#,
+        "",
+        "event: message_stop",
+        #"data: {"type":"message_stop"}"#,
+        ""
+      ]
+    )
+    let provider = AnthropicMessagesProvider(
+      configuration: makeConfiguration(provider: .anthropicMessages),
+      client: client
+    )
+
+    let (partials, result) = try await collectStream(from: provider)
+
+    XCTAssertEqual(partials, ["你", "你好"])
+    XCTAssertEqual(result?.translatedText, "你好")
+    XCTAssertEqual(try client.boolBodyValue("stream"), true)
+  }
+
+  func testGeminiGenerateContentRequestAndResponse() async throws {
+    let client = MockHTTPClient(responseJSON: #"{"candidates":[{"content":{"parts":[{"text":"你好"}]}}]}"#)
+    let provider = GeminiGenerateContentProvider(
+      configuration: makeConfiguration(provider: .geminiGenerateContent, model: "gemini-test"),
+      client: client
+    )
+
+    let result = try await provider.translate(makeRequest())
+
+    XCTAssertEqual(result.translatedText, "你好")
+    XCTAssertEqual(client.request?.url?.absoluteString, "https://api.example.test/v1/models/gemini-test:generateContent")
+    XCTAssertEqual(client.request?.value(forHTTPHeaderField: "x-goog-api-key"), "test-key")
+    XCTAssertNotNil(try client.jsonBody()["systemInstruction"])
+  }
+
+  func testGeminiGenerateContentStreamsTextDeltas() async throws {
+    let client = MockHTTPClient(
+      responseJSON: "{}",
+      streamLines: [
+        #"data: {"candidates":[{"content":{"parts":[{"text":"你"}]}}]}"#,
+        "",
+        #"data: {"candidates":[{"content":{"parts":[{"text":"好"}]}}]}"#,
+        ""
+      ]
+    )
+    let provider = GeminiGenerateContentProvider(
+      configuration: makeConfiguration(provider: .geminiGenerateContent, model: "gemini-test"),
+      client: client
+    )
+
+    let (partials, result) = try await collectStream(from: provider)
+
+    XCTAssertEqual(partials, ["你", "你好"])
+    XCTAssertEqual(result?.translatedText, "你好")
+    XCTAssertEqual(client.request?.url?.absoluteString, "https://api.example.test/v1/models/gemini-test:streamGenerateContent?alt=sse")
+  }
+
+  func testProviderRejectsMissingAPIKey() async throws {
+    let client = MockHTTPClient(responseJSON: #"{"choices":[]}"#)
+    let provider = OpenAIChatCompletionsProvider(
+      configuration: makeConfiguration(provider: .openAIChatCompletions, apiKey: ""),
+      client: client
+    )
+
+    do {
+      _ = try await provider.translate(makeRequest())
+      XCTFail("Expected missing API key")
+    } catch let error as TranslationError {
+      XCTAssertEqual(error, .missingAPIKey)
+    }
+  }
+
+  func testMalformedStreamFailsProvider() async throws {
+    let client = MockHTTPClient(responseJSON: "{}", streamLines: ["data: {", ""])
+    let provider = OpenAIChatCompletionsProvider(
+      configuration: makeConfiguration(provider: .openAIChatCompletions),
+      client: client
+    )
+
+    do {
+      _ = try await collectStream(from: provider)
+      XCTFail("Expected malformed stream to throw")
+    } catch let error as TranslationError {
+      guard case .network = error else {
+        return XCTFail("Expected network stream failure")
+      }
+    }
+  }
+
+  private func collectStream(from provider: TranslationProvider) async throws -> ([String], TranslationResult?) {
+    let stream = try await provider.streamTranslation(makeRequest())
+    var partials: [String] = []
+    var result: TranslationResult?
+
+    for try await update in stream {
+      switch update {
+      case let .partial(text):
+        partials.append(text)
+      case let .completed(completed):
+        result = completed
+      }
+    }
+
+    return (partials, result)
+  }
+
+  private func makeRequest() -> TranslationRequest {
+    TranslationRequest(text: "hello", sourceLanguage: "en", targetLanguage: "zh-Hans", selectionSource: .manual)
+  }
+
+  private func makeConfiguration(
+    provider: ProviderID,
+    baseURL: String = "https://api.example.test/v1",
+    apiKey: String = "test-key",
+    model: String = "test-model"
+  ) -> LLMProviderConfiguration {
+    LLMProviderConfiguration(provider: provider, baseURL: baseURL, apiKey: apiKey, model: model)
+  }
+}
+
+private final class MockHTTPClient: HTTPClient {
+  private(set) var request: URLRequest?
+  private let data: Data
+  private let statusCode: Int
+  private let streamLines: [String]
+
+  init(responseJSON: String, statusCode: Int = 200, streamLines: [String] = []) {
+    data = Data(responseJSON.utf8)
+    self.statusCode = statusCode
+    self.streamLines = streamLines
+  }
+
+  func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+    self.request = request
+    let response = try HTTPURLResponse(
+      url: XCTUnwrap(request.url),
+      statusCode: statusCode,
+      httpVersion: nil,
+      headerFields: nil
+    )
+    return try (data, XCTUnwrap(response))
+  }
+
+  func lineStream(for request: URLRequest) async throws -> HTTPLineStream {
+    self.request = request
+    let response = try HTTPURLResponse(
+      url: XCTUnwrap(request.url),
+      statusCode: statusCode,
+      httpVersion: nil,
+      headerFields: nil
+    )
+    let lines = AsyncThrowingStream<String, Error> { continuation in
+      for line in streamLines {
+        continuation.yield(line)
+      }
+      continuation.finish()
+    }
+    return try HTTPLineStream(lines: lines, response: XCTUnwrap(response))
+  }
+
+  func jsonBody() throws -> [String: Any] {
+    let body = try XCTUnwrap(request?.httpBody)
+    let object = try JSONSerialization.jsonObject(with: body)
+    return try XCTUnwrap(object as? [String: Any])
+  }
+
+  func stringBodyValue(_ key: String) throws -> String? {
+    try jsonBody()[key] as? String
+  }
+
+  func boolBodyValue(_ key: String) throws -> Bool? {
+    try jsonBody()[key] as? Bool
+  }
+}

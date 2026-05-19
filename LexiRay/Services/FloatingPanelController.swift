@@ -2,15 +2,40 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class FloatingPanelController {
+protocol FloatingPanelPresenting: AnyObject {
+  func show(activating: Bool, repositioning: Bool)
+  func refreshContentLayout()
+  func hide()
+  func hideIfNeeded()
+  func updatePinnedState(isPinned: Bool)
+  func updateLayout()
+}
+
+extension FloatingPanelPresenting {
+  func show(activating: Bool) {
+    show(activating: activating, repositioning: true)
+  }
+
+  func show() {
+    show(activating: false, repositioning: true)
+  }
+}
+
+@MainActor
+final class FloatingPanelController: FloatingPanelPresenting {
+  static let panelStyleMask: NSWindow.StyleMask = [.borderless, .nonactivatingPanel]
+
   private weak var controller: LexiRayController?
   private var panel: NSPanel?
+  private var globalMouseMonitor: Any?
+  private var localMouseMonitor: Any?
+  private var localKeyMonitor: Any?
 
   init(controller: LexiRayController) {
     self.controller = controller
   }
 
-  func show() {
+  func show(activating: Bool = false, repositioning: Bool = true) {
     guard let controller else {
       return
     }
@@ -18,39 +43,150 @@ final class FloatingPanelController {
     let panel = panel ?? makePanel(controller: controller)
     self.panel = panel
 
-    position(panel)
+    let shouldPosition = repositioning || !panel.isVisible
+    resize(panel, for: controller, preservingTopLeft: panel.isVisible && !shouldPosition)
+    if shouldPosition {
+      position(panel)
+    }
+
     panel.orderFrontRegardless()
-    NSApp.activate(ignoringOtherApps: true)
+    startDismissMonitors()
+    if activating {
+      NSApp.activate()
+    }
     AppLog.panel.info("Floating panel shown")
+  }
+
+  func hide() {
+    panel?.orderOut(nil)
+    stopDismissMonitors()
   }
 
   func hideIfNeeded() {
     guard controller?.isPanelPinned == false else {
       return
     }
-    panel?.orderOut(nil)
+    hide()
+  }
+
+  func updatePinnedState(isPinned _: Bool) {
+    guard panel?.isVisible == true else {
+      return
+    }
+    startDismissMonitors()
+  }
+
+  func refreshContentLayout() {
+    guard let controller, let panel else {
+      return
+    }
+
+    resize(panel, for: controller, preservingTopLeft: true)
+  }
+
+  func updateLayout() {
+    guard let controller, let panel else {
+      return
+    }
+
+    resize(panel, for: controller, preservingTopLeft: true)
   }
 
   private func makePanel(controller: LexiRayController) -> NSPanel {
     let panel = NSPanel(
-      contentRect: NSRect(x: 0, y: 0, width: 430, height: 286),
-      styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView],
+      contentRect: NSRect(x: 0, y: 0, width: 430, height: 220),
+      styleMask: Self.panelStyleMask,
       backing: .buffered,
       defer: false
     )
 
     panel.title = "LexiRay"
-    panel.titleVisibility = .hidden
-    panel.titlebarAppearsTransparent = true
     panel.isFloatingPanel = true
     panel.level = .floating
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     panel.isMovableByWindowBackground = true
     panel.hidesOnDeactivate = false
+    panel.isOpaque = false
     panel.backgroundColor = .clear
     panel.contentView = NSHostingView(rootView: FloatingPanelView(controller: controller))
 
     return panel
+  }
+
+  private func startDismissMonitors() {
+    guard globalMouseMonitor == nil, localMouseMonitor == nil, localKeyMonitor == nil else {
+      return
+    }
+
+    globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
+      matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+    ) { [weak self] _ in
+      Task { @MainActor in
+        self?.hideAfterOutsideClick(at: NSEvent.mouseLocation)
+      }
+    }
+
+    localMouseMonitor = NSEvent.addLocalMonitorForEvents(
+      matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+    ) { [weak self] event in
+      let screenLocation = event.window?.convertPoint(toScreen: event.locationInWindow) ?? NSEvent.mouseLocation
+      let windowNumber = event.window?.windowNumber
+      Task { @MainActor in
+        self?.hideAfterLocalMouseEvent(windowNumber: windowNumber, screenLocation: screenLocation)
+      }
+      return event
+    }
+
+    localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+      guard event.keyCode == 53 else {
+        return event
+      }
+      Task { @MainActor in
+        self?.hideIfNeeded()
+      }
+      return nil
+    }
+  }
+
+  private func stopDismissMonitors() {
+    if let globalMouseMonitor {
+      NSEvent.removeMonitor(globalMouseMonitor)
+      self.globalMouseMonitor = nil
+    }
+
+    if let localMouseMonitor {
+      NSEvent.removeMonitor(localMouseMonitor)
+      self.localMouseMonitor = nil
+    }
+
+    if let localKeyMonitor {
+      NSEvent.removeMonitor(localKeyMonitor)
+      self.localKeyMonitor = nil
+    }
+  }
+
+  private func hideAfterOutsideClick(at screenLocation: NSPoint) {
+    guard panel?.isVisible == true, controller?.isPanelPinned == false else {
+      return
+    }
+
+    if panel?.frame.contains(screenLocation) == false {
+      hide()
+    }
+  }
+
+  private func hideAfterLocalMouseEvent(windowNumber: Int?, screenLocation: NSPoint) {
+    guard panel?.isVisible == true, controller?.isPanelPinned == false else {
+      return
+    }
+
+    guard let panel, windowNumber != panel.windowNumber else {
+      return
+    }
+
+    if !panel.frame.contains(screenLocation) {
+      hide()
+    }
   }
 
   private func position(_ panel: NSPanel) {
@@ -63,5 +199,50 @@ final class FloatingPanelController {
     let y = min(max(mouseLocation.y - size.height - 14, visibleFrame.minY + 12), visibleFrame.maxY - size.height - 12)
 
     panel.setFrameOrigin(NSPoint(x: x, y: y))
+  }
+
+  private func resize(_ panel: NSPanel, for controller: LexiRayController, preservingTopLeft: Bool) {
+    let topLeft = NSPoint(x: panel.frame.minX, y: panel.frame.maxY)
+    panel.setContentSize(Self.contentSize(for: controller))
+
+    if preservingTopLeft {
+      panel.setFrameOrigin(NSPoint(x: topLeft.x, y: topLeft.y - panel.frame.height))
+    }
+  }
+
+  static func contentSize(for controller: LexiRayController) -> NSSize {
+    NSSize(width: 560, height: contentHeight(for: controller))
+  }
+
+  private static func contentHeight(for controller: LexiRayController) -> CGFloat {
+    if controller.isExpanded {
+      return 420
+    }
+
+    switch controller.panelState {
+    case .idle:
+      return 178
+    case let .loading(state):
+      let preview = state.preview ?? state.title
+      return preview.count > 120 ? 238 : 198
+    case let .error(message):
+      return message.count > 110 ? 248 : 210
+    case let .batch(batch):
+      let baseHeight: CGFloat = controller.isExpanded ? 620 : 460
+      let rowHeight = batch.entries.reduce(CGFloat(0)) { height, entry in
+        height + (entry.status.isDisabled ? 42 : 92)
+      }
+      let sourceHeight: CGFloat = batch.request.text.count > 180 || batch.request.text.lineCount > 4 ? 150 : 106
+      return min(baseHeight, max(300, sourceHeight + rowHeight + 76))
+    case let .result(result):
+      let text = result.translatedText
+      if text.count > 260 || text.lineCount > 6 {
+        return 360
+      }
+      if text.count > 120 || text.lineCount > 3 {
+        return 300
+      }
+      return 260
+    }
   }
 }

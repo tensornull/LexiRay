@@ -5,6 +5,7 @@ enum AppConstants {
   static let appName = "LexiRay"
   static let bundleID = "io.github.tensornull.lexiray"
   static let defaultHotKeyDescription = "Option-Command-D"
+  static let defaultOCRHotKeyDescription = "Option-Command-O"
 }
 
 enum AppLog {
@@ -12,5 +13,7 @@ enum AppLog {
   static let hotKey = Logger(subsystem: AppConstants.bundleID, category: "HotKey")
   static let selection = Logger(subsystem: AppConstants.bundleID, category: "Selection")
   static let translation = Logger(subsystem: AppConstants.bundleID, category: "Translation")
+  static let settings = Logger(subsystem: AppConstants.bundleID, category: "Settings")
   static let panel = Logger(subsystem: AppConstants.bundleID, category: "Panel")
+  static let ocr = Logger(subsystem: AppConstants.bundleID, category: "OCR")
 }

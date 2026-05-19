@@ -24,8 +24,9 @@
   <string>LexiRay uses browser automation only to read the currently selected text when Accessibility cannot provide it.</string>
   <key>NSAccessibilityUsageDescription</key>
   <string>LexiRay needs Accessibility access to read selected text and show a translation near your current work.</string>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>LexiRay uses screen capture only for the OCR region you select.</string>
   <key>NSSupportsAutomaticGraphicsSwitching</key>
   <true/>
 </dict>
 </plist>
-

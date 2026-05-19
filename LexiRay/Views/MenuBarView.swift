@@ -4,23 +4,32 @@ import SwiftUI
 struct MenuBarView: View {
   @ObservedObject var controller: LexiRayController
   @Environment(\.openWindow) private var openWindow
+  @Environment(\.openSettings) private var openSettings
 
   var body: some View {
     Button {
       controller.translateCurrentSelection()
     } label: {
-      Label("Translate Selection", systemImage: "text.magnifyingglass")
+      Label("Translate Selection", systemImage: "text.viewfinder")
     }
     .keyboardShortcut("d", modifiers: [.command, .option])
 
     Button {
-      openWindow(id: "main")
-      NSApp.activate(ignoringOtherApps: true)
+      controller.translateOCRRegion()
+    } label: {
+      Label("OCR Region", systemImage: "viewfinder")
+    }
+    .keyboardShortcut("o", modifiers: [.command, .option])
+
+    Button {
+      openMainWindow()
     } label: {
       Label("Open LexiRay", systemImage: "macwindow")
     }
 
-    SettingsLink {
+    Button {
+      openSettingsWindow()
+    } label: {
       Label("Settings", systemImage: "gearshape")
     }
 
@@ -31,5 +40,15 @@ struct MenuBarView: View {
     } label: {
       Label("Quit LexiRay", systemImage: "power")
     }
+  }
+
+  private func openMainWindow() {
+    openWindow(id: "main")
+    AppWindowPresenter.bringMainWindowToFrontSoon()
+  }
+
+  private func openSettingsWindow() {
+    openSettings()
+    AppWindowPresenter.bringSettingsWindowToFrontSoon()
   }
 }

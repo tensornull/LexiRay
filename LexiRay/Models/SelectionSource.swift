@@ -5,6 +5,7 @@ enum SelectionSource: String, Codable {
   case browserAppleScript
   case simulatedCopy
   case manual
+  case ocr
   case unavailable
 
   var displayName: String {
@@ -17,6 +18,8 @@ enum SelectionSource: String, Codable {
       "Clipboard"
     case .manual:
       "Manual"
+    case .ocr:
+      "OCR"
     case .unavailable:
       "Unavailable"
     }
@@ -26,6 +29,19 @@ enum SelectionSource: String, Codable {
 struct SelectionReadResult: Equatable {
   let text: String?
   let source: SelectionSource
+  let failureReason: SelectionFailureReason?
 
-  static let unavailable = SelectionReadResult(text: nil, source: .unavailable)
+  init(text: String?, source: SelectionSource, failureReason: SelectionFailureReason? = nil) {
+    self.text = text
+    self.source = source
+    self.failureReason = failureReason
+  }
+
+  static let unavailable = SelectionReadResult(text: nil, source: .unavailable, failureReason: .noSelection)
+}
+
+enum SelectionFailureReason: Equatable {
+  case accessibilityPermissionMissing
+  case copyFailed
+  case noSelection
 }

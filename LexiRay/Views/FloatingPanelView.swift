@@ -4,49 +4,47 @@ struct FloatingPanelView: View {
   @ObservedObject var controller: LexiRayController
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
+    VStack(alignment: .leading, spacing: 12) {
       header
-
-      Divider()
-
       content
-
-      Spacer(minLength: 0)
     }
-    .padding(16)
-    .frame(width: 430, height: controller.isExpanded ? 420 : 286)
-    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+    .padding(14)
+    .frame(width: panelSize.width, height: panelSize.height, alignment: .topLeading)
+    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
     .overlay {
-      RoundedRectangle(cornerRadius: 14)
+      RoundedRectangle(cornerRadius: 12)
         .stroke(.separator.opacity(0.7), lineWidth: 1)
     }
   }
 
   private var header: some View {
-    HStack(spacing: 10) {
-      Image(systemName: "text.magnifyingglass")
-        .font(.title3)
+    HStack(alignment: .top, spacing: 10) {
+      VStack(alignment: .leading, spacing: 2) {
+        Text("LexiRay Translate")
+          .font(.title3.weight(.semibold))
+          .lineLimit(1)
 
-      Text("LexiRay")
-        .font(.headline)
+        Text(headerSubtitle)
+          .font(.caption.weight(.medium))
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
 
       Spacer()
 
-      Button {
-        controller.togglePinned()
-      } label: {
-        Image(systemName: controller.isPanelPinned ? "pin.fill" : "pin")
-      }
-      .buttonStyle(.borderless)
-      .help(controller.isPanelPinned ? "Unpin" : "Pin")
+      panelButton(
+        systemName: controller.isPanelPinned ? "pin.fill" : "pin",
+        help: controller.isPanelPinned ? "Unpin" : "Pin",
+        action: controller.togglePinned
+      )
 
-      Button {
-        controller.toggleExpanded()
-      } label: {
-        Image(systemName: controller.isExpanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-      }
-      .buttonStyle(.borderless)
-      .help(controller.isExpanded ? "Collapse" : "Expand")
+      panelButton(
+        systemName: controller.isExpanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+        help: controller.isExpanded ? "Collapse" : "Expand",
+        action: controller.toggleExpanded
+      )
+
+      panelButton(systemName: "xmark", help: "Close", action: controller.hideFloatingPanel)
     }
   }
 
@@ -54,57 +52,125 @@ struct FloatingPanelView: View {
   private var content: some View {
     switch controller.panelState {
     case .idle:
-      ContentUnavailableView("Ready", systemImage: "keyboard", description: Text(AppConstants.defaultHotKeyDescription))
-    case let .loading(text):
-      VStack(alignment: .leading, spacing: 12) {
-        ProgressView()
-        Text(text)
-          .font(.body)
-          .foregroundStyle(.secondary)
-          .lineLimit(4)
-          .textSelection(.enabled)
-      }
+      idleView
+    case let .loading(state):
+      loadingView(state)
+    case let .batch(batch):
+      batchView(batch)
     case let .result(result):
       resultView(result)
     case let .error(message):
-      ContentUnavailableView("No Translation", systemImage: "exclamationmark.triangle", description: Text(message))
+      errorView(message)
     }
   }
 
-  private func resultView(_ result: TranslationResult) -> some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Text(result.translatedText)
-        .font(.title3)
-        .textSelection(.enabled)
-        .lineLimit(controller.isExpanded ? nil : 6)
-
-      if controller.settings.showProviderDetails {
-        HStack(spacing: 8) {
-          Label(result.providerName, systemImage: "bolt.horizontal.circle")
-          Text(result.request.selectionSource.displayName)
-          if let detectedLanguage = result.detectedLanguage {
-            Text(detectedLanguage)
-          }
-        }
-        .font(.caption)
+  private var idleView: some View {
+    HStack(spacing: 10) {
+      Image(systemName: "keyboard")
         .foregroundStyle(.secondary)
+      Text(AppConstants.defaultHotKeyDescription)
+        .font(.body)
+        .foregroundStyle(.secondary)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+  }
+
+  private func loadingView(_ state: PanelLoadingState) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(spacing: 10) {
+        ProgressView()
+          .controlSize(.small)
+        Text(state.title)
+          .font(.body.weight(.medium))
       }
 
-      HStack {
-        Button {
-          controller.copyResultToClipboard()
-        } label: {
-          Label("Copy", systemImage: "doc.on.doc")
-        }
-
-        Button {
-          controller.speakResult()
-        } label: {
-          Label("Speak", systemImage: "speaker.wave.2")
-        }
-
-        Spacer()
+      if let preview = state.preview?.nonEmptyTrimmed {
+        Text(preview)
+          .font(.body)
+          .foregroundStyle(.secondary)
+          .lineLimit(controller.isExpanded ? nil : 4)
+          .textSelection(.enabled)
       }
     }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+  }
+
+  private func resultView(_ result: TranslationResult) -> some View {
+    let batch = TranslationBatch(
+      request: result.request,
+      entries: [
+        ProviderTranslationEntry(
+          providerID: result.providerID,
+          providerName: result.providerName,
+          status: .success(result)
+        )
+      ]
+    )
+
+    return batchView(batch)
+  }
+
+  private func batchView(_ batch: TranslationBatch) -> some View {
+    ScrollView {
+      TranslationBatchResultsView(
+        controller: controller,
+        batch: batch,
+        showsSourcePreview: true,
+        resultLineLimit: controller.isExpanded ? nil : 8
+      )
+      .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+  }
+
+  private func errorView(_ message: String) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(spacing: 8) {
+        Image(systemName: "exclamationmark.triangle.fill")
+          .foregroundStyle(.orange)
+        Text("No Translation")
+          .font(.body.weight(.medium))
+      }
+
+      Text(message)
+        .font(.body)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+  }
+
+  private func panelButton(systemName: String, help: String, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      Image(systemName: systemName)
+        .frame(width: 26, height: 26)
+    }
+    .buttonStyle(.borderless)
+    .help(help)
+  }
+
+  private var headerSubtitle: String {
+    switch controller.panelState {
+    case .idle:
+      "Ready"
+    case let .loading(state):
+      state.title
+    case let .batch(batch):
+      LanguageDetector.directionLabel(
+        sourceLanguage: batch.request.sourceLanguage,
+        targetLanguage: batch.request.targetLanguage
+      )
+    case let .result(result):
+      LanguageDetector.directionLabel(
+        sourceLanguage: result.request.sourceLanguage,
+        targetLanguage: result.request.targetLanguage
+      )
+    case .error:
+      "Needs attention"
+    }
+  }
+
+  private var panelSize: CGSize {
+    FloatingPanelController.contentSize(for: controller)
   }
 }

@@ -5,10 +5,11 @@ LexiRay is a clean-room macOS selection translation app built with SwiftUI and n
 The goal is a fast, polished translation surface for selected text:
 
 - Menu bar control and settings window.
-- Global shortcut for translating the current selection.
+- Global shortcuts for translating the current selection and OCR regions.
 - Text extraction pipeline: Accessibility, browser AppleScript, then simulated copy.
+- Local OCR through ScreenCaptureKit and Vision.
 - Floating translation panel near the pointer.
-- Provider pipeline with mock, system dictionary, and OpenAI-compatible providers.
+- Provider pipeline with system dictionary, OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, and Gemini GenerateContent. Mock translation is reserved for tests.
 
 ## Development
 
@@ -47,4 +48,3 @@ xcodebuild test -project LexiRay.xcodeproj -scheme LexiRay -configuration Debug 
 ## Clean-Room Rule
 
 LexiRay may study publicly documented product behavior from existing tools, but must not copy GPL source code, assets, UI implementations, or private reverse-engineered details.
-

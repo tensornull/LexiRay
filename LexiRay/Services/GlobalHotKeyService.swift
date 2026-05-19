@@ -3,22 +3,40 @@ import Foundation
 
 @MainActor
 final class GlobalHotKeyService {
-  private var hotKeyRef: EventHotKeyRef?
+  private var hotKeyRefs: [UInt32: EventHotKeyRef] = [:]
   private var eventHandler: EventHandlerRef?
 
-  func registerDefaultHotKey(action: @escaping @MainActor () -> Void) {
+  func registerDefaultHotKeys(
+    translate: @escaping @MainActor () -> Void,
+    ocr: @escaping @MainActor () -> Void
+  ) {
     unregister()
 
-    Self.currentAction = action
+    Self.currentActions = [
+      HotKeyID.translate.rawValue: translate,
+      HotKeyID.ocr.rawValue: ocr
+    ]
     installEventHandlerIfNeeded()
+    register(keyCode: UInt32(kVK_ANSI_D), id: .translate, description: AppConstants.defaultHotKeyDescription)
+    register(keyCode: UInt32(kVK_ANSI_O), id: .ocr, description: AppConstants.defaultOCRHotKeyDescription)
+  }
 
+  func unregister() {
+    for hotKeyRef in hotKeyRefs.values {
+      UnregisterEventHotKey(hotKeyRef)
+    }
+    hotKeyRefs.removeAll()
+  }
+
+  private func register(keyCode: UInt32, id: HotKeyID, description: String) {
     let hotKeyID = EventHotKeyID(
       signature: "LXR1".fourCharCodeValue,
-      id: 1
+      id: id.rawValue
     )
 
+    var hotKeyRef: EventHotKeyRef?
     let status = RegisterEventHotKey(
-      UInt32(kVK_ANSI_D),
+      keyCode,
       UInt32(cmdKey) | UInt32(optionKey),
       hotKeyID,
       GetApplicationEventTarget(),
@@ -26,18 +44,12 @@ final class GlobalHotKeyService {
       &hotKeyRef
     )
 
-    if status == noErr {
-      AppLog.hotKey.info("Registered global hotkey \(AppConstants.defaultHotKeyDescription, privacy: .public)")
+    if status == noErr, let hotKeyRef {
+      hotKeyRefs[id.rawValue] = hotKeyRef
+      AppLog.hotKey.info("Registered global hotkey \(description, privacy: .public)")
     } else {
       AppLog.hotKey.error("Failed to register global hotkey: \(status)")
     }
-  }
-
-  func unregister() {
-    if let hotKeyRef {
-      UnregisterEventHotKey(hotKeyRef)
-    }
-    hotKeyRef = nil
   }
 
   private func installEventHandlerIfNeeded() {
@@ -60,12 +72,32 @@ final class GlobalHotKeyService {
     )
   }
 
-  private nonisolated(unsafe) static var currentAction: (@MainActor () -> Void)?
+  private nonisolated(unsafe) static var currentActions: [UInt32: @MainActor () -> Void] = [:]
 
-  private nonisolated static let hotKeyHandler: EventHandlerUPP = { _, _, _ in
+  private nonisolated static let hotKeyHandler: EventHandlerUPP = { _, event, _ in
+    var hotKeyID = EventHotKeyID()
+    let status = GetEventParameter(
+      event,
+      EventParamName(kEventParamDirectObject),
+      EventParamType(typeEventHotKeyID),
+      nil,
+      MemoryLayout<EventHotKeyID>.size,
+      nil,
+      &hotKeyID
+    )
+
+    guard status == noErr else {
+      return status
+    }
+
     Task { @MainActor in
-      currentAction?()
+      currentActions[hotKeyID.id]?()
     }
     return noErr
+  }
+
+  private enum HotKeyID: UInt32 {
+    case translate = 1
+    case ocr = 2
   }
 }

@@ -4,20 +4,40 @@ import Foundation
 final class TranslationPipeline {
   private let settings: SettingsStore
   private let cache: TranslationCache
+  private let providerFactory: ((ProviderID) throws -> TranslationProvider)?
 
-  init(settings: SettingsStore, cache: TranslationCache = TranslationCache()) {
+  init(
+    settings: SettingsStore,
+    cache: TranslationCache = TranslationCache(),
+    providerFactory: ((ProviderID) throws -> TranslationProvider)? = nil
+  ) {
     self.settings = settings
     self.cache = cache
+    self.providerFactory = providerFactory
   }
 
   func translate(text rawText: String, selectionSource: SelectionSource) async throws -> TranslationResult {
+    let batch = try await translateBatch(text: rawText, selectionSource: selectionSource)
+    if let result = batch.successfulResults.first {
+      return result
+    }
+
+    let message = batch.entries.allSatisfy(\.status.isDisabled) ? "Enable at least one provider in LexiRay Settings." : batch.entries.compactMap { entry -> String? in
+      if case let .failure(message) = entry.status {
+        return message
+      }
+      return nil
+    }.first ?? "No provider returned a translation"
+    throw TranslationError.providerUnavailable(message)
+  }
+
+  func makeBatch(text rawText: String, selectionSource: SelectionSource) throws -> TranslationBatch {
     guard let text = rawText.nonEmptyTrimmed else {
       throw TranslationError.emptyInput
     }
 
     let sourceLanguage = LanguageDetector.dominantLanguageCode(for: text)
-    let targetLanguage = settings.targetLanguage.nonEmptyTrimmed
-      ?? LanguageDetector.defaultTargetLanguage(for: sourceLanguage)
+    let targetLanguage = settings.resolvedTargetLanguage(for: sourceLanguage)
 
     let request = TranslationRequest(
       text: text,
@@ -26,38 +46,152 @@ final class TranslationPipeline {
       selectionSource: selectionSource
     )
 
-    let provider = makeProvider(for: settings.preferredProvider)
+    let configurations = settings.visibleProviderIDs().map { settings.configuration(for: $0) }
+
+    return TranslationBatch(
+      request: request,
+      entries: configurations.map { configuration in
+        ProviderTranslationEntry(
+          providerID: configuration.providerID,
+          providerName: configuration.effectiveDisplayName,
+          status: configuration.isEnabled ? .translating : .disabled
+        )
+      }
+    )
+  }
+
+  func translateBatch(
+    text rawText: String,
+    selectionSource: SelectionSource,
+    onUpdate: (@MainActor (TranslationBatch) -> Void)? = nil
+  ) async throws -> TranslationBatch {
+    var batch = try makeBatch(text: rawText, selectionSource: selectionSource)
+    let request = batch.request
+    let tasks = batch.entries.filter(\.isTranslatable).map { entry in
+      Task { @MainActor in
+        await self.translate(entry, request: request)
+      }
+    }
+
+    for task in tasks {
+      let entry = await task.value
+      batch.update(entry)
+      onUpdate?(batch)
+    }
+
+    return batch
+  }
+
+  func translate(_ entry: ProviderTranslationEntry, request: TranslationRequest) async -> ProviderTranslationEntry {
+    await stream(entry, request: request, onUpdate: nil)
+  }
+
+  func stream(
+    _ entry: ProviderTranslationEntry,
+    request: TranslationRequest,
+    onUpdate: (@MainActor (ProviderTranslationEntry) -> Void)?
+  ) async -> ProviderTranslationEntry {
+    do {
+      let result = try await translate(
+        request: request,
+        providerID: entry.providerID,
+        providerName: entry.providerName,
+        onPartial: { partialText in
+          onUpdate?(entry.updating(status: .streaming(partialText)))
+        }
+      )
+      return entry.updating(status: .success(result))
+    } catch {
+      return entry.updating(status: .failure(error.localizedDescription))
+    }
+  }
+
+  private func translate(
+    request: TranslationRequest,
+    providerID: ProviderID,
+    providerName: String,
+    onPartial: (@MainActor (String) -> Void)? = nil
+  ) async throws -> TranslationResult {
+    let provider = try makeProvider(for: providerID)
+    let text = request.text
     let cacheKey = TranslationCacheKey(
       providerID: provider.id,
       text: text,
-      sourceLanguage: sourceLanguage,
-      targetLanguage: targetLanguage
+      sourceLanguage: request.sourceLanguage,
+      targetLanguage: request.targetLanguage
     )
 
     if let cached = await cache.value(for: cacheKey) {
       AppLog.translation.debug("Using cached result for provider \(provider.name, privacy: .public)")
-      return cached
+      return cached.withProviderName(providerName)
     }
 
-    let result = try await provider.translate(request)
+    let stream = try await provider.streamTranslation(request)
+    var finalResult: TranslationResult?
+
+    for try await update in stream {
+      switch update {
+      case let .partial(partialText):
+        if !partialText.isEmpty {
+          onPartial?(partialText)
+        }
+      case let .completed(result):
+        finalResult = result.withProviderName(providerName)
+      }
+    }
+
+    guard let result = finalResult else {
+      throw TranslationError.invalidResponse
+    }
+
     await cache.insert(result, for: cacheKey)
     return result
   }
 
-  private func makeProvider(for id: ProviderID) -> TranslationProvider {
+  private func makeProvider(for id: ProviderID) throws -> TranslationProvider {
+    let providerConfiguration = settings.configuration(for: id)
+    guard providerConfiguration.isEnabled else {
+      throw TranslationError.providerUnavailable("\(id.displayName) is disabled")
+    }
+
+    if id.needsAPIKey, settings.apiKey(for: id).trimmedForQuery.isEmpty {
+      throw TranslationError.missingAPIKey
+    }
+
+    if let provider = try providerFactory?(id) {
+      return provider
+    }
+
     switch id {
     case .mock:
-      MockTranslationProvider()
+      return MockTranslationProvider()
     case .systemDictionary:
-      SystemDictionaryProvider()
-    case .openAICompatible:
-      OpenAICompatibleProvider(
-        configuration: OpenAICompatibleConfiguration(
-          baseURL: settings.openAIBaseURL,
-          apiKey: settings.openAIAPIKey,
-          model: settings.openAIModel
-        )
+      return SystemDictionaryProvider()
+    case .openAIChatCompletions:
+      return OpenAIChatCompletionsProvider(
+        configuration: makeLLMConfiguration(for: providerConfiguration)
+      )
+    case .openAIResponses:
+      return OpenAIResponsesProvider(
+        configuration: makeLLMConfiguration(for: providerConfiguration)
+      )
+    case .anthropicMessages:
+      return AnthropicMessagesProvider(
+        configuration: makeLLMConfiguration(for: providerConfiguration)
+      )
+    case .geminiGenerateContent:
+      return GeminiGenerateContentProvider(
+        configuration: makeLLMConfiguration(for: providerConfiguration)
       )
     }
+  }
+
+  private func makeLLMConfiguration(for configuration: ProviderConfiguration) -> LLMProviderConfiguration {
+    LLMProviderConfiguration(
+      provider: configuration.providerID,
+      baseURL: configuration.baseURL,
+      apiKey: settings.apiKey(for: configuration.providerID),
+      model: configuration.model
+    )
   }
 }
