@@ -10,6 +10,7 @@ struct TranslationRequest: Equatable, Hashable {
 struct TranslationResult: Equatable, Identifiable {
   let id = UUID()
   let request: TranslationRequest
+  let providerConfigurationID: String
   let providerID: ProviderID
   let providerName: String
   let translatedText: String
@@ -18,6 +19,7 @@ struct TranslationResult: Equatable, Identifiable {
 
   init(
     request: TranslationRequest,
+    providerConfigurationID: String? = nil,
     providerID: ProviderID,
     providerName: String,
     translatedText: String,
@@ -25,6 +27,7 @@ struct TranslationResult: Equatable, Identifiable {
     createdAt: Date = Date()
   ) {
     self.request = request
+    self.providerConfigurationID = providerConfigurationID ?? providerID.rawValue
     self.providerID = providerID
     self.providerName = providerName
     self.translatedText = translatedText
@@ -33,8 +36,13 @@ struct TranslationResult: Equatable, Identifiable {
   }
 
   func withProviderName(_ providerName: String) -> TranslationResult {
+    withProviderIdentity(providerConfigurationID: providerConfigurationID, providerName: providerName)
+  }
+
+  func withProviderIdentity(providerConfigurationID: String, providerName: String) -> TranslationResult {
     TranslationResult(
       request: request,
+      providerConfigurationID: providerConfigurationID,
       providerID: providerID,
       providerName: providerName,
       translatedText: translatedText,
@@ -85,7 +93,7 @@ struct TranslationBatch: Equatable, Identifiable {
   }
 
   mutating func update(_ entry: ProviderTranslationEntry) {
-    guard let index = entries.firstIndex(where: { $0.providerID == entry.providerID }) else {
+    guard let index = entries.firstIndex(where: { $0.providerConfigurationID == entry.providerConfigurationID }) else {
       return
     }
     entries[index] = entry
@@ -93,12 +101,13 @@ struct TranslationBatch: Equatable, Identifiable {
 }
 
 struct ProviderTranslationEntry: Equatable, Identifiable {
+  let providerConfigurationID: String
   let providerID: ProviderID
   let providerName: String
   var status: ProviderTranslationStatus
 
-  var id: ProviderID {
-    providerID
+  var id: String {
+    providerConfigurationID
   }
 
   var result: TranslationResult? {
@@ -116,7 +125,12 @@ struct ProviderTranslationEntry: Equatable, Identifiable {
   }
 
   func updating(status: ProviderTranslationStatus) -> ProviderTranslationEntry {
-    ProviderTranslationEntry(providerID: providerID, providerName: providerName, status: status)
+    ProviderTranslationEntry(
+      providerConfigurationID: providerConfigurationID,
+      providerID: providerID,
+      providerName: providerName,
+      status: status
+    )
   }
 }
 

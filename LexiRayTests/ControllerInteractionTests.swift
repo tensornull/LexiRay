@@ -182,8 +182,8 @@ final class ControllerInteractionTests: XCTestCase {
       TranslationBatch(
         request: request,
         entries: [
-          ProviderTranslationEntry(providerID: .mock, providerName: "First", status: .success(first)),
-          ProviderTranslationEntry(providerID: .systemDictionary, providerName: "Second", status: .success(second))
+          ProviderTranslationEntry(providerConfigurationID: ProviderID.mock.rawValue, providerID: .mock, providerName: "First", status: .success(first)),
+          ProviderTranslationEntry(providerConfigurationID: ProviderID.systemDictionary.rawValue, providerID: .systemDictionary, providerName: "Second", status: .success(second))
         ]
       )
     )
@@ -319,7 +319,7 @@ final class ControllerInteractionTests: XCTestCase {
       return true
     }
 
-    controller.toggleProviderEnabled(.mock)
+    controller.toggleProviderEnabled(ProviderID.mock.rawValue)
 
     guard case let .batch(batch) = controller.panelState,
           let entry = batch.entries.first(where: { $0.providerID == .mock })
@@ -359,7 +359,7 @@ final class ControllerInteractionTests: XCTestCase {
       return batch.entries.allSatisfy(\.status.isDisabled)
     }
 
-    controller.toggleProviderEnabled(.mock)
+    controller.toggleProviderEnabled(ProviderID.mock.rawValue)
 
     await waitUntil {
       guard case let .batch(batch) = controller.panelState else {
@@ -395,7 +395,7 @@ final class ControllerInteractionTests: XCTestCase {
       return true
     }
 
-    controller.toggleProviderEnabled(.openAIResponses)
+    controller.toggleProviderEnabled(ProviderID.openAIResponses.rawValue)
 
     guard case let .batch(batch) = controller.panelState,
           let entry = batch.entries.first(where: { $0.providerID == .openAIResponses }),

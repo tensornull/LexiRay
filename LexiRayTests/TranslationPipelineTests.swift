@@ -77,6 +77,27 @@ final class TranslationPipelineTests: XCTestCase {
     XCTAssertEqual(batch.successfulResults.first?.providerName, "Local Mock")
   }
 
+  func testBatchTranslationIncludesCustomProviderInstance() async throws {
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayPipelineTests-\(UUID().uuidString)"))
+    let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
+    enableOnly([], in: settings)
+    var custom = settings.addProvider(providerID: .openAIChatCompletions)
+    custom.displayName = "Backup Chat"
+    custom.isEnabled = true
+    settings.updateConfiguration(custom)
+    settings.setAPIKey("secret", forConfigurationID: custom.id)
+    let pipeline = TranslationPipeline(settings: settings, providerFactory: { configuration in
+      StaticTranslationProvider(providerID: configuration.providerID)
+    })
+
+    let batch = try await pipeline.translateBatch(text: "hello", selectionSource: .manual)
+
+    let result = try XCTUnwrap(batch.successfulResults.first(where: { $0.providerConfigurationID == custom.id }))
+    XCTAssertEqual(result.providerName, "Backup Chat")
+    XCTAssertEqual(result.providerID, .openAIChatCompletions)
+    XCTAssertTrue(batch.entries.contains(where: { $0.providerConfigurationID == custom.id }))
+  }
+
   func testBatchTranslationShowsDisabledRowsWhenNoProviderEnabled() async throws {
     let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayPipelineTests-\(UUID().uuidString)"))
     let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
@@ -118,5 +139,24 @@ final class TranslationPipelineTests: XCTestCase {
       configuration.isEnabled = providers.contains(providerID)
       settings.updateConfiguration(configuration)
     }
+  }
+}
+
+private struct StaticTranslationProvider: TranslationProvider {
+  let id: ProviderID
+  let name = "Static"
+
+  init(providerID: ProviderID) {
+    id = providerID
+  }
+
+  func translate(_ request: TranslationRequest) async throws -> TranslationResult {
+    TranslationResult(
+      request: request,
+      providerID: id,
+      providerName: name,
+      translatedText: "translated \(request.text)",
+      detectedLanguage: request.sourceLanguage
+    )
   }
 }

@@ -1,6 +1,7 @@
 import Foundation
 
 struct TranslationCacheKey: Hashable {
+  let providerConfigurationID: String
   let providerID: ProviderID
   let text: String
   let sourceLanguage: String?

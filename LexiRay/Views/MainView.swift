@@ -179,6 +179,7 @@ struct MainView: View {
       request: result.request,
       entries: [
         ProviderTranslationEntry(
+          providerConfigurationID: result.providerConfigurationID,
           providerID: result.providerID,
           providerName: result.providerName,
           status: .success(result)

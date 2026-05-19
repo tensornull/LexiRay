@@ -4,12 +4,12 @@ import Foundation
 final class TranslationPipeline {
   private let settings: SettingsStore
   private let cache: TranslationCache
-  private let providerFactory: ((ProviderID) throws -> TranslationProvider)?
+  private let providerFactory: ((ProviderConfiguration) throws -> TranslationProvider)?
 
   init(
     settings: SettingsStore,
     cache: TranslationCache = TranslationCache(),
-    providerFactory: ((ProviderID) throws -> TranslationProvider)? = nil
+    providerFactory: ((ProviderConfiguration) throws -> TranslationProvider)? = nil
   ) {
     self.settings = settings
     self.cache = cache
@@ -46,12 +46,13 @@ final class TranslationPipeline {
       selectionSource: selectionSource
     )
 
-    let configurations = settings.visibleProviderIDs().map { settings.configuration(for: $0) }
+    let configurations = settings.visibleProviderConfigurations()
 
     return TranslationBatch(
       request: request,
       entries: configurations.map { configuration in
         ProviderTranslationEntry(
+          providerConfigurationID: configuration.id,
           providerID: configuration.providerID,
           providerName: configuration.effectiveDisplayName,
           status: configuration.isEnabled ? .translating : .disabled
@@ -94,6 +95,7 @@ final class TranslationPipeline {
     do {
       let result = try await translate(
         request: request,
+        providerConfigurationID: entry.providerConfigurationID,
         providerID: entry.providerID,
         providerName: entry.providerName,
         onPartial: { partialText in
@@ -108,13 +110,15 @@ final class TranslationPipeline {
 
   private func translate(
     request: TranslationRequest,
+    providerConfigurationID: String,
     providerID: ProviderID,
     providerName: String,
     onPartial: (@MainActor (String) -> Void)? = nil
   ) async throws -> TranslationResult {
-    let provider = try makeProvider(for: providerID)
+    let provider = try makeProvider(forConfigurationID: providerConfigurationID)
     let text = request.text
     let cacheKey = TranslationCacheKey(
+      providerConfigurationID: providerConfigurationID,
       providerID: provider.id,
       text: text,
       sourceLanguage: request.sourceLanguage,
@@ -123,7 +127,7 @@ final class TranslationPipeline {
 
     if let cached = await cache.value(for: cacheKey) {
       AppLog.translation.debug("Using cached result for provider \(provider.name, privacy: .public)")
-      return cached.withProviderName(providerName)
+      return cached.withProviderIdentity(providerConfigurationID: providerConfigurationID, providerName: providerName)
     }
 
     let stream = try await provider.streamTranslation(request)
@@ -136,7 +140,7 @@ final class TranslationPipeline {
           onPartial?(partialText)
         }
       case let .completed(result):
-        finalResult = result.withProviderName(providerName)
+        finalResult = result.withProviderIdentity(providerConfigurationID: providerConfigurationID, providerName: providerName)
       }
     }
 
@@ -148,17 +152,20 @@ final class TranslationPipeline {
     return result
   }
 
-  private func makeProvider(for id: ProviderID) throws -> TranslationProvider {
-    let providerConfiguration = settings.configuration(for: id)
+  private func makeProvider(forConfigurationID configurationID: String) throws -> TranslationProvider {
+    guard let providerConfiguration = settings.configuration(for: configurationID) else {
+      throw TranslationError.providerUnavailable("Provider configuration was removed")
+    }
+    let id = providerConfiguration.providerID
     guard providerConfiguration.isEnabled else {
       throw TranslationError.providerUnavailable("\(id.displayName) is disabled")
     }
 
-    if id.needsAPIKey, settings.apiKey(for: id).trimmedForQuery.isEmpty {
+    if id.needsAPIKey, settings.apiKey(forConfigurationID: configurationID).trimmedForQuery.isEmpty {
       throw TranslationError.missingAPIKey
     }
 
-    if let provider = try providerFactory?(id) {
+    if let provider = try providerFactory?(providerConfiguration) {
       return provider
     }
 
@@ -190,7 +197,7 @@ final class TranslationPipeline {
     LLMProviderConfiguration(
       provider: configuration.providerID,
       baseURL: configuration.baseURL,
-      apiKey: settings.apiKey(for: configuration.providerID),
+      apiKey: settings.apiKey(forConfigurationID: configuration.id),
       model: configuration.model
     )
   }

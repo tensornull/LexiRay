@@ -17,6 +17,7 @@ final class TranslationCacheTests: XCTestCase {
       translatedText: "hello"
     )
     let key = TranslationCacheKey(
+      providerConfigurationID: ProviderID.mock.rawValue,
       providerID: .mock,
       text: "hello",
       sourceLanguage: "en",

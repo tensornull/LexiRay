@@ -39,4 +39,31 @@ final class ServerSentEventParserTests: XCTestCase {
 
     XCTAssertEqual(parser.finish(), ServerSentEvent(event: nil, data: "trailing"))
   }
+
+  func testParserSplitsJSONDataEventsWhenBlankLinesAreMissing() {
+    var parser = ServerSentEventParser()
+
+    XCTAssertTrue(parser.consumeEvents(#"data: {"delta":"你"}"#).isEmpty)
+    XCTAssertEqual(
+      parser.consumeEvents(#"data: {"delta":"好"}"#),
+      [ServerSentEvent(event: nil, data: #"{"delta":"你"}"#)]
+    )
+    XCTAssertEqual(parser.finish(), ServerSentEvent(event: nil, data: #"{"delta":"好"}"#))
+  }
+
+  func testParserSplitsNamedEventsWhenBlankLinesAreMissing() {
+    var parser = ServerSentEventParser()
+
+    XCTAssertTrue(parser.consumeEvents("event: response.output_text.delta").isEmpty)
+    XCTAssertTrue(parser.consumeEvents(#"data: {"type":"response.output_text.delta","delta":"你"}"#).isEmpty)
+    XCTAssertEqual(
+      parser.consumeEvents("event: response.output_text.delta"),
+      [ServerSentEvent(event: "response.output_text.delta", data: #"{"type":"response.output_text.delta","delta":"你"}"#)]
+    )
+    XCTAssertTrue(parser.consumeEvents(#"data: {"type":"response.output_text.delta","delta":"好"}"#).isEmpty)
+    XCTAssertEqual(
+      parser.finish(),
+      ServerSentEvent(event: "response.output_text.delta", data: #"{"type":"response.output_text.delta","delta":"好"}"#)
+    )
+  }
 }

@@ -5,9 +5,27 @@ struct ProviderConfigurationList: View {
   var compact = false
 
   var body: some View {
-    LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
-      ForEach(settings.visibleProviderIDs()) { providerID in
-        ProviderConfigurationCard(settings: settings, providerID: providerID, compact: compact)
+    VStack(alignment: .leading, spacing: 12) {
+      HStack {
+        Spacer()
+        Menu {
+          ForEach(ProviderID.addableCases) { providerID in
+            Button {
+              settings.addProvider(providerID: providerID)
+            } label: {
+              Label(providerID.displayName, systemImage: providerID.systemImage)
+            }
+          }
+        } label: {
+          Label("Add Provider", systemImage: "plus")
+        }
+        .menuStyle(.borderedButton)
+      }
+
+      LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+        ForEach(settings.visibleProviderConfigurations()) { configuration in
+          ProviderConfigurationCard(settings: settings, configurationID: configuration.id, compact: compact)
+        }
       }
     }
   }
@@ -23,7 +41,7 @@ struct ProviderConfigurationList: View {
 
 private struct ProviderConfigurationCard: View {
   @ObservedObject var settings: SettingsStore
-  let providerID: ProviderID
+  let configurationID: String
   var compact: Bool
 
   var body: some View {
@@ -34,7 +52,7 @@ private struct ProviderConfigurationCard: View {
         TextField("Display Name", text: configurationBinding(\.displayName))
           .textFieldStyle(.roundedBorder)
 
-        if providerID.isLLMProvider {
+        if configuration.providerID.isLLMProvider {
           TextField("Base URL", text: configurationBinding(\.baseURL))
             .textFieldStyle(.roundedBorder)
 
@@ -52,13 +70,23 @@ private struct ProviderConfigurationCard: View {
       }
     } label: {
       HStack(spacing: 8) {
-        Label(configuration.effectiveDisplayName, systemImage: providerID.systemImage)
+        Label(configuration.effectiveDisplayName, systemImage: configuration.providerID.systemImage)
 
-        if configuration.effectiveDisplayName != providerID.displayName {
-          Text(providerID.displayName)
+        if configuration.effectiveDisplayName != configuration.providerID.displayName {
+          Text(configuration.providerID.displayName)
             .font(.caption)
             .foregroundStyle(.secondary)
         }
+
+        Spacer()
+
+        Button(role: .destructive) {
+          settings.removeProvider(configurationID: configurationID)
+        } label: {
+          Image(systemName: "trash")
+        }
+        .buttonStyle(.borderless)
+        .help("Remove Provider")
       }
     }
   }
@@ -70,24 +98,26 @@ private struct ProviderConfigurationCard: View {
 
       Spacer()
 
-      if providerID.needsAPIKey {
-        Label(settings.hasAPIKey(for: providerID) ? "Key saved" : "No key", systemImage: settings.hasAPIKey(for: providerID) ? "key.fill" : "key")
+      if configuration.providerID.needsAPIKey {
+        Label(settings.hasAPIKey(forConfigurationID: configurationID) ? "Key saved" : "No key", systemImage: settings.hasAPIKey(forConfigurationID: configurationID) ? "key.fill" : "key")
           .font(.caption)
-          .foregroundStyle(settings.hasAPIKey(for: providerID) ? .green : .secondary)
+          .foregroundStyle(settings.hasAPIKey(forConfigurationID: configurationID) ? .green : .secondary)
       }
     }
     .font(.caption)
   }
 
   private var configuration: ProviderConfiguration {
-    settings.configuration(for: providerID)
+    settings.configuration(for: configurationID) ?? ProviderConfiguration.defaults(for: .openAIResponses)
   }
 
   private func configurationBinding<Value: Equatable>(_ keyPath: WritableKeyPath<ProviderConfiguration, Value>) -> Binding<Value> {
     Binding {
-      settings.configuration(for: providerID)[keyPath: keyPath]
+      configuration[keyPath: keyPath]
     } set: { value in
-      var configuration = settings.configuration(for: providerID)
+      guard var configuration = settings.configuration(for: configurationID) else {
+        return
+      }
       guard configuration[keyPath: keyPath] != value else {
         return
       }
@@ -98,12 +128,12 @@ private struct ProviderConfigurationCard: View {
 
   private var apiKeyBinding: Binding<String> {
     Binding {
-      settings.apiKey(for: providerID)
+      settings.apiKey(forConfigurationID: configurationID)
     } set: { value in
-      guard settings.apiKey(for: providerID) != value else {
+      guard settings.apiKey(forConfigurationID: configurationID) != value else {
         return
       }
-      settings.setAPIKey(value, for: providerID)
+      settings.setAPIKey(value, forConfigurationID: configurationID)
     }
   }
 }

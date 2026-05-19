@@ -24,7 +24,7 @@ final class LexiRayController: ObservableObject {
   private let speechService: SpeechControlling
   private var floatingPanel: FloatingPanelPresenting!
   private var translationTask: Task<Void, Never>?
-  private var providerTranslationTasks: [ProviderID: Task<Void, Never>] = [:]
+  private var providerTranslationTasks: [String: Task<Void, Never>] = [:]
   private var activeBatchID: UUID?
 
   init(
@@ -222,15 +222,15 @@ final class LexiRayController: ObservableObject {
     speakingResultID == result.id && speechService.isSpeaking
   }
 
-  func isProviderEnabled(_ providerID: ProviderID) -> Bool {
-    settings.configuration(for: providerID).isEnabled
+  func isProviderEnabled(_ configurationID: String) -> Bool {
+    settings.configuration(for: configurationID)?.isEnabled ?? false
   }
 
-  func toggleProviderEnabled(_ providerID: ProviderID) {
-    if isProviderEnabled(providerID) {
-      disableProvider(providerID)
+  func toggleProviderEnabled(_ configurationID: String) {
+    if isProviderEnabled(configurationID) {
+      disableProvider(configurationID)
     } else {
-      enableProvider(providerID)
+      enableProvider(configurationID)
     }
   }
 
@@ -288,8 +288,8 @@ final class LexiRayController: ObservableObject {
   }
 
   private func startProviderTranslation(_ entry: ProviderTranslationEntry, batchID: UUID, request: TranslationRequest) {
-    providerTranslationTasks[entry.providerID]?.cancel()
-    providerTranslationTasks[entry.providerID] = Task { @MainActor [weak self] in
+    providerTranslationTasks[entry.providerConfigurationID]?.cancel()
+    providerTranslationTasks[entry.providerConfigurationID] = Task { @MainActor [weak self] in
       guard let self else {
         return
       }
@@ -303,7 +303,7 @@ final class LexiRayController: ObservableObject {
         self.floatingPanel.refreshContentLayout()
       }
 
-      self.providerTranslationTasks[entry.providerID] = nil
+      self.providerTranslationTasks[entry.providerConfigurationID] = nil
       guard !Task.isCancelled, self.activeBatchID == batchID else {
         return
       }
@@ -319,20 +319,22 @@ final class LexiRayController: ObservableObject {
     }
   }
 
-  private func disableProvider(_ providerID: ProviderID) {
-    if currentResults.contains(where: { $0.providerID == providerID && $0.id == speakingResultID }) {
+  private func disableProvider(_ configurationID: String) {
+    if currentResults.contains(where: { $0.providerConfigurationID == configurationID && $0.id == speakingResultID }) {
       stopSpeaking()
     }
 
-    var configuration = settings.configuration(for: providerID)
+    guard var configuration = settings.configuration(for: configurationID) else {
+      return
+    }
     configuration.isEnabled = false
     settings.updateConfiguration(configuration)
-    providerTranslationTasks[providerID]?.cancel()
-    providerTranslationTasks[providerID] = nil
+    providerTranslationTasks[configurationID]?.cancel()
+    providerTranslationTasks[configurationID] = nil
 
     guard let activeBatchID,
           case let .batch(batch) = panelState,
-          let entry = batch.entries.first(where: { $0.providerID == providerID })
+          let entry = batch.entries.first(where: { $0.providerConfigurationID == configurationID })
     else {
       return
     }
@@ -341,10 +343,12 @@ final class LexiRayController: ObservableObject {
     floatingPanel.refreshContentLayout()
   }
 
-  private func enableProvider(_ providerID: ProviderID) {
-    let configuration = settings.configuration(for: providerID)
-    guard !providerID.needsAPIKey || settings.hasAPIKey(for: providerID) else {
-      updateProviderFailure(providerID, message: TranslationError.missingAPIKey.localizedDescription)
+  private func enableProvider(_ configurationID: String) {
+    guard let configuration = settings.configuration(for: configurationID) else {
+      return
+    }
+    guard !configuration.providerID.needsAPIKey || settings.hasAPIKey(forConfigurationID: configurationID) else {
+      updateProviderFailure(configurationID, message: TranslationError.missingAPIKey.localizedDescription)
       return
     }
 
@@ -354,13 +358,14 @@ final class LexiRayController: ObservableObject {
 
     guard let activeBatchID,
           case let .batch(batch) = panelState,
-          batch.entries.contains(where: { $0.providerID == providerID })
+          batch.entries.contains(where: { $0.providerConfigurationID == configurationID })
     else {
       return
     }
 
     let entry = ProviderTranslationEntry(
-      providerID: providerID,
+      providerConfigurationID: configurationID,
+      providerID: enabledConfiguration.providerID,
       providerName: enabledConfiguration.effectiveDisplayName,
       status: .translating
     )
@@ -373,10 +378,10 @@ final class LexiRayController: ObservableObject {
     )
   }
 
-  private func updateProviderFailure(_ providerID: ProviderID, message: String) {
+  private func updateProviderFailure(_ configurationID: String, message: String) {
     guard let activeBatchID,
           case let .batch(batch) = panelState,
-          let entry = batch.entries.first(where: { $0.providerID == providerID })
+          let entry = batch.entries.first(where: { $0.providerConfigurationID == configurationID })
     else {
       return
     }

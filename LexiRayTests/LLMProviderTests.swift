@@ -182,6 +182,29 @@ final class LLMProviderTests: XCTestCase {
     XCTAssertEqual(client.request?.url?.absoluteString, "https://api.example.test/v1/models/gemini-test:streamGenerateContent?alt=sse")
   }
 
+  func testGeminiStreamReturnsProviderErrorMessage() async throws {
+    let client = MockHTTPClient(
+      responseJSON: "{}",
+      streamLines: [
+        #"data: {"error":{"code":429,"message":"Resource has been exhausted (e.g. check quota).","status":"RESOURCE_EXHAUSTED"}}"#,
+        ""
+      ]
+    )
+    let provider = GeminiGenerateContentProvider(
+      configuration: makeConfiguration(provider: .geminiGenerateContent, model: "gemini-test"),
+      client: client
+    )
+
+    do {
+      _ = try await collectStream(from: provider)
+      XCTFail("Expected provider error")
+    } catch let error as TranslationError {
+      XCTAssertEqual(error, .network("Resource has been exhausted (e.g. check quota)."))
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
+
   func testProviderRejectsMissingAPIKey() async throws {
     let client = MockHTTPClient(responseJSON: #"{"choices":[]}"#)
     let provider = OpenAIChatCompletionsProvider(

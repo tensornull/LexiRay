@@ -505,7 +505,7 @@ private func makeStreamingTranslation(
 
       do {
         for try await line in lineStream.lines {
-          if let event = parser.consume(line) {
+          for event in parser.consumeEvents(line) {
             try handle(event)
           }
 
@@ -561,15 +561,17 @@ private func openAIChatStreamAction(_ event: ServerSentEvent) throws -> Provider
     return .ignore
   }
 
-  let data = Data(event.data.utf8)
-  if let message = ProviderErrorMessage.message(from: data) {
+  let object = try streamJSONObject(from: event)
+  if let message = ProviderErrorMessage.message(from: object) {
     throw TranslationError.network(message)
   }
 
-  let chunk = try JSONDecoder().decode(OpenAIChatStreamChunk.self, from: data)
-  let delta = chunk.choices
-    .compactMap(\.delta?.content)
+  let delta = (object["choices"] as? [[String: Any]])?
+    .compactMap { choice in
+      (choice["delta"] as? [String: Any])?["content"] as? String
+    }
     .joined()
+    ?? ""
 
   return delta.isEmpty ? .ignore : .append(delta)
 }
@@ -583,21 +585,21 @@ private func openAIResponsesStreamAction(_ event: ServerSentEvent) throws -> Pro
     return .ignore
   }
 
-  let data = Data(event.data.utf8)
-  if let message = ProviderErrorMessage.message(from: data) {
+  let object = try streamJSONObject(from: event)
+  if let message = ProviderErrorMessage.message(from: object), isFailureEvent(object, fallbackEventName: event.event) {
     throw TranslationError.network(message)
   }
 
-  let responseEvent = try JSONDecoder().decode(OpenAIResponsesStreamEvent.self, from: data)
-  switch responseEvent.type {
+  let type = object["type"] as? String ?? event.event ?? ""
+  switch type {
   case "response.output_text.delta":
-    return responseEvent.delta?.isEmpty == false ? .append(responseEvent.delta ?? "") : .ignore
+    return stringValue("delta", in: object)?.isEmpty == false ? .append(stringValue("delta", in: object) ?? "") : .ignore
   case "response.output_text.done":
-    return responseEvent.text?.isEmpty == false ? .finalText(responseEvent.text ?? "") : .ignore
+    return stringValue("text", in: object)?.isEmpty == false ? .finalText(stringValue("text", in: object) ?? "") : .ignore
   case "response.completed":
     return .done
   case "response.failed", "response.incomplete":
-    throw TranslationError.network(responseEvent.error?.message ?? "OpenAI Responses stream failed")
+    throw TranslationError.network(ProviderErrorMessage.message(from: object) ?? "OpenAI Responses stream failed")
   default:
     return .ignore
   }
@@ -608,19 +610,20 @@ private func anthropicStreamAction(_ event: ServerSentEvent) throws -> ProviderS
     return .ignore
   }
 
-  let data = Data(event.data.utf8)
-  if let message = ProviderErrorMessage.message(from: data) {
+  let object = try streamJSONObject(from: event)
+  if let message = ProviderErrorMessage.message(from: object), isFailureEvent(object, fallbackEventName: event.event) {
     throw TranslationError.network(message)
   }
 
-  let responseEvent = try JSONDecoder().decode(AnthropicStreamEvent.self, from: data)
-  switch responseEvent.type {
-  case "content_block_delta" where responseEvent.delta?.type == "text_delta":
-    return responseEvent.delta?.text?.isEmpty == false ? .append(responseEvent.delta?.text ?? "") : .ignore
+  let type = object["type"] as? String ?? event.event ?? ""
+  switch type {
+  case "content_block_delta" where (object["delta"] as? [String: Any])?["type"] as? String == "text_delta":
+    let text = (object["delta"] as? [String: Any])?["text"] as? String
+    return text?.isEmpty == false ? .append(text ?? "") : .ignore
   case "message_stop":
     return .done
   case "error":
-    throw TranslationError.network(responseEvent.error?.message ?? "Anthropic stream failed")
+    throw TranslationError.network(ProviderErrorMessage.message(from: object) ?? "Anthropic stream failed")
   default:
     return .ignore
   }
@@ -631,16 +634,22 @@ private func geminiStreamAction(_ event: ServerSentEvent) throws -> ProviderStre
     return event.data == "[DONE]" ? .done : .ignore
   }
 
-  let data = Data(event.data.utf8)
-  if let message = ProviderErrorMessage.message(from: data) {
+  let object = try streamJSONObject(from: event)
+  if let message = ProviderErrorMessage.message(from: object) {
     throw TranslationError.network(message)
   }
 
-  let response = try JSONDecoder().decode(GeminiGenerateContentResponse.self, from: data)
-  let delta = response.candidates
-    .flatMap(\.content.parts)
-    .compactMap(\.text)
+  let delta = (object["candidates"] as? [[String: Any]])?
+    .compactMap { candidate -> String? in
+      guard let content = candidate["content"] as? [String: Any],
+            let parts = content["parts"] as? [[String: Any]]
+      else {
+        return nil
+      }
+      return parts.compactMap { $0["text"] as? String }.joined()
+    }
     .joined()
+    ?? ""
 
   return delta.isEmpty ? .ignore : .append(delta)
 }
@@ -655,8 +664,50 @@ private enum ProviderErrorMessage {
       return decoded.error.message.nonEmptyTrimmed
     }
 
+    if let decoded = try? JSONDecoder().decode(GoogleErrorResponse.self, from: data) {
+      return decoded.error.message.nonEmptyTrimmed
+    }
+
     return nil
   }
+
+  static func message(from object: [String: Any]) -> String? {
+    guard let error = object["error"] else {
+      return nil
+    }
+
+    if let message = error as? String {
+      return message.nonEmptyTrimmed
+    }
+
+    if let errorObject = error as? [String: Any] {
+      if let message = errorObject["message"] as? String {
+        return message.nonEmptyTrimmed
+      }
+      if let message = errorObject["error"] as? String {
+        return message.nonEmptyTrimmed
+      }
+    }
+
+    return nil
+  }
+}
+
+private func streamJSONObject(from event: ServerSentEvent) throws -> [String: Any] {
+  let data = Data(event.data.utf8)
+  guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+    throw TranslationError.network("Provider stream returned malformed JSON.")
+  }
+  return object
+}
+
+private func stringValue(_ key: String, in object: [String: Any]) -> String? {
+  object[key] as? String
+}
+
+private func isFailureEvent(_ object: [String: Any], fallbackEventName: String?) -> Bool {
+  let type = object["type"] as? String ?? fallbackEventName ?? ""
+  return type.contains("failed") || type.contains("error") || type.contains("incomplete")
 }
 
 private struct OpenAIChatRequest: Encodable {
@@ -813,7 +864,7 @@ private struct GeminiContent: Codable {
 }
 
 private struct GeminiPart: Codable {
-  let text: String
+  let text: String?
 }
 
 private struct GeminiGenerationConfig: Encodable {
@@ -837,6 +888,14 @@ private struct OpenAIErrorResponse: Decodable {
 }
 
 private struct AnthropicErrorResponse: Decodable {
+  let error: ErrorMessage
+
+  struct ErrorMessage: Decodable {
+    let message: String
+  }
+}
+
+private struct GoogleErrorResponse: Decodable {
   let error: ErrorMessage
 
   struct ErrorMessage: Decodable {

@@ -182,10 +182,10 @@ private struct ProviderTranslationResultRow: View {
 
   private var providerToggleButton: some View {
     iconButton(
-      systemName: controller.isProviderEnabled(entry.providerID) ? "chevron.down" : "chevron.right",
-      help: controller.isProviderEnabled(entry.providerID) ? "Disable Provider" : "Enable Provider"
+      systemName: controller.isProviderEnabled(entry.providerConfigurationID) ? "chevron.down" : "chevron.right",
+      help: controller.isProviderEnabled(entry.providerConfigurationID) ? "Disable Provider" : "Enable Provider"
     ) {
-      controller.toggleProviderEnabled(entry.providerID)
+      controller.toggleProviderEnabled(entry.providerConfigurationID)
     }
   }
 

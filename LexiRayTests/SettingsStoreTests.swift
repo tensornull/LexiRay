@@ -70,6 +70,23 @@ final class SettingsStoreTests: XCTestCase {
     XCTAssertEqual(reloaded.defaultCopyFormat, .html)
   }
 
+  func testBlankLanguageSettingsFallbackToDefaultsAndPersist() throws {
+    let defaults = try makeDefaults()
+    let providerFileStore = makeProviderFileStore()
+    defaults.set("", forKey: "language1")
+    defaults.set("   ", forKey: "language2")
+    defaults.set("", forKey: "targetLanguage")
+
+    let store = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+
+    XCTAssertEqual(store.language1, "en")
+    XCTAssertEqual(store.language2, "zh-Hans")
+    XCTAssertEqual(store.targetLanguage, "zh-Hans")
+    XCTAssertEqual(store.resolvedTargetLanguage(for: "zh-Hans"), "en")
+    XCTAssertEqual(defaults.string(forKey: "language1"), "en")
+    XCTAssertEqual(defaults.string(forKey: "language2"), "zh-Hans")
+  }
+
   func testProviderConfigurationsPersist() throws {
     let defaults = try makeDefaults()
     let providerFileStore = makeProviderFileStore()
@@ -88,6 +105,48 @@ final class SettingsStoreTests: XCTestCase {
     XCTAssertEqual(reloaded.configuration(for: .anthropicMessages).baseURL, "https://example.test/v1")
     XCTAssertEqual(reloaded.configuration(for: .anthropicMessages).model, "claude-test")
     XCTAssertFalse(reloaded.configuration(for: .anthropicMessages).isEnabled)
+  }
+
+  func testCustomProviderInstancesPersistInOrder() throws {
+    let defaults = try makeDefaults()
+    let providerFileStore = makeProviderFileStore()
+    let store = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+    var custom = store.addProvider(providerID: .openAIChatCompletions)
+    custom.displayName = "Comet Chat Backup"
+    custom.baseURL = "https://backup.example.test/v1"
+    custom.model = "gpt-backup"
+    custom.isEnabled = true
+    store.updateConfiguration(custom)
+    store.setAPIKey("backup-secret", forConfigurationID: custom.id)
+
+    let reloaded = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+    let reloadedCustom = try XCTUnwrap(reloaded.configuration(for: custom.id))
+    let file = try readProviderFile(from: providerFileStore)
+
+    XCTAssertEqual(reloadedCustom.providerID, .openAIChatCompletions)
+    XCTAssertEqual(reloadedCustom.displayName, "Comet Chat Backup")
+    XCTAssertEqual(reloadedCustom.baseURL, "https://backup.example.test/v1")
+    XCTAssertEqual(reloadedCustom.model, "gpt-backup")
+    XCTAssertTrue(reloadedCustom.isEnabled)
+    XCTAssertEqual(reloaded.apiKey(forConfigurationID: custom.id), "backup-secret")
+    XCTAssertTrue(file.providerOrder.contains(custom.id))
+    XCTAssertEqual(file.providers[custom.id]?.providerID, .openAIChatCompletions)
+  }
+
+  func testBuiltInProviderCanBeRemovedAndAddedBackAsInstance() throws {
+    let defaults = try makeDefaults()
+    let providerFileStore = makeProviderFileStore()
+    let store = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+
+    store.removeProvider(configurationID: ProviderID.openAIResponses.rawValue)
+    let custom = store.addProvider(providerID: .openAIResponses)
+    let reloaded = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+
+    XCTAssertFalse(store.visibleProviderConfigurations().contains { $0.id == ProviderID.openAIResponses.rawValue })
+    XCTAssertTrue(store.visibleProviderConfigurations().contains { $0.id == custom.id })
+    XCTAssertEqual(custom.providerID, .openAIResponses)
+    XCTAssertFalse(reloaded.visibleProviderConfigurations().contains { $0.id == ProviderID.openAIResponses.rawValue })
+    XCTAssertTrue(reloaded.visibleProviderConfigurations().contains { $0.id == custom.id })
   }
 
   func testProviderSettingsPersistAsStringKeyedJSONFile() throws {

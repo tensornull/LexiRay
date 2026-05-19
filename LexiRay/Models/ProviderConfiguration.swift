@@ -1,14 +1,15 @@
 import Foundation
 
 struct ProviderConfiguration: Codable, Equatable, Identifiable {
-  let providerID: ProviderID
+  var id: String
+  var providerID: ProviderID
   var displayName: String
   var baseURL: String
   var model: String
   var isEnabled: Bool
 
-  var id: ProviderID {
-    providerID
+  var isBuiltIn: Bool {
+    id == providerID.rawValue
   }
 
   var effectiveDisplayName: String {
@@ -20,12 +21,14 @@ struct ProviderConfiguration: Codable, Equatable, Identifiable {
   }
 
   init(
+    id: String? = nil,
     providerID: ProviderID,
     displayName: String = "",
     baseURL: String,
     model: String,
     isEnabled: Bool
   ) {
+    self.id = id ?? providerID.rawValue
     self.providerID = providerID
     self.displayName = displayName
     self.baseURL = baseURL
@@ -36,6 +39,7 @@ struct ProviderConfiguration: Codable, Equatable, Identifiable {
   init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     providerID = try container.decode(ProviderID.self, forKey: .providerID)
+    id = try container.decodeIfPresent(String.self, forKey: .id) ?? providerID.rawValue
     displayName = try container.decodeIfPresent(String.self, forKey: .displayName) ?? ""
     baseURL = try container.decode(String.self, forKey: .baseURL)
     model = try container.decode(String.self, forKey: .model)
@@ -85,5 +89,13 @@ struct ProviderConfiguration: Codable, Equatable, Identifiable {
         isEnabled: false
       )
     }
+  }
+
+  static func custom(providerID: ProviderID) -> ProviderConfiguration {
+    var configuration = defaults(for: providerID)
+    configuration.id = "\(providerID.rawValue)-\(UUID().uuidString)"
+    configuration.displayName = ""
+    configuration.isEnabled = false
+    return configuration
   }
 }

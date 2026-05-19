@@ -3,20 +3,32 @@ import Foundation
 struct ProviderSettingsFile: Codable, Equatable {
   var version: Int
   var preferredProvider: String
+  var providerOrder: [String]
   var providers: [String: StoredProviderSettings]
 
   init(
     version: Int = 1,
     preferredProvider: String,
+    providerOrder: [String] = [],
     providers: [String: StoredProviderSettings]
   ) {
     self.version = version
     self.preferredProvider = preferredProvider
+    self.providerOrder = providerOrder
     self.providers = providers
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
+    preferredProvider = try container.decode(String.self, forKey: .preferredProvider)
+    providerOrder = try container.decodeIfPresent([String].self, forKey: .providerOrder) ?? []
+    providers = try container.decode([String: StoredProviderSettings].self, forKey: .providers)
   }
 }
 
 struct StoredProviderSettings: Codable, Equatable {
+  var providerID: ProviderID?
   var displayName: String
   var baseURL: String
   var model: String
@@ -24,12 +36,14 @@ struct StoredProviderSettings: Codable, Equatable {
   var apiKey: String
 
   init(
+    providerID: ProviderID? = nil,
     displayName: String = "",
     baseURL: String,
     model: String,
     isEnabled: Bool,
     apiKey: String
   ) {
+    self.providerID = providerID
     self.displayName = displayName
     self.baseURL = baseURL
     self.model = model
@@ -39,6 +53,7 @@ struct StoredProviderSettings: Codable, Equatable {
 
   init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
+    providerID = try container.decodeIfPresent(ProviderID.self, forKey: .providerID)
     displayName = try container.decodeIfPresent(String.self, forKey: .displayName) ?? ""
     baseURL = try container.decode(String.self, forKey: .baseURL)
     model = try container.decode(String.self, forKey: .model)

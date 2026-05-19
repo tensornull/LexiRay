@@ -18,6 +18,14 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable {
     .systemDictionary
   ]
 
+  static let addableCases: [ProviderID] = [
+    .openAIResponses,
+    .openAIChatCompletions,
+    .anthropicMessages,
+    .geminiGenerateContent,
+    .systemDictionary
+  ]
+
   var id: String {
     rawValue
   }
