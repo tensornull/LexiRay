@@ -20,6 +20,7 @@ final class ControllerInteractionTests: XCTestCase {
     await waitUntil { !panel.events.isEmpty }
     XCTAssertEqual(panel.events.first, .show(activating: false, repositioning: true))
     XCTAssertEqual(controller.lastSelectionSource, .simulatedCopy)
+    XCTAssertEqual(controller.panelSourceText, "hello")
   }
 
   func testUnavailableSelectionPromptsForAccessibilityWhenNeeded() async {
@@ -87,8 +88,42 @@ final class ControllerInteractionTests: XCTestCase {
 
     let size = FloatingPanelController.contentSize(for: controller)
 
-    XCTAssertEqual(size.width, 560)
-    XCTAssertLessThanOrEqual(size.height, 270)
+    XCTAssertEqual(size.width, 660)
+    XCTAssertLessThanOrEqual(size.height, 410)
+  }
+
+  func testEmptyPanelSourceSubmitDoesNotStartTranslation() {
+    let panel = MockFloatingPanelPresenter()
+    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
+
+    controller.panelSourceText = "   "
+    controller.submitPanelSourceText()
+
+    XCTAssertTrue(panel.events.isEmpty)
+    XCTAssertEqual(controller.panelState, .idle)
+  }
+
+  func testSubmitPanelSourceTextRetranslatesEditedTextAsManual() async {
+    let panel = MockFloatingPanelPresenter()
+    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
+
+    controller.panelSourceText = " edited source "
+    controller.submitPanelSourceText()
+
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      return batch.successfulResults.count == 1
+    }
+
+    guard case let .batch(batch) = controller.panelState else {
+      return XCTFail("Expected batch state")
+    }
+
+    XCTAssertEqual(batch.request.text, "edited source")
+    XCTAssertEqual(batch.request.selectionSource, .manual)
+    XCTAssertEqual(controller.panelSourceText, "edited source")
   }
 
   func testManualTranslationUpdatesBatchResult() async {
@@ -111,6 +146,7 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(batch.entries.map(\.providerID), [.mock, .openAIResponses, .openAIChatCompletions, .anthropicMessages, .geminiGenerateContent, .systemDictionary])
     XCTAssertEqual(batch.successfulResults.first?.providerName, "Mock")
     XCTAssertTrue(batch.entries.dropFirst().allSatisfy(\.status.isDisabled))
+    XCTAssertEqual(controller.panelSourceText, "hello")
   }
 
   func testStreamingPartialRefreshesPanelWithoutRepositioningShow() async {

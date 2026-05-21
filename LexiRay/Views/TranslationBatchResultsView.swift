@@ -8,7 +8,7 @@ struct TranslationBatchResultsView: View {
   var compact = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: compact ? 10 : 14) {
+    VStack(alignment: .leading, spacing: compact ? 10 : 12) {
       if showsSourcePreview {
         sourcePreview
       }
@@ -38,7 +38,7 @@ struct TranslationBatchResultsView: View {
         .foregroundStyle(.secondary)
 
       Text(batch.request.text)
-        .font(compact ? .body : .title3.weight(.semibold))
+        .font(compact ? .body : .body.weight(.medium))
         .foregroundStyle(.primary)
         .lineLimit(sourceLineLimit)
         .textSelection(.enabled)
@@ -64,14 +64,14 @@ private struct ProviderTranslationResultRow: View {
   var compact: Bool
 
   var body: some View {
-    VStack(alignment: .leading, spacing: compact ? 8 : 10) {
+    VStack(alignment: .leading, spacing: compact ? 7 : 8) {
       HStack(alignment: .center, spacing: 8) {
         Image(systemName: entry.providerID.systemImage)
           .foregroundStyle(.secondary)
-          .frame(width: 16)
+          .frame(width: 15)
 
         Text(entry.providerName)
-          .font(.body.weight(.semibold))
+          .font((compact ? Font.callout : Font.body).weight(.semibold))
           .lineLimit(1)
 
         if entry.providerName != entry.providerID.displayName {
@@ -80,7 +80,7 @@ private struct ProviderTranslationResultRow: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(.quaternary, in: Capsule())
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
         }
 
         Spacer(minLength: 12)
@@ -92,7 +92,7 @@ private struct ProviderTranslationResultRow: View {
         content
       }
     }
-    .padding(.vertical, compact ? 10 : 12)
+    .padding(.vertical, entry.status.isDisabled ? 8 : compact ? 10 : 11)
   }
 
   @ViewBuilder
@@ -100,27 +100,21 @@ private struct ProviderTranslationResultRow: View {
     switch entry.status {
     case .disabled:
       HStack(spacing: 6) {
-        Text("Off")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+        StatusPill(title: "Off", systemName: "pause.circle", color: .secondary)
         providerToggleButton
       }
     case .translating:
       HStack(spacing: 6) {
         ProgressView()
           .controlSize(.small)
-        Text("Translating")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+        StatusPill(title: "Translating", systemName: "clock", color: .secondary)
         providerToggleButton
       }
     case .streaming:
       HStack(spacing: 6) {
         ProgressView()
           .controlSize(.small)
-        Text("Streaming")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+        StatusPill(title: "Streaming", systemName: "clock", color: .secondary)
         providerToggleButton
       }
     case let .success(result):
@@ -143,9 +137,7 @@ private struct ProviderTranslationResultRow: View {
       }
     case .failure:
       HStack(spacing: 6) {
-        Label("Failed", systemImage: "exclamationmark.triangle.fill")
-          .font(.caption)
-          .foregroundStyle(.orange)
+        StatusPill(title: "Failed", systemName: "exclamationmark.triangle.fill", color: .orange)
         providerToggleButton
       }
     }
@@ -163,13 +155,13 @@ private struct ProviderTranslationResultRow: View {
     case let .streaming(partialText):
       RichTranslationText(
         text: partialText,
-        font: compact ? .body : .title3,
+        font: compact ? .callout : .body,
         lineLimit: resultLineLimit
       )
     case let .success(result):
       RichTranslationText(
         text: result.translatedText,
-        font: compact ? .body : .title3,
+        font: compact ? .callout : .body,
         lineLimit: resultLineLimit
       )
     case let .failure(message):
@@ -205,7 +197,7 @@ private struct ProviderTranslationResultRow: View {
       }
     } label: {
       Image(systemName: "chevron.down")
-        .frame(width: 24, height: 24)
+        .frame(width: 22, height: 22)
     }
     .menuStyle(.borderlessButton)
     .help("Copy Format")
@@ -219,10 +211,23 @@ private struct ProviderTranslationResultRow: View {
   ) -> some View {
     Button(action: action) {
       Image(systemName: systemName)
-        .frame(width: 24, height: 24)
+        .frame(width: 22, height: 22)
         .foregroundStyle(isActive ? Color.accentColor : Color.primary)
     }
     .buttonStyle(.borderless)
     .help(help)
+  }
+}
+
+private struct StatusPill: View {
+  let title: String
+  let systemName: String
+  let color: Color
+
+  var body: some View {
+    Label(title, systemImage: systemName)
+      .font(.caption)
+      .foregroundStyle(color)
+      .labelStyle(.titleAndIcon)
   }
 }

@@ -9,6 +9,7 @@ final class LexiRayController: ObservableObject {
   @Published var panelState: PanelState = .idle
   @Published var isPanelPinned = false
   @Published var isExpanded = false
+  @Published var panelSourceText = ""
   @Published var lastSelectionSource: SelectionSource = .unavailable
   @Published var lastOCRText = ""
   @Published var selectedMainSection: MainSection = .dashboard
@@ -84,6 +85,7 @@ final class LexiRayController: ObservableObject {
   func translateCurrentSelection() {
     cancelTranslationWork()
     isExpanded = false
+    panelSourceText = ""
     panelState = .loading(PanelLoadingState(title: "Reading selection...", preview: nil))
 
     translationTask = Task { @MainActor [weak self] in
@@ -104,6 +106,7 @@ final class LexiRayController: ObservableObject {
         return
       }
 
+      panelSourceText = text
       panelState = .loading(PanelLoadingState(title: "Translating...", preview: text))
       floatingPanel.show()
       await Task.yield()
@@ -116,9 +119,22 @@ final class LexiRayController: ObservableObject {
     translate(text: text, source: .manual)
   }
 
+  func submitPanelSourceText() {
+    guard let text = panelSourceText.nonEmptyTrimmed else {
+      return
+    }
+
+    translate(text: text, source: .manual)
+  }
+
+  func clearPanelSourceText() {
+    panelSourceText = ""
+  }
+
   func translateOCRRegion() {
     cancelTranslationWork()
     isExpanded = false
+    panelSourceText = ""
     panelState = .loading(PanelLoadingState(title: "Drag to select an OCR region...", preview: nil))
     lastSelectionSource = .ocr
     floatingPanel.show()
@@ -145,6 +161,7 @@ final class LexiRayController: ObservableObject {
   private func recognizeAndTranslateOCR(in rect: CGRect) {
     cancelTranslationWork()
     isExpanded = false
+    panelSourceText = ""
     panelState = .loading(PanelLoadingState(title: "Recognizing text...", preview: nil))
     floatingPanel.show()
 
@@ -171,6 +188,7 @@ final class LexiRayController: ObservableObject {
 
   private func translateRecognizedText(_ text: String) async {
     lastSelectionSource = .ocr
+    panelSourceText = text
     panelState = .loading(PanelLoadingState(title: "Translating OCR text...", preview: text))
     floatingPanel.show()
     await Task.yield()
@@ -181,6 +199,7 @@ final class LexiRayController: ObservableObject {
   private func translate(text: String, source: SelectionSource) {
     cancelTranslationWork()
     isExpanded = false
+    panelSourceText = text.nonEmptyTrimmed ?? text
     panelState = .loading(PanelLoadingState(title: "Translating...", preview: text))
     lastSelectionSource = source
     floatingPanel.show()
@@ -324,6 +343,7 @@ final class LexiRayController: ObservableObject {
 
     do {
       let batch = try pipeline.makeBatch(text: text, selectionSource: source)
+      panelSourceText = batch.request.text
       activeBatchID = batch.id
       panelState = .batch(batch)
       floatingPanel.show(activating: false, repositioning: false)

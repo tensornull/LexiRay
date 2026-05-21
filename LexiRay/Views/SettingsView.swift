@@ -18,13 +18,13 @@ struct DashboardSettingsView: View {
   }
 
   private var appPanel: some View {
-    GroupBox("App") {
+    SettingsSection(title: "App", systemName: "app.badge") {
       Toggle("Show menu bar icon", isOn: showsMenuBarIcon)
     }
   }
 
   private var hotKeyPanel: some View {
-    GroupBox("Hotkeys") {
+    SettingsSection(title: "Hotkeys", systemName: "keyboard") {
       VStack(alignment: .leading, spacing: 12) {
         HotKeySettingsRow(
           title: "Translate selection",
@@ -47,7 +47,7 @@ struct DashboardSettingsView: View {
   }
 
   private var floatingPanel: some View {
-    GroupBox("Floating Panel") {
+    SettingsSection(title: "Floating Panel", systemName: "macwindow.on.rectangle") {
       VStack(alignment: .leading, spacing: 12) {
         Picker("Default position", selection: floatingPanelPlacement) {
           ForEach(FloatingPanelPlacement.allCases) { placement in
@@ -66,7 +66,7 @@ struct DashboardSettingsView: View {
   }
 
   private var permissionPanel: some View {
-    GroupBox("Permissions") {
+    SettingsSection(title: "Permissions", systemName: "lock.shield") {
       VStack(alignment: .leading, spacing: 10) {
         PermissionSettingsRow(
           title: "Accessibility",
@@ -93,7 +93,7 @@ struct DashboardSettingsView: View {
   }
 
   private var advancedPanel: some View {
-    GroupBox("Advanced") {
+    SettingsSection(title: "Advanced", systemName: "slider.horizontal.3") {
       VStack(alignment: .leading, spacing: 12) {
         LabeledContent("Last source", value: controller.lastSelectionSource.displayName)
 
@@ -136,6 +136,28 @@ struct DashboardSettingsView: View {
       get: { settings.floatingPanelPlacement },
       set: { settings.floatingPanelPlacement = $0 }
     )
+  }
+}
+
+private struct SettingsSection<Content: View>: View {
+  let title: String
+  let systemName: String
+  @ViewBuilder var content: Content
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Label(title, systemImage: systemName)
+        .font(.headline)
+
+      content
+    }
+    .padding(14)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(Color(nsColor: .controlBackgroundColor).opacity(0.32), in: RoundedRectangle(cornerRadius: 8))
+    .overlay {
+      RoundedRectangle(cornerRadius: 8)
+        .stroke(Color(nsColor: .separatorColor).opacity(0.48), lineWidth: 1)
+    }
   }
 }
 

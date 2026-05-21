@@ -95,8 +95,8 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   }
 
   private func makePanel(controller: LexiRayController) -> NSPanel {
-    let panel = NSPanel(
-      contentRect: NSRect(x: 0, y: 0, width: 430, height: 220),
+    let panel = LexiRayFloatingPanel(
+      contentRect: NSRect(x: 0, y: 0, width: 660, height: 360),
       styleMask: Self.panelStyleMask,
       backing: .buffered,
       defer: false
@@ -140,8 +140,16 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
       return event
     }
 
+    let panelWindowNumber = panel?.windowNumber
     localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-      guard event.keyCode == 53 else {
+      if Self.isSubmitShortcut(event), event.window?.windowNumber == panelWindowNumber {
+        Task { @MainActor in
+          self?.controller?.submitPanelSourceText()
+        }
+        return nil
+      }
+
+      if event.keyCode != 53 {
         return event
       }
       Task { @MainActor in
@@ -231,7 +239,7 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   }
 
   static func contentSize(for controller: LexiRayController) -> NSSize {
-    NSSize(width: 560, height: contentHeight(for: controller))
+    NSSize(width: 660, height: contentHeight(for: controller))
   }
 
   private static func contentHeight(for controller: LexiRayController) -> CGFloat {
@@ -241,29 +249,34 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
 
     switch controller.panelState {
     case .idle:
-      return 178
+      return 330
     case let .loading(state):
       let preview = state.preview ?? state.title
-      return preview.count > 120 ? 238 : 198
+      return preview.count > 120 ? 390 : 360
     case let .error(message):
-      return message.count > 110 ? 248 : 210
+      return message.count > 110 ? 420 : 380
     case let .batch(batch):
-      let baseHeight: CGFloat = controller.isExpanded ? 620 : 460
+      let baseHeight: CGFloat = controller.isExpanded ? 620 : 500
       let rowHeight = batch.entries.reduce(CGFloat(0)) { height, entry in
-        height + (entry.status.isDisabled ? 42 : 92)
+        height + (entry.status.isDisabled ? 36 : 84)
       }
-      let sourceHeight: CGFloat = batch.request.text.count > 180 || batch.request.text.lineCount > 4 ? 150 : 106
-      return min(baseHeight, max(300, sourceHeight + rowHeight + 76))
+      return min(baseHeight, max(390, rowHeight + 224))
     case let .result(result):
       let text = result.translatedText
       if text.count > 260 || text.lineCount > 6 {
-        return 360
+        return 460
       }
       if text.count > 120 || text.lineCount > 3 {
-        return 300
+        return 420
       }
-      return 260
+      return 390
     }
+  }
+
+  nonisolated private static func isSubmitShortcut(_ event: NSEvent) -> Bool {
+    let keyCode = event.keyCode
+    return (keyCode == 36 || keyCode == 76)
+      && event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command)
   }
 }
 
@@ -281,5 +294,11 @@ extension FloatingPanelController: NSWindowDelegate {
       x: panel.frame.origin.x,
       y: panel.frame.origin.y
     )
+  }
+}
+
+private final class LexiRayFloatingPanel: NSPanel {
+  override var canBecomeKey: Bool {
+    true
   }
 }

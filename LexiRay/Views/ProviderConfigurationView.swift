@@ -45,49 +45,62 @@ private struct ProviderConfigurationCard: View {
   var compact: Bool
 
   var body: some View {
-    GroupBox {
-      VStack(alignment: .leading, spacing: 10) {
-        header
+    VStack(alignment: .leading, spacing: 10) {
+      titleRow
+      header
 
-        TextField("Display Name", text: configurationBinding(\.displayName))
+      TextField("Display Name", text: configurationBinding(\.displayName))
+        .textFieldStyle(.roundedBorder)
+
+      if configuration.providerID.isLLMProvider {
+        TextField("Base URL", text: configurationBinding(\.baseURL))
           .textFieldStyle(.roundedBorder)
 
-        if configuration.providerID.isLLMProvider {
-          TextField("Base URL", text: configurationBinding(\.baseURL))
-            .textFieldStyle(.roundedBorder)
+        TextField("Model", text: configurationBinding(\.model))
+          .textFieldStyle(.roundedBorder)
 
-          TextField("Model", text: configurationBinding(\.model))
-            .textFieldStyle(.roundedBorder)
-
-          SecureField("API key", text: apiKeyBinding)
-            .textFieldStyle(.roundedBorder)
-        } else {
-          Text("Uses the macOS system dictionary.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-        }
+        SecureField("API key", text: apiKeyBinding)
+          .textFieldStyle(.roundedBorder)
+      } else {
+        Text("Uses the macOS system dictionary.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
       }
-    } label: {
-      HStack(spacing: 8) {
-        Label(configuration.effectiveDisplayName, systemImage: configuration.providerID.systemImage)
+    }
+    .padding(14)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(Color(nsColor: .controlBackgroundColor).opacity(0.32), in: RoundedRectangle(cornerRadius: 8))
+    .overlay {
+      RoundedRectangle(cornerRadius: 8)
+        .stroke(Color(nsColor: .separatorColor).opacity(0.48), lineWidth: 1)
+    }
+  }
 
-        if configuration.effectiveDisplayName != configuration.providerID.displayName {
-          Text(configuration.providerID.displayName)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
+  private var titleRow: some View {
+    HStack(spacing: 8) {
+      Label(configuration.effectiveDisplayName, systemImage: configuration.providerID.systemImage)
+        .font(.headline)
+        .lineLimit(1)
 
-        Spacer()
-
-        Button(role: .destructive) {
-          settings.removeProvider(configurationID: configurationID)
-        } label: {
-          Image(systemName: "trash")
-        }
-        .buttonStyle(.borderless)
-        .help("Remove Provider")
+      if configuration.effectiveDisplayName != configuration.providerID.displayName {
+        Text(configuration.providerID.displayName)
+          .font(.caption.weight(.medium))
+          .foregroundStyle(.secondary)
+          .padding(.horizontal, 6)
+          .padding(.vertical, 2)
+          .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
       }
+
+      Spacer()
+
+      Button(role: .destructive) {
+        settings.removeProvider(configurationID: configurationID)
+      } label: {
+        Image(systemName: "trash")
+      }
+      .buttonStyle(.borderless)
+      .help("Remove Provider")
     }
   }
 

@@ -12,11 +12,43 @@ cd "$ROOT_DIR"
 swift - "$APP_BUNDLE" "$TEXT_FILE" <<'SWIFT'
 import AppKit
 import ApplicationServices
+import Carbon
 import CoreGraphics
 import Foundation
 
 let appBundle = CommandLine.arguments[1]
 let textFile = CommandLine.arguments[2]
+
+struct SmokeHotKey: Decodable {
+  let keyCode: UInt32
+  let modifiers: UInt32
+}
+
+func loadTranslateHotKey() -> (keyCode: CGKeyCode, flags: CGEventFlags) {
+  let fallback = SmokeHotKey(
+    keyCode: UInt32(kVK_ANSI_T),
+    modifiers: UInt32(cmdKey) | UInt32(optionKey) | UInt32(shiftKey)
+  )
+  let domain = UserDefaults.standard.persistentDomain(forName: "io.github.tensornull.lexiray")
+  let data = domain?["translateHotKey"] as? Data
+  let hotKey = data.flatMap { try? JSONDecoder().decode(SmokeHotKey.self, from: $0) } ?? fallback
+
+  var flags: CGEventFlags = []
+  if hotKey.modifiers & UInt32(controlKey) != 0 {
+    flags.insert(.maskControl)
+  }
+  if hotKey.modifiers & UInt32(optionKey) != 0 {
+    flags.insert(.maskAlternate)
+  }
+  if hotKey.modifiers & UInt32(shiftKey) != 0 {
+    flags.insert(.maskShift)
+  }
+  if hotKey.modifiers & UInt32(cmdKey) != 0 {
+    flags.insert(.maskCommand)
+  }
+
+  return (CGKeyCode(hotKey.keyCode), flags)
+}
 
 try "LexiRay smoke selection text.\n中文划词翻译测试。\n".write(
   toFile: textFile,
@@ -57,7 +89,7 @@ func windows(owner: String, name: String? = nil) -> [CGRect] {
 
 func panelWindows() -> [CGRect] {
   windows(owner: "LexiRay").filter { rect in
-    rect.width >= 400 && rect.width <= 470 && rect.height >= 160 && rect.height <= 430
+    rect.width >= 560 && rect.width <= 720 && rect.height >= 250 && rect.height <= 650
   }
 }
 
@@ -83,7 +115,7 @@ func panelAXSizes() -> [CGSize] {
     let axValue = sizeValue as! AXValue
     var size = CGSize.zero
     guard AXValueGetValue(axValue, .cgSize, &size),
-          size.width >= 400 && size.width <= 470 && size.height >= 160 && size.height <= 430
+          size.width >= 560 && size.width <= 720 && size.height >= 250 && size.height <= 650
     else {
       return nil
     }
@@ -123,6 +155,61 @@ func axString(_ element: AXUIElement, _ attribute: String) -> String {
     return ""
   }
   return value as? String ?? ""
+}
+
+func axFrame(_ element: AXUIElement) -> CGRect? {
+  var positionValue: CFTypeRef?
+  var sizeValue: CFTypeRef?
+  guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &positionValue) == .success,
+        AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeValue) == .success,
+        let positionValue,
+        let sizeValue
+  else {
+    return nil
+  }
+
+  var position = CGPoint.zero
+  var size = CGSize.zero
+  guard AXValueGetValue(positionValue as! AXValue, .cgPoint, &position),
+        AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
+  else {
+    return nil
+  }
+
+  return CGRect(origin: position, size: size)
+}
+
+func floatingSourceEditor() -> AXUIElement? {
+  lexirayAXElements().first { element in
+    axString(element, kAXIdentifierAttribute) == "FloatingPanelSourceEditor"
+      || axString(element, kAXDescriptionAttribute) == "Source Text"
+  }
+}
+
+func focusAndReplaceSourceText(_ text: String) -> Bool {
+  guard let editor = floatingSourceEditor() else {
+    return false
+  }
+
+  if AXUIElementSetAttributeValue(editor, kAXFocusedAttribute as CFString, kCFBooleanTrue) != .success,
+     let frame = axFrame(editor) {
+    click(CGPoint(x: frame.midX, y: frame.midY))
+  }
+
+  RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+
+  if AXUIElementSetAttributeValue(editor, kAXValueAttribute as CFString, text as CFString) == .success {
+    return true
+  }
+
+  NSPasteboard.general.clearContents()
+  NSPasteboard.general.setString(text, forType: .string)
+  press(0, flags: .maskCommand)
+  RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+  press(9, flags: .maskCommand)
+  RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+
+  return true
 }
 
 func pressLexiRayButton(description: String) -> Bool {
@@ -242,19 +329,44 @@ click(CGPoint(x: textWindow.midX, y: textWindow.midY))
 RunLoop.current.run(until: Date().addingTimeInterval(0.2))
 press(0, flags: .maskCommand)
 RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-press(2, flags: [.maskCommand, .maskAlternate])
+let translateHotKey = loadTranslateHotKey()
+press(translateHotKey.keyCode, flags: translateHotKey.flags)
 
-guard waitFor("LexiRay floating panel after Option-Command-D", timeout: 10, { !panelWindows().isEmpty }) else {
+guard waitFor("LexiRay floating panel after translate hotkey", timeout: 20, { !panelWindows().isEmpty }) else {
   print("UI_SMOKE_FAIL: panel did not appear after selecting TextEdit text")
   exit(1)
 }
 
 let firstPanel = panelWindows()[0]
 let measuredPanelHeight = panelAXSizes().first?.height ?? firstPanel.height
-if measuredPanelHeight > 380 {
+if measuredPanelHeight > 560 {
   print("UI_SMOKE_FAIL: short floating panel is too tall: \(measuredPanelHeight)")
   exit(1)
 }
+
+guard waitFor("floating source editor", timeout: 5, { floatingSourceEditor() != nil }) else {
+  print("UI_SMOKE_FAIL: source editor was not reachable")
+  exit(1)
+}
+
+let editedSmokeText = "LexiRay edited smoke text."
+guard focusAndReplaceSourceText(editedSmokeText) else {
+  print("UI_SMOKE_FAIL: source editor did not accept focus")
+  exit(1)
+}
+
+guard waitFor("source editor accepts text", timeout: 5, {
+  guard let editor = floatingSourceEditor() else {
+    return false
+  }
+  return axString(editor, kAXValueAttribute).contains(editedSmokeText)
+}) else {
+  print("UI_SMOKE_FAIL: source editor did not accept edited text")
+  exit(1)
+}
+
+press(36, flags: .maskCommand)
+RunLoop.current.run(until: Date().addingTimeInterval(0.5))
 
 click(CGPoint(x: max(30, firstPanel.minX - 120), y: max(30, firstPanel.minY - 120)))
 guard waitFor("unpinned panel hide after outside click", { panelWindows().isEmpty }) else {
@@ -268,9 +380,9 @@ click(CGPoint(x: textWindow.midX, y: textWindow.midY))
 RunLoop.current.run(until: Date().addingTimeInterval(0.2))
 press(0, flags: .maskCommand)
 RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-press(2, flags: [.maskCommand, .maskAlternate])
+press(translateHotKey.keyCode, flags: translateHotKey.flags)
 
-guard waitFor("LexiRay floating panel for pin check", timeout: 10, { !panelWindows().isEmpty }) else {
+guard waitFor("LexiRay floating panel for pin check", timeout: 20, { !panelWindows().isEmpty }) else {
   print("UI_SMOKE_FAIL: panel did not appear for pin check")
   exit(1)
 }
