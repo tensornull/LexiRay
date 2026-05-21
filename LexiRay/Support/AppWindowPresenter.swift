@@ -9,10 +9,10 @@ enum AppWindowPresenter {
   }
 
   static func bringSettingsWindowToFrontSoon() {
-    bringToFrontSoon(.settings)
+    bringMainWindowToFrontSoon()
   }
 
-  static func startDockVisibilityObservation() {
+  static func startDockVisibilityObservation(settings: SettingsStore) {
     guard windowCloseObserver == nil else {
       return
     }
@@ -23,7 +23,7 @@ enum AppWindowPresenter {
       queue: .main
     ) { _ in
       Task { @MainActor in
-        hideDockIfNoRegularWindowsSoon()
+        hideDockIfNoRegularWindowsSoon(showsMenuBarIcon: settings.showsMenuBarIcon)
       }
     }
   }
@@ -34,13 +34,24 @@ enum AppWindowPresenter {
     NSApp.activate()
   }
 
-  static func hideDockIfNoRegularWindowsSoon() {
-    scheduleDockVisibilityUpdate(after: 0.05)
-    scheduleDockVisibilityUpdate(after: 0.2)
+  static func hideDockIfNoRegularWindowsSoon(showsMenuBarIcon: Bool) {
+    scheduleDockVisibilityUpdate(after: 0.05, showsMenuBarIcon: showsMenuBarIcon)
+    scheduleDockVisibilityUpdate(after: 0.2, showsMenuBarIcon: showsMenuBarIcon)
   }
 
   static func activationPolicy(hasVisibleRegularWindows: Bool) -> NSApplication.ActivationPolicy {
-    hasVisibleRegularWindows ? .regular : .accessory
+    activationPolicy(hasVisibleRegularWindows: hasVisibleRegularWindows, showsMenuBarIcon: true)
+  }
+
+  static func activationPolicy(
+    hasVisibleRegularWindows: Bool,
+    showsMenuBarIcon: Bool
+  ) -> NSApplication.ActivationPolicy {
+    hasVisibleRegularWindows || !showsMenuBarIcon ? .regular : .accessory
+  }
+
+  static func refreshDockVisibilitySoon(showsMenuBarIcon: Bool) {
+    hideDockIfNoRegularWindowsSoon(showsMenuBarIcon: showsMenuBarIcon)
   }
 
   private static func bringToFrontSoon(_ kind: WindowKind) {
@@ -62,8 +73,6 @@ enum AppWindowPresenter {
 
     let candidate = NSApp.windows.first { window in
       window.isVisible && matches(window, kind: kind)
-    } ?? NSApp.keyWindow ?? NSApp.windows.first { window in
-      window.isVisible && window.canBecomeKey
     }
 
     candidate?.deminiaturize(nil)
@@ -71,17 +80,20 @@ enum AppWindowPresenter {
     candidate?.orderFrontRegardless()
   }
 
-  private static func scheduleDockVisibilityUpdate(after delay: TimeInterval) {
+  private static func scheduleDockVisibilityUpdate(after delay: TimeInterval, showsMenuBarIcon: Bool) {
     DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
       Task { @MainActor in
-        updateDockVisibility()
+        updateDockVisibility(showsMenuBarIcon: showsMenuBarIcon)
       }
     }
   }
 
-  private static func updateDockVisibility() {
+  private static func updateDockVisibility(showsMenuBarIcon: Bool) {
     NSApp.setActivationPolicy(
-      activationPolicy(hasVisibleRegularWindows: hasVisibleRegularWindows())
+      activationPolicy(
+        hasVisibleRegularWindows: hasVisibleRegularWindows(),
+        showsMenuBarIcon: showsMenuBarIcon
+      )
     )
   }
 
@@ -101,19 +113,29 @@ enum AppWindowPresenter {
   private static func matches(_ window: NSWindow, kind: WindowKind) -> Bool {
     let identifier = window.identifier?.rawValue ?? ""
     let title = window.title
+    return matches(identifier: identifier, title: title, kind: kind)
+  }
 
-    switch kind {
-    case .main:
-      return identifier == "main" || title == AppConstants.appName
-    case .settings:
-      return identifier.localizedCaseInsensitiveContains("settings")
-        || title.localizedCaseInsensitiveContains("settings")
-        || title.localizedCaseInsensitiveContains("preferences")
+  static func matchingWindowIndex(in windows: [WindowSnapshot], kind: WindowKind) -> Int? {
+    windows.firstIndex { window in
+      window.isVisible && matches(identifier: window.identifier, title: window.title, kind: kind)
     }
   }
 
-  private enum WindowKind {
+  static func matches(identifier: String, title: String, kind: WindowKind) -> Bool {
+    switch kind {
+    case .main:
+      return identifier == "main" || title == AppConstants.appName
+    }
+  }
+
+  struct WindowSnapshot {
+    let isVisible: Bool
+    let identifier: String
+    let title: String
+  }
+
+  enum WindowKind {
     case main
-    case settings
   }
 }

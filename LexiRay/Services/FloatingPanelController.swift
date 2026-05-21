@@ -22,7 +22,7 @@ extension FloatingPanelPresenting {
 }
 
 @MainActor
-final class FloatingPanelController: FloatingPanelPresenting {
+final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   static let panelStyleMask: NSWindow.StyleMask = [.borderless, .nonactivatingPanel]
 
   private weak var controller: LexiRayController?
@@ -30,9 +30,11 @@ final class FloatingPanelController: FloatingPanelPresenting {
   private var globalMouseMonitor: Any?
   private var localMouseMonitor: Any?
   private var localKeyMonitor: Any?
+  private var isMovingProgrammatically = false
 
   init(controller: LexiRayController) {
     self.controller = controller
+    super.init()
   }
 
   func show(activating: Bool = false, repositioning: Bool = true) {
@@ -108,6 +110,7 @@ final class FloatingPanelController: FloatingPanelPresenting {
     panel.hidesOnDeactivate = false
     panel.isOpaque = false
     panel.backgroundColor = .clear
+    panel.delegate = self
     panel.contentView = NSHostingView(rootView: FloatingPanelView(controller: controller))
 
     return panel
@@ -190,15 +193,26 @@ final class FloatingPanelController: FloatingPanelPresenting {
   }
 
   private func position(_ panel: NSPanel) {
+    guard let controller else {
+      return
+    }
+
     let mouseLocation = NSEvent.mouseLocation
     let screen = NSScreen.screens.first { NSMouseInRect(mouseLocation, $0.frame, false) } ?? NSScreen.main
     let visibleFrame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
     let size = panel.frame.size
+    let lastOrigin = controller.settings.floatingPanelLastOrigin.map { NSPoint(x: $0.x, y: $0.y) }
 
-    let x = min(max(mouseLocation.x + 14, visibleFrame.minX + 12), visibleFrame.maxX - size.width - 12)
-    let y = min(max(mouseLocation.y - size.height - 14, visibleFrame.minY + 12), visibleFrame.maxY - size.height - 12)
-
-    panel.setFrameOrigin(NSPoint(x: x, y: y))
+    setFrameOrigin(
+      FloatingPanelPositionResolver.origin(
+        placement: controller.settings.floatingPanelPlacement,
+        panelSize: size,
+        visibleFrame: visibleFrame,
+        mouseLocation: mouseLocation,
+        lastOrigin: lastOrigin
+      ),
+      for: panel
+    )
   }
 
   private func resize(_ panel: NSPanel, for controller: LexiRayController, preservingTopLeft: Bool) {
@@ -206,8 +220,14 @@ final class FloatingPanelController: FloatingPanelPresenting {
     panel.setContentSize(Self.contentSize(for: controller))
 
     if preservingTopLeft {
-      panel.setFrameOrigin(NSPoint(x: topLeft.x, y: topLeft.y - panel.frame.height))
+      setFrameOrigin(NSPoint(x: topLeft.x, y: topLeft.y - panel.frame.height), for: panel)
     }
+  }
+
+  private func setFrameOrigin(_ origin: NSPoint, for panel: NSPanel) {
+    isMovingProgrammatically = true
+    panel.setFrameOrigin(origin)
+    isMovingProgrammatically = false
   }
 
   static func contentSize(for controller: LexiRayController) -> NSSize {
@@ -244,5 +264,22 @@ final class FloatingPanelController: FloatingPanelPresenting {
       }
       return 260
     }
+  }
+}
+
+extension FloatingPanelController: NSWindowDelegate {
+  func windowDidMove(_ notification: Notification) {
+    guard !isMovingProgrammatically,
+          let panel = notification.object as? NSPanel,
+          let currentPanel = self.panel,
+          panel === currentPanel
+    else {
+      return
+    }
+
+    controller?.settings.recordFloatingPanelOrigin(
+      x: panel.frame.origin.x,
+      y: panel.frame.origin.y
+    )
   }
 }

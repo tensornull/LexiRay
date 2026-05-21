@@ -7,16 +7,12 @@ struct LexiRayApp: App {
   @StateObject private var settings = LexiRayController.shared.settings
 
   var body: some Scene {
-    WindowGroup("LexiRay", id: "main") {
+    Window("LexiRay", id: "main") {
       MainView(controller: controller)
         .frame(minWidth: 760, minHeight: 500)
     }
     .defaultSize(width: 820, height: 560)
-
-    Settings {
-      SettingsView(settings: settings)
-        .frame(width: 520)
-    }
+    .defaultLaunchBehavior(.presented)
 
     MenuBarExtra("LexiRay", image: "MenuBarIcon", isInserted: showsMenuBarIcon) {
       MenuBarView(controller: controller)

@@ -1,5 +1,6 @@
 @testable import LexiRay
 import AppKit
+import Carbon
 import XCTest
 
 @MainActor
@@ -416,6 +417,38 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertFalse(style.contains(.fullSizeContentView))
   }
 
+  func testFloatingPanelSettingsActionSelectsSettingsAndHidesIfNeeded() {
+    let panel = MockFloatingPanelPresenter()
+    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
+
+    controller.openSettingsFromFloatingPanel()
+
+    XCTAssertEqual(controller.selectedMainSection, .settings)
+    XCTAssertEqual(panel.hideIfNeededCount, 1)
+  }
+
+  func testHotKeyChangeReregistersHotKeys() {
+    let panel = MockFloatingPanelPresenter()
+    let hotKeys = MockHotKeyService()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      hotKeyService: hotKeys
+    )
+    let customHotKey = HotKeyConfiguration(
+      keyCode: UInt32(kVK_ANSI_T),
+      modifiers: UInt32(controlKey) | UInt32(optionKey),
+      keyEquivalent: "T"
+    )
+
+    controller.startForTesting()
+    controller.settings.translateHotKey = customHotKey
+
+    XCTAssertEqual(hotKeys.registrations.count, 2)
+    XCTAssertEqual(hotKeys.registrations.last?.translateHotKey, customHotKey)
+    XCTAssertEqual(hotKeys.registrations.last?.ocrHotKey, .defaultOCR)
+  }
+
   func testAppRuntimeDetectsXCTest() {
     XCTAssertTrue(AppRuntime.isRunningTests)
   }
@@ -429,12 +462,52 @@ final class ControllerInteractionTests: XCTestCase {
       AppWindowPresenter.activationPolicy(hasVisibleRegularWindows: false),
       .accessory
     )
+    XCTAssertEqual(
+      AppWindowPresenter.activationPolicy(hasVisibleRegularWindows: false, showsMenuBarIcon: false),
+      .regular
+    )
+  }
+
+  func testWindowMatchingDoesNotFallbackToUnrelatedVisibleWindow() {
+    let windows = [
+      AppWindowPresenter.WindowSnapshot(isVisible: true, identifier: "settings", title: "LexiRay Settings"),
+      AppWindowPresenter.WindowSnapshot(isVisible: false, identifier: "main", title: "LexiRay")
+    ]
+
+    XCTAssertNil(AppWindowPresenter.matchingWindowIndex(in: windows, kind: .main))
+  }
+
+  func testFloatingPanelPositionResolverUsesScreenCenter() {
+    let origin = FloatingPanelPositionResolver.origin(
+      placement: .screenCenter,
+      panelSize: NSSize(width: 200, height: 100),
+      visibleFrame: NSRect(x: 0, y: 0, width: 1000, height: 800),
+      mouseLocation: NSPoint(x: 20, y: 20),
+      lastOrigin: nil
+    )
+
+    XCTAssertEqual(origin.x, 400)
+    XCTAssertEqual(origin.y, 350)
+  }
+
+  func testFloatingPanelPositionResolverClampsLastPosition() {
+    let origin = FloatingPanelPositionResolver.origin(
+      placement: .lastPosition,
+      panelSize: NSSize(width: 200, height: 100),
+      visibleFrame: NSRect(x: 0, y: 0, width: 1000, height: 800),
+      mouseLocation: NSPoint(x: 20, y: 20),
+      lastOrigin: NSPoint(x: 950, y: -50)
+    )
+
+    XCTAssertEqual(origin.x, 788)
+    XCTAssertEqual(origin.y, 12)
   }
 
   private func makeController(
     selectionReader: TextSelectionReading,
     panel: MockFloatingPanelPresenter,
     permissions: PermissionChecking = MockPermissionChecker(isAccessibilityTrusted: true),
+    hotKeyService: HotKeyRegistering = MockHotKeyService(),
     pipeline: TranslationPipeline? = nil,
     speechService: SpeechControlling? = nil
   ) -> LexiRayController {
@@ -450,6 +523,7 @@ final class ControllerInteractionTests: XCTestCase {
       settings: settings,
       selectionService: selectionReader,
       permissionChecker: permissions,
+      hotKeyService: hotKeyService,
       floatingPanelFactory: { _ in panel },
       pipeline: pipeline,
       speechService: speechService
@@ -559,6 +633,27 @@ private final class MockFloatingPanelPresenter: FloatingPanelPresenting {
       }
       return false
     }
+  }
+}
+
+@MainActor
+private final class MockHotKeyService: HotKeyRegistering {
+  private(set) var registrations: [Registration] = []
+
+  func registerDefaultHotKeys(
+    translateHotKey: HotKeyConfiguration,
+    ocrHotKey: HotKeyConfiguration,
+    translate _: @escaping @MainActor () -> Void,
+    ocr _: @escaping @MainActor () -> Void
+  ) {
+    registrations.append(Registration(translateHotKey: translateHotKey, ocrHotKey: ocrHotKey))
+  }
+
+  func unregister() {}
+
+  struct Registration {
+    let translateHotKey: HotKeyConfiguration
+    let ocrHotKey: HotKeyConfiguration
   }
 }
 

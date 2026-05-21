@@ -1,3 +1,4 @@
+import Carbon
 import Combine
 import Foundation
 
@@ -63,6 +64,22 @@ final class SettingsStore: ObservableObject {
     didSet { defaults.set(showsMenuBarIcon, forKey: Keys.showsMenuBarIcon) }
   }
 
+  @Published var translateHotKey: HotKeyConfiguration {
+    didSet { persistHotKey(translateHotKey, forKey: Keys.translateHotKey) }
+  }
+
+  @Published var ocrHotKey: HotKeyConfiguration {
+    didSet { persistHotKey(ocrHotKey, forKey: Keys.ocrHotKey) }
+  }
+
+  @Published var floatingPanelPlacement: FloatingPanelPlacement {
+    didSet { defaults.set(floatingPanelPlacement.rawValue, forKey: Keys.floatingPanelPlacement) }
+  }
+
+  @Published private(set) var floatingPanelLastOrigin: FloatingPanelSavedOrigin? {
+    didSet { persistFloatingPanelLastOrigin() }
+  }
+
   @Published var defaultCopyFormat: CopyFormat {
     didSet { defaults.set(defaultCopyFormat.rawValue, forKey: Keys.defaultCopyFormat) }
   }
@@ -108,6 +125,19 @@ final class SettingsStore: ObservableObject {
     targetLanguage = initialLanguage2
     autoSwitchLanguages = defaults.object(forKey: Keys.autoSwitchLanguages) as? Bool ?? true
     showsMenuBarIcon = defaults.object(forKey: Keys.showsMenuBarIcon) as? Bool ?? true
+    translateHotKey = Self.loadHotKey(
+      defaults: defaults,
+      key: Keys.translateHotKey,
+      fallback: .defaultTranslate
+    )
+    ocrHotKey = Self.loadHotKey(
+      defaults: defaults,
+      key: Keys.ocrHotKey,
+      fallback: .defaultOCR
+    )
+    floatingPanelPlacement = FloatingPanelPlacement(rawValue: defaults.string(forKey: Keys.floatingPanelPlacement) ?? "")
+      ?? .screenCenter
+    floatingPanelLastOrigin = Self.loadFloatingPanelLastOrigin(defaults: defaults)
     defaultCopyFormat = CopyFormat(rawValue: defaults.string(forKey: Keys.defaultCopyFormat) ?? "") ?? .originalText
     providerConfigurations = providerState.configurations
     providerAPIKeys = providerState.apiKeys
@@ -128,6 +158,15 @@ final class SettingsStore: ObservableObject {
     providerConfigurations = Self.defaultProviderConfigurations()
     apiKeyRevision = UUID()
     persistProviderSettingsFile()
+  }
+
+  func resetHotKeys() {
+    translateHotKey = .defaultTranslate
+    ocrHotKey = .defaultOCR
+  }
+
+  func recordFloatingPanelOrigin(x: Double, y: Double) {
+    floatingPanelLastOrigin = FloatingPanelSavedOrigin(x: x, y: y)
   }
 
   func configuration(for providerID: ProviderID) -> ProviderConfiguration {
@@ -302,9 +341,69 @@ final class SettingsStore: ObservableObject {
       defaults.set(showsMenuBarIcon, forKey: Keys.showsMenuBarIcon)
     }
 
+    if defaults.object(forKey: Keys.translateHotKey) == nil {
+      persistHotKey(translateHotKey, forKey: Keys.translateHotKey)
+    }
+
+    if defaults.object(forKey: Keys.ocrHotKey) == nil {
+      persistHotKey(ocrHotKey, forKey: Keys.ocrHotKey)
+    }
+
+    if defaults.object(forKey: Keys.floatingPanelPlacement) == nil {
+      defaults.set(floatingPanelPlacement.rawValue, forKey: Keys.floatingPanelPlacement)
+    }
+
     if defaults.object(forKey: Keys.defaultCopyFormat) == nil {
       defaults.set(defaultCopyFormat.rawValue, forKey: Keys.defaultCopyFormat)
     }
+  }
+
+  private func persistHotKey(_ hotKey: HotKeyConfiguration, forKey key: String) {
+    guard let data = try? JSONEncoder().encode(hotKey) else {
+      return
+    }
+    defaults.set(data, forKey: key)
+  }
+
+  private func persistFloatingPanelLastOrigin() {
+    guard let floatingPanelLastOrigin else {
+      defaults.removeObject(forKey: Keys.floatingPanelLastOrigin)
+      return
+    }
+
+    guard let data = try? JSONEncoder().encode(floatingPanelLastOrigin) else {
+      return
+    }
+    defaults.set(data, forKey: Keys.floatingPanelLastOrigin)
+  }
+
+  private static func loadHotKey(
+    defaults: UserDefaults,
+    key: String,
+    fallback: HotKeyConfiguration
+  ) -> HotKeyConfiguration {
+    guard let data = defaults.data(forKey: key),
+          let hotKey = try? JSONDecoder().decode(HotKeyConfiguration.self, from: data),
+          hotKey.isValidGlobalShortcut
+    else {
+      return fallback
+    }
+
+    if key == Keys.translateHotKey, hotKey == legacyDockToggleTranslateHotKey {
+      if let data = try? JSONEncoder().encode(fallback) {
+        defaults.set(data, forKey: key)
+      }
+      return fallback
+    }
+
+    return hotKey
+  }
+
+  private static func loadFloatingPanelLastOrigin(defaults: UserDefaults) -> FloatingPanelSavedOrigin? {
+    guard let data = defaults.data(forKey: Keys.floatingPanelLastOrigin) else {
+      return nil
+    }
+    return try? JSONDecoder().decode(FloatingPanelSavedOrigin.self, from: data)
   }
 
   private static func loadProviderConfigurations(from defaults: UserDefaults) -> [ProviderConfiguration] {
@@ -448,6 +547,12 @@ final class SettingsStore: ObservableObject {
     return ProviderID.productDefault
   }
 
+  private static let legacyDockToggleTranslateHotKey = HotKeyConfiguration(
+    keyCode: UInt32(kVK_ANSI_D),
+    modifiers: UInt32(cmdKey) | UInt32(optionKey),
+    keyEquivalent: "D"
+  )
+
   private struct StoredProviderConfiguration: Codable {
     let displayName: String
     let baseURL: String
@@ -476,6 +581,10 @@ final class SettingsStore: ObservableObject {
     static let language2 = "language2"
     static let autoSwitchLanguages = "autoSwitchLanguages"
     static let showsMenuBarIcon = "showsMenuBarIcon"
+    static let translateHotKey = "translateHotKey"
+    static let ocrHotKey = "ocrHotKey"
+    static let floatingPanelPlacement = "floatingPanelPlacement"
+    static let floatingPanelLastOrigin = "floatingPanelLastOrigin"
     static let defaultCopyFormat = "defaultCopyFormat"
     static let providerConfigurations = "providerConfigurations"
     static let openAIBaseURL = "openAIBaseURL"

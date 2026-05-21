@@ -31,6 +31,12 @@ Preferred local loop:
 ./script/build_and_run.sh --verify
 ```
 
+Development runs must use the workspace build at `build/DerivedData/Build/Products/Debug/LexiRay.app`.
+Do not copy, overwrite, kill, or otherwise manage `/Applications` or `~/Applications`
+release builds during local iteration. Use `./script/clean_dev_apps.sh` to inspect stale
+development bundles, and only use `./script/clean_dev_apps.sh --apply` when the listed
+paths are under this repo's `build/` directory or Xcode's `DerivedData/LexiRay-*`.
+
 Preferred test loop:
 
 ```bash
@@ -44,4 +50,3 @@ xcodebuild test -project LexiRay.xcodeproj -scheme LexiRay -configuration Debug 
 - No marketing landing page inside the app.
 - Prefer system symbols, semantic colors, and materials.
 - The floating panel should feel fast, lightweight, and keyboard-friendly.
-

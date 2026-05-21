@@ -4,7 +4,6 @@ import SwiftUI
 struct MenuBarView: View {
   @ObservedObject var controller: LexiRayController
   @Environment(\.openWindow) private var openWindow
-  @Environment(\.openSettings) private var openSettings
 
   var body: some View {
     Button {
@@ -43,12 +42,14 @@ struct MenuBarView: View {
   }
 
   private func openMainWindow() {
+    controller.selectDashboard()
     openWindow(id: "main")
     AppWindowPresenter.bringMainWindowToFrontSoon()
   }
 
   private func openSettingsWindow() {
-    openSettings()
-    AppWindowPresenter.bringSettingsWindowToFrontSoon()
+    controller.selectSettings()
+    openWindow(id: "main")
+    AppWindowPresenter.bringMainWindowToFrontSoon()
   }
 }

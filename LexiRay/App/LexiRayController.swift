@@ -11,6 +11,7 @@ final class LexiRayController: ObservableObject {
   @Published var isExpanded = false
   @Published var lastSelectionSource: SelectionSource = .unavailable
   @Published var lastOCRText = ""
+  @Published var selectedMainSection: MainSection = .dashboard
   @Published private(set) var speakingResultID: UUID?
 
   let settings: SettingsStore
@@ -18,7 +19,7 @@ final class LexiRayController: ObservableObject {
   private let selectionService: TextSelectionReading
   private let permissionChecker: PermissionChecking
   private let pipeline: TranslationPipeline
-  private let hotKeyService = GlobalHotKeyService()
+  private let hotKeyService: HotKeyRegistering
   private let ocrService = OCRService()
   private let ocrSelectionOverlay = OCRSelectionOverlayController()
   private let speechService: SpeechControlling
@@ -26,11 +27,13 @@ final class LexiRayController: ObservableObject {
   private var translationTask: Task<Void, Never>?
   private var providerTranslationTasks: [String: Task<Void, Never>] = [:]
   private var activeBatchID: UUID?
+  private var settingsCancellables: Set<AnyCancellable> = []
 
   init(
     settings: SettingsStore = SettingsStore(),
     selectionService: TextSelectionReading = TextSelectionService(),
     permissionChecker: PermissionChecking = SystemPermissionChecker(),
+    hotKeyService: HotKeyRegistering = GlobalHotKeyService(),
     floatingPanelFactory: ((LexiRayController) -> FloatingPanelPresenting)? = nil,
     pipeline: TranslationPipeline? = nil,
     speechService: SpeechControlling? = nil
@@ -38,6 +41,7 @@ final class LexiRayController: ObservableObject {
     self.settings = settings
     self.selectionService = selectionService
     self.permissionChecker = permissionChecker
+    self.hotKeyService = hotKeyService
     self.pipeline = pipeline ?? TranslationPipeline(settings: settings)
     self.speechService = speechService ?? SpeechService()
     floatingPanel = floatingPanelFactory?(self) ?? FloatingPanelController(controller: self)
@@ -54,15 +58,27 @@ final class LexiRayController: ObservableObject {
     }
 
     permissionChecker.requestAccessibilityIfNeeded(prompt: false)
-    hotKeyService.registerDefaultHotKeys(
-      translate: { [weak self] in
-        self?.translateCurrentSelection()
-      },
-      ocr: { [weak self] in
-        self?.translateOCRRegion()
-      }
-    )
+    registerHotKeys()
+    observeSettings()
     AppLog.app.info("LexiRay started")
+  }
+
+  func startForTesting() {
+    registerHotKeys()
+    observeSettings()
+  }
+
+  func selectDashboard() {
+    selectedMainSection = .dashboard
+  }
+
+  func selectSettings() {
+    selectedMainSection = .settings
+  }
+
+  func openSettingsFromFloatingPanel() {
+    selectSettings()
+    hideFloatingPanelIfNeeded()
   }
 
   func translateCurrentSelection() {
@@ -255,14 +271,52 @@ final class LexiRayController: ObservableObject {
   private func selectionUnavailableMessage(for reason: SelectionFailureReason?) -> String {
     if reason == .accessibilityPermissionMissing || !permissionChecker.isAccessibilityTrusted {
       permissionChecker.requestAccessibilityIfNeeded(prompt: true)
-      return "Grant Accessibility permission to LexiRay, then select text and press \(AppConstants.defaultHotKeyDescription) again."
+      return "Grant Accessibility permission to LexiRay, then select text and press \(settings.translateHotKey.displayString) again."
     }
 
     if reason == .copyFailed {
       return "No readable selection. Select text again, then check Accessibility, Input Monitoring, or Automation permissions if this keeps happening."
     }
 
-    return "Select text, then press \(AppConstants.defaultHotKeyDescription)."
+    return "Select text, then press \(settings.translateHotKey.displayString)."
+  }
+
+  private func registerHotKeys() {
+    registerHotKeys(translateHotKey: settings.translateHotKey, ocrHotKey: settings.ocrHotKey)
+  }
+
+  private func registerHotKeys(translateHotKey: HotKeyConfiguration, ocrHotKey: HotKeyConfiguration) {
+    hotKeyService.registerDefaultHotKeys(
+      translateHotKey: translateHotKey,
+      ocrHotKey: ocrHotKey,
+      translate: { [weak self] in
+        self?.translateCurrentSelection()
+      },
+      ocr: { [weak self] in
+        self?.translateOCRRegion()
+      }
+    )
+  }
+
+  private func observeSettings() {
+    guard settingsCancellables.isEmpty else {
+      return
+    }
+
+    settings.$translateHotKey
+      .combineLatest(settings.$ocrHotKey)
+      .dropFirst()
+      .sink { [weak self] translateHotKey, ocrHotKey in
+        self?.registerHotKeys(translateHotKey: translateHotKey, ocrHotKey: ocrHotKey)
+      }
+      .store(in: &settingsCancellables)
+
+    settings.$showsMenuBarIcon
+      .dropFirst()
+      .sink { showsMenuBarIcon in
+        AppWindowPresenter.refreshDockVisibilitySoon(showsMenuBarIcon: showsMenuBarIcon)
+      }
+      .store(in: &settingsCancellables)
   }
 
   private func startBatchTranslation(text: String, source: SelectionSource) {

@@ -2,11 +2,24 @@ import Carbon
 import Foundation
 
 @MainActor
-final class GlobalHotKeyService {
+protocol HotKeyRegistering: AnyObject {
+  func registerDefaultHotKeys(
+    translateHotKey: HotKeyConfiguration,
+    ocrHotKey: HotKeyConfiguration,
+    translate: @escaping @MainActor () -> Void,
+    ocr: @escaping @MainActor () -> Void
+  )
+  func unregister()
+}
+
+@MainActor
+final class GlobalHotKeyService: HotKeyRegistering {
   private var hotKeyRefs: [UInt32: EventHotKeyRef] = [:]
   private var eventHandler: EventHandlerRef?
 
   func registerDefaultHotKeys(
+    translateHotKey: HotKeyConfiguration,
+    ocrHotKey: HotKeyConfiguration,
     translate: @escaping @MainActor () -> Void,
     ocr: @escaping @MainActor () -> Void
   ) {
@@ -17,8 +30,8 @@ final class GlobalHotKeyService {
       HotKeyID.ocr.rawValue: ocr
     ]
     installEventHandlerIfNeeded()
-    register(keyCode: UInt32(kVK_ANSI_D), id: .translate, description: AppConstants.defaultHotKeyDescription)
-    register(keyCode: UInt32(kVK_ANSI_O), id: .ocr, description: AppConstants.defaultOCRHotKeyDescription)
+    register(hotKey: translateHotKey, id: .translate)
+    register(hotKey: ocrHotKey, id: .ocr)
   }
 
   func unregister() {
@@ -28,7 +41,12 @@ final class GlobalHotKeyService {
     hotKeyRefs.removeAll()
   }
 
-  private func register(keyCode: UInt32, id: HotKeyID, description: String) {
+  private func register(hotKey: HotKeyConfiguration, id: HotKeyID) {
+    guard hotKey.isValidGlobalShortcut else {
+      AppLog.hotKey.error("Skipped invalid global hotkey \(hotKey.displayString, privacy: .public)")
+      return
+    }
+
     let hotKeyID = EventHotKeyID(
       signature: "LXR1".fourCharCodeValue,
       id: id.rawValue
@@ -36,8 +54,8 @@ final class GlobalHotKeyService {
 
     var hotKeyRef: EventHotKeyRef?
     let status = RegisterEventHotKey(
-      keyCode,
-      UInt32(cmdKey) | UInt32(optionKey),
+      hotKey.keyCode,
+      hotKey.modifiers,
       hotKeyID,
       GetApplicationEventTarget(),
       0,
@@ -46,7 +64,7 @@ final class GlobalHotKeyService {
 
     if status == noErr, let hotKeyRef {
       hotKeyRefs[id.rawValue] = hotKeyRef
-      AppLog.hotKey.info("Registered global hotkey \(description, privacy: .public)")
+      AppLog.hotKey.info("Registered global hotkey \(hotKey.displayString, privacy: .public)")
     } else {
       AppLog.hotKey.error("Failed to register global hotkey: \(status)")
     }

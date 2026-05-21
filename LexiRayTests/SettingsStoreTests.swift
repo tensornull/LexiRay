@@ -1,4 +1,5 @@
 @testable import LexiRay
+import Carbon
 import XCTest
 
 @MainActor
@@ -68,6 +69,91 @@ final class SettingsStoreTests: XCTestCase {
 
     let reloaded = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
     XCTAssertEqual(reloaded.defaultCopyFormat, .html)
+  }
+
+  func testHotKeysDefaultAndPersist() throws {
+    let defaults = try makeDefaults()
+    let providerFileStore = makeProviderFileStore()
+    let store = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+    let customTranslate = HotKeyConfiguration(
+      keyCode: UInt32(kVK_ANSI_T),
+      modifiers: UInt32(controlKey) | UInt32(optionKey),
+      keyEquivalent: "T"
+    )
+    let customOCR = HotKeyConfiguration(
+      keyCode: UInt32(kVK_ANSI_R),
+      modifiers: UInt32(controlKey) | UInt32(cmdKey),
+      keyEquivalent: "R"
+    )
+
+    XCTAssertEqual(store.translateHotKey, .defaultTranslate)
+    XCTAssertEqual(store.ocrHotKey, .defaultOCR)
+
+    store.translateHotKey = customTranslate
+    store.ocrHotKey = customOCR
+
+    let reloaded = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+    XCTAssertEqual(reloaded.translateHotKey, customTranslate)
+    XCTAssertEqual(reloaded.ocrHotKey, customOCR)
+  }
+
+  func testDefaultTranslateHotKeyAvoidsMacOSDockShortcut() {
+    let dockToggleHotKey = HotKeyConfiguration(
+      keyCode: UInt32(kVK_ANSI_D),
+      modifiers: UInt32(cmdKey) | UInt32(optionKey),
+      keyEquivalent: "D"
+    )
+
+    XCTAssertNotEqual(HotKeyConfiguration.defaultTranslate, dockToggleHotKey)
+    XCTAssertEqual(HotKeyConfiguration.defaultTranslate.keyCode, UInt32(kVK_ANSI_T))
+    XCTAssertEqual(
+      HotKeyConfiguration.defaultTranslate.modifiers,
+      UInt32(cmdKey) | UInt32(optionKey) | UInt32(shiftKey)
+    )
+    XCTAssertEqual(HotKeyConfiguration.defaultTranslate.keyEquivalent, "T")
+  }
+
+  func testLegacyDockTranslateHotKeyMigratesToDefault() throws {
+    let defaults = try makeDefaults()
+    let providerFileStore = makeProviderFileStore()
+    let legacyHotKey = HotKeyConfiguration(
+      keyCode: UInt32(kVK_ANSI_D),
+      modifiers: UInt32(cmdKey) | UInt32(optionKey),
+      keyEquivalent: "D"
+    )
+    defaults.set(try JSONEncoder().encode(legacyHotKey), forKey: "translateHotKey")
+
+    let store = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+
+    XCTAssertEqual(store.translateHotKey, .defaultTranslate)
+    let persistedData = try XCTUnwrap(defaults.data(forKey: "translateHotKey"))
+    let persistedHotKey = try JSONDecoder().decode(HotKeyConfiguration.self, from: persistedData)
+    XCTAssertEqual(persistedHotKey, .defaultTranslate)
+  }
+
+  func testBareLetterHotKeyIsInvalid() {
+    let bareLetter = HotKeyConfiguration(
+      keyCode: UInt32(kVK_ANSI_D),
+      modifiers: 0,
+      keyEquivalent: "D"
+    )
+
+    XCTAssertFalse(bareLetter.isValidGlobalShortcut)
+  }
+
+  func testFloatingPanelPlacementAndLastOriginPersist() throws {
+    let defaults = try makeDefaults()
+    let providerFileStore = makeProviderFileStore()
+    let store = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+
+    XCTAssertEqual(store.floatingPanelPlacement, .screenCenter)
+
+    store.floatingPanelPlacement = .topRight
+    store.recordFloatingPanelOrigin(x: 120, y: 340)
+
+    let reloaded = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+    XCTAssertEqual(reloaded.floatingPanelPlacement, .topRight)
+    XCTAssertEqual(reloaded.floatingPanelLastOrigin, FloatingPanelSavedOrigin(x: 120, y: 340))
   }
 
   func testBlankLanguageSettingsFallbackToDefaultsAndPersist() throws {

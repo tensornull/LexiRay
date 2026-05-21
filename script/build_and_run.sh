@@ -8,6 +8,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DERIVED_DATA="$ROOT_DIR/build/DerivedData"
 PROJECT="$ROOT_DIR/LexiRay.xcodeproj"
 APP_BUNDLE="$DERIVED_DATA/Build/Products/Debug/$APP_NAME.app"
+APP_EXECUTABLE="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
 cd "$ROOT_DIR"
 
@@ -16,17 +17,32 @@ if ! command -v xcodegen >/dev/null 2>&1; then
   exit 127
 fi
 
-kill_existing_app() {
+is_development_process() {
+  local process_path="$1"
+  case "$process_path" in
+    "$ROOT_DIR"/build/*/"$APP_NAME.app"/Contents/MacOS/"$APP_NAME"*) return 0 ;;
+    "$HOME"/Library/Developer/Xcode/DerivedData/"$APP_NAME"-*/Build/Products/*/"$APP_NAME.app"/Contents/MacOS/"$APP_NAME"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+kill_development_apps() {
   (pgrep -x "$APP_NAME" || true) | while read -r pid; do
     [[ -n "$pid" ]] || continue
-    kill "$pid" >/dev/null 2>&1 || true
+    process_path="$(ps -p "$pid" -o args=)"
+    if is_development_process "$process_path"; then
+      kill "$pid" >/dev/null 2>&1 || true
+    fi
   done
 
   sleep 1
 
   (pgrep -x "$APP_NAME" || true) | while read -r pid; do
     [[ -n "$pid" ]] || continue
-    kill -9 "$pid" >/dev/null 2>&1 || true
+    process_path="$(ps -p "$pid" -o args=)"
+    if is_development_process "$process_path"; then
+      kill -9 "$pid" >/dev/null 2>&1 || true
+    fi
   done
 }
 
@@ -36,7 +52,11 @@ keep_only_workspace_app() {
     process_path="$(ps -p "$pid" -o args=)"
     case "$process_path" in
       "$APP_BUNDLE"/Contents/MacOS/"$APP_NAME") ;;
-      *) kill "$pid" >/dev/null 2>&1 || true ;;
+      *)
+        if is_development_process "$process_path"; then
+          kill "$pid" >/dev/null 2>&1 || true
+        fi
+        ;;
     esac
   done
 
@@ -47,12 +67,26 @@ keep_only_workspace_app() {
     process_path="$(ps -p "$pid" -o args=)"
     case "$process_path" in
       "$APP_BUNDLE"/Contents/MacOS/"$APP_NAME") ;;
-      *) kill -9 "$pid" >/dev/null 2>&1 || true ;;
+      *)
+        if is_development_process "$process_path"; then
+          kill -9 "$pid" >/dev/null 2>&1 || true
+        fi
+        ;;
     esac
   done
 }
 
-kill_existing_app
+canonical_app_is_running() {
+  (pgrep -x "$APP_NAME" || true) | while read -r pid; do
+    [[ -n "$pid" ]] || continue
+    process_path="$(ps -p "$pid" -o args=)"
+    case "$process_path" in
+      "$APP_EXECUTABLE"*) echo "$pid" ;;
+    esac
+  done
+}
+
+kill_development_apps
 
 xcodegen generate
 xcodebuild \
@@ -64,7 +98,12 @@ xcodebuild \
   build
 
 open_app() {
-  /usr/bin/open -n "$APP_BUNDLE"
+  if [[ -n "$(canonical_app_is_running)" ]]; then
+    /usr/bin/open "$APP_BUNDLE"
+    return
+  fi
+
+  /usr/bin/open "$APP_BUNDLE"
 }
 
 case "$MODE" in
@@ -85,7 +124,7 @@ case "$MODE" in
   --verify|verify)
     open_app
     sleep 2
-    pgrep -x "$APP_NAME" >/dev/null
+    [[ -n "$(canonical_app_is_running)" ]]
     keep_only_workspace_app
     ;;
   *)

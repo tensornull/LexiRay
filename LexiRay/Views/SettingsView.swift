@@ -1,55 +1,107 @@
 import SwiftUI
 
-struct SettingsView: View {
-  @ObservedObject var settings: SettingsStore
+struct DashboardSettingsView: View {
+  @ObservedObject var controller: LexiRayController
+
+  private var settings: SettingsStore {
+    controller.settings
+  }
 
   var body: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 18) {
-        GroupBox("App") {
-          Toggle("Show menu bar icon", isOn: showsMenuBarIcon)
-        }
+    VStack(alignment: .leading, spacing: 18) {
+      appPanel
+      hotKeyPanel
+      floatingPanel
+      permissionPanel
+      advancedPanel
+    }
+  }
 
-        GroupBox("Translation") {
-          VStack(alignment: .leading, spacing: 12) {
-            LanguageSettingsView(settings: settings, compact: true)
+  private var appPanel: some View {
+    GroupBox("App") {
+      Toggle("Show menu bar icon", isOn: showsMenuBarIcon)
+    }
+  }
+
+  private var hotKeyPanel: some View {
+    GroupBox("Hotkeys") {
+      VStack(alignment: .leading, spacing: 12) {
+        HotKeySettingsRow(
+          title: "Translate selection",
+          hotKey: translateHotKey,
+          defaultHotKey: .defaultTranslate
+        )
+
+        HotKeySettingsRow(
+          title: "OCR region",
+          hotKey: ocrHotKey,
+          defaultHotKey: .defaultOCR
+        )
+
+        Button("Restore Default Hotkeys") {
+          settings.resetHotKeys()
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+
+  private var floatingPanel: some View {
+    GroupBox("Floating Panel") {
+      VStack(alignment: .leading, spacing: 12) {
+        Picker("Default position", selection: floatingPanelPlacement) {
+          ForEach(FloatingPanelPlacement.allCases) { placement in
+            Text(placement.title).tag(placement)
           }
         }
+        .pickerStyle(.menu)
 
-        GroupBox("Providers") {
-          ProviderConfigurationList(settings: settings, compact: true)
+        if let origin = settings.floatingPanelLastOrigin {
+          LabeledContent("Last position", value: "\(Int(origin.x)), \(Int(origin.y))")
+            .foregroundStyle(.secondary)
         }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
 
-        GroupBox("Permissions") {
-          VStack(alignment: .leading, spacing: 12) {
-            PermissionSettingsRow(
-              title: "Accessibility",
-              isEnabled: PermissionService.isAccessibilityTrusted,
-              systemImage: PermissionService.isAccessibilityTrusted ? "checkmark.circle.fill" : "lock.shield",
-              action: PermissionService.openAccessibilitySettings
-            )
+  private var permissionPanel: some View {
+    GroupBox("Permissions") {
+      VStack(alignment: .leading, spacing: 10) {
+        PermissionSettingsRow(
+          title: "Accessibility",
+          detail: PermissionService.isAccessibilityTrusted ? "Enabled" : "Needed for selected text",
+          isEnabled: PermissionService.isAccessibilityTrusted,
+          action: PermissionService.openAccessibilitySettings
+        )
 
-            PermissionSettingsRow(
-              title: "Screen Recording",
-              isEnabled: PermissionService.isScreenCaptureTrusted,
-              systemImage: PermissionService.isScreenCaptureTrusted ? "checkmark.circle.fill" : "rectangle.on.rectangle",
-              action: PermissionService.openScreenCaptureSettings
-            )
+        PermissionSettingsRow(
+          title: "Screen Recording",
+          detail: PermissionService.isScreenCaptureTrusted ? "Enabled" : "Needed for OCR",
+          isEnabled: PermissionService.isScreenCaptureTrusted,
+          action: PermissionService.openScreenCaptureSettings
+        )
 
-            PermissionSettingsRow(
-              title: "Automation",
-              status: .unknown,
-              systemImage: "applescript",
-              action: PermissionService.openAutomationSettings
-            )
-          }
-        }
+        PermissionSettingsRow(
+          title: "Automation",
+          detail: "Requested when browser selection is used",
+          isEnabled: nil,
+          action: PermissionService.openAutomationSettings
+        )
+      }
+    }
+  }
+
+  private var advancedPanel: some View {
+    GroupBox("Advanced") {
+      VStack(alignment: .leading, spacing: 12) {
+        LabeledContent("Last source", value: controller.lastSelectionSource.displayName)
 
         Button("Reset Provider Settings") {
           settings.resetProviderSettings()
         }
       }
-      .padding(20)
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
 
@@ -65,37 +117,88 @@ struct SettingsView: View {
     )
   }
 
+  private var translateHotKey: Binding<HotKeyConfiguration> {
+    Binding(
+      get: { settings.translateHotKey },
+      set: { settings.translateHotKey = $0 }
+    )
+  }
+
+  private var ocrHotKey: Binding<HotKeyConfiguration> {
+    Binding(
+      get: { settings.ocrHotKey },
+      set: { settings.ocrHotKey = $0 }
+    )
+  }
+
+  private var floatingPanelPlacement: Binding<FloatingPanelPlacement> {
+    Binding(
+      get: { settings.floatingPanelPlacement },
+      set: { settings.floatingPanelPlacement = $0 }
+    )
+  }
+}
+
+private struct HotKeySettingsRow: View {
+  let title: String
+  @Binding var hotKey: HotKeyConfiguration
+  let defaultHotKey: HotKeyConfiguration
+
+  var body: some View {
+    HStack(spacing: 12) {
+      Text(title)
+      Spacer()
+      HotKeyRecorderButton(hotKey: $hotKey)
+        .frame(width: 190, height: 28)
+      Button("Reset") {
+        hotKey = defaultHotKey
+      }
+      .disabled(hotKey == defaultHotKey)
+    }
+  }
 }
 
 private struct PermissionSettingsRow: View {
   let title: String
-  var isEnabled: Bool?
-  var status: PermissionStatus?
-  let systemImage: String
+  let detail: String
+  let isEnabled: Bool?
   let action: () -> Void
 
   var body: some View {
-    HStack {
-      Label(title, systemImage: systemImage)
-        .foregroundStyle(effectiveStatus == .enabled ? .primary : .secondary)
+    HStack(spacing: 12) {
+      Image(systemName: iconName)
+        .foregroundStyle(iconColor)
+
+      VStack(alignment: .leading, spacing: 2) {
+        Text(title)
+        Text(detail)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+
       Spacer()
-      Button("Open Settings") {
-        action()
+
+      if isEnabled != true {
+        Button("Open") {
+          action()
+        }
       }
     }
   }
 
-  private var effectiveStatus: PermissionStatus {
-    if let status {
-      return status
+  private var iconName: String {
+    if isEnabled == nil {
+      return "questionmark.circle"
     }
 
-    return isEnabled == true ? .enabled : .needed
+    return isEnabled == true ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
   }
-}
 
-private enum PermissionStatus {
-  case enabled
-  case needed
-  case unknown
+  private var iconColor: Color {
+    if isEnabled == nil {
+      return .secondary
+    }
+
+    return isEnabled == true ? .green : .orange
+  }
 }

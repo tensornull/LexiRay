@@ -4,8 +4,8 @@ import OSLog
 enum AppConstants {
   static let appName = "LexiRay"
   static let bundleID = "io.github.tensornull.lexiray"
-  static let defaultHotKeyDescription = "Option-Command-D"
-  static let defaultOCRHotKeyDescription = "Option-Command-O"
+  static let defaultHotKeyDescription = HotKeyConfiguration.defaultTranslate.displayString
+  static let defaultOCRHotKeyDescription = HotKeyConfiguration.defaultOCR.displayString
 }
 
 enum AppLog {

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct FloatingPanelView: View {
   @ObservedObject var controller: LexiRayController
+  @Environment(\.openWindow) private var openWindow
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -31,6 +32,12 @@ struct FloatingPanelView: View {
       }
 
       Spacer()
+
+      panelButton(
+        systemName: "gearshape",
+        help: "Settings",
+        action: openSettings
+      )
 
       panelButton(
         systemName: controller.isPanelPinned ? "pin.fill" : "pin",
@@ -68,7 +75,7 @@ struct FloatingPanelView: View {
     HStack(spacing: 10) {
       Image(systemName: "keyboard")
         .foregroundStyle(.secondary)
-      Text(AppConstants.defaultHotKeyDescription)
+      Text(controller.settings.translateHotKey.displayString)
         .font(.body)
         .foregroundStyle(.secondary)
     }
@@ -148,6 +155,12 @@ struct FloatingPanelView: View {
     }
     .buttonStyle(.borderless)
     .help(help)
+  }
+
+  private func openSettings() {
+    controller.openSettingsFromFloatingPanel()
+    openWindow(id: "main")
+    AppWindowPresenter.bringMainWindowToFrontSoon()
   }
 
   private var headerSubtitle: String {
