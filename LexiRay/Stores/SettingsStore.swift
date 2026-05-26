@@ -113,8 +113,8 @@ final class SettingsStore: ObservableObject {
     )
     let initialLanguage2 = Self.normalizedLanguage(
       defaults.string(forKey: Keys.language2)
-      ?? defaults.string(forKey: Keys.targetLanguage)
-      ?? LanguageDetector.defaultLanguage2,
+        ?? defaults.string(forKey: Keys.targetLanguage)
+        ?? LanguageDetector.defaultLanguage2,
       fallback: LanguageDetector.defaultLanguage2
     )
     language1 = Self.normalizedLanguage(

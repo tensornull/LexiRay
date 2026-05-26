@@ -1,5 +1,5 @@
-@testable import LexiRay
 import AppKit
+@testable import LexiRay
 import XCTest
 
 @MainActor

@@ -46,4 +46,16 @@ final class ProviderConfigurationTests: XCTestCase {
 
     XCTAssertEqual(url.absoluteString, "https://api.example.test/v1/messages")
   }
+
+  func testLLMProvidersUseBrandIconKinds() {
+    XCTAssertEqual(ProviderID.openAIResponses.iconKind, .openAI)
+    XCTAssertEqual(ProviderID.openAIChatCompletions.iconKind, .openAI)
+    XCTAssertEqual(ProviderID.anthropicMessages.iconKind, .anthropic)
+    XCTAssertEqual(ProviderID.geminiGenerateContent.iconKind, .gemini)
+  }
+
+  func testNonLLMProvidersFallbackToSystemIcons() {
+    XCTAssertEqual(ProviderID.systemDictionary.iconKind, .system("book"))
+    XCTAssertEqual(ProviderID.mock.iconKind, .system("hammer"))
+  }
 }

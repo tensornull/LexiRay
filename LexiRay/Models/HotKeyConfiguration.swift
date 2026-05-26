@@ -1,7 +1,7 @@
 import Carbon
 import Foundation
 
-struct HotKeyConfiguration: Codable, Equatable, Sendable {
+struct HotKeyConfiguration: Codable, Equatable {
   var keyCode: UInt32
   var modifiers: UInt32
   var keyEquivalent: String

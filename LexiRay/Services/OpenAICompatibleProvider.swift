@@ -24,7 +24,7 @@ struct OpenAIChatCompletionsProvider: TranslationProvider {
   }
 
   func translate(_ request: TranslationRequest) async throws -> TranslationResult {
-    let text = try validatedText(request.text)
+    let text = try validatedText(request.llmInputText)
     let endpoint = try ProviderEndpoint.openAI(baseURL: configuration.normalizedBaseURL, path: "chat/completions")
     let body = OpenAIChatRequest(
       model: configuration.model,
@@ -50,7 +50,7 @@ struct OpenAIChatCompletionsProvider: TranslationProvider {
   }
 
   func streamTranslation(_ request: TranslationRequest) async throws -> AsyncThrowingStream<TranslationStreamUpdate, Error> {
-    let text = try validatedText(request.text)
+    let text = try validatedText(request.llmInputText)
     guard !configuration.apiKey.trimmedForQuery.isEmpty else {
       throw TranslationError.missingAPIKey
     }
@@ -97,7 +97,7 @@ struct OpenAIResponsesProvider: TranslationProvider {
   }
 
   func translate(_ request: TranslationRequest) async throws -> TranslationResult {
-    let text = try validatedText(request.text)
+    let text = try validatedText(request.llmInputText)
     let endpoint = try ProviderEndpoint.openAI(baseURL: configuration.normalizedBaseURL, path: "responses")
     let body = OpenAIResponsesRequest(
       model: configuration.model,
@@ -121,7 +121,7 @@ struct OpenAIResponsesProvider: TranslationProvider {
   }
 
   func streamTranslation(_ request: TranslationRequest) async throws -> AsyncThrowingStream<TranslationStreamUpdate, Error> {
-    let text = try validatedText(request.text)
+    let text = try validatedText(request.llmInputText)
     guard !configuration.apiKey.trimmedForQuery.isEmpty else {
       throw TranslationError.missingAPIKey
     }
@@ -166,7 +166,7 @@ struct AnthropicMessagesProvider: TranslationProvider {
   }
 
   func translate(_ request: TranslationRequest) async throws -> TranslationResult {
-    let text = try validatedText(request.text)
+    let text = try validatedText(request.llmInputText)
     guard !configuration.apiKey.trimmedForQuery.isEmpty else {
       throw TranslationError.missingAPIKey
     }
@@ -197,7 +197,7 @@ struct AnthropicMessagesProvider: TranslationProvider {
   }
 
   func streamTranslation(_ request: TranslationRequest) async throws -> AsyncThrowingStream<TranslationStreamUpdate, Error> {
-    let text = try validatedText(request.text)
+    let text = try validatedText(request.llmInputText)
     guard !configuration.apiKey.trimmedForQuery.isEmpty else {
       throw TranslationError.missingAPIKey
     }
@@ -243,7 +243,7 @@ struct GeminiGenerateContentProvider: TranslationProvider {
   }
 
   func translate(_ request: TranslationRequest) async throws -> TranslationResult {
-    let text = try validatedText(request.text)
+    let text = try validatedText(request.llmInputText)
     guard !configuration.apiKey.trimmedForQuery.isEmpty else {
       throw TranslationError.missingAPIKey
     }
@@ -279,7 +279,7 @@ struct GeminiGenerateContentProvider: TranslationProvider {
   }
 
   func streamTranslation(_ request: TranslationRequest) async throws -> AsyncThrowingStream<TranslationStreamUpdate, Error> {
-    let text = try validatedText(request.text)
+    let text = try validatedText(request.llmInputText)
     guard !configuration.apiKey.trimmedForQuery.isEmpty else {
       throw TranslationError.missingAPIKey
     }
@@ -314,7 +314,12 @@ struct GeminiGenerateContentProvider: TranslationProvider {
 enum TranslationPrompt {
   static func instructions(targetLanguage: String) -> String {
     """
-    Translate the user's text into \(targetLanguage). Return only the translation. Preserve the original meaning, names, numbers, formatting, line breaks, Markdown, and code blocks. Do not add explanations.
+    Translate the user's text into \(targetLanguage). Return only the translation.
+
+    Preserve paragraph count, paragraph order, blank lines, Markdown structure, fenced code block boundaries, names, numbers, URLs, keys, and identifiers.
+    If the input contains fenced code blocks, keep the fences and language tags. Inside code blocks, translate only natural-language prose, comments, or string values when that is clearly intended; do not change JSON keys, code syntax, indentation, or punctuation.
+    Never convert a fenced code block into a bullet list, paragraph, quote, or inline text.
+    Do not merge separate paragraphs. Do not add explanations.
     """
   }
 }
@@ -545,7 +550,7 @@ private func makeStreamingTranslation(
   }
 }
 
-private enum ProviderStreamAction: Sendable {
+private enum ProviderStreamAction {
   case ignore
   case append(String)
   case finalText(String)

@@ -368,7 +368,7 @@ final class LexiRayController: ObservableObject {
         return
       }
 
-      let updatedEntry = await self.pipeline.stream(entry, request: request) { partialEntry in
+      let updatedEntry = await pipeline.stream(entry, request: request) { partialEntry in
         guard !Task.isCancelled, self.activeBatchID == batchID else {
           return
         }
@@ -377,13 +377,13 @@ final class LexiRayController: ObservableObject {
         self.floatingPanel.refreshContentLayout()
       }
 
-      self.providerTranslationTasks[entry.providerConfigurationID] = nil
-      guard !Task.isCancelled, self.activeBatchID == batchID else {
+      providerTranslationTasks[entry.providerConfigurationID] = nil
+      guard !Task.isCancelled, activeBatchID == batchID else {
         return
       }
 
-      self.updateBatchEntry(batchID: batchID, entry: updatedEntry)
-      self.floatingPanel.refreshContentLayout()
+      updateBatchEntry(batchID: batchID, entry: updatedEntry)
+      floatingPanel.refreshContentLayout()
 
       if case let .success(result) = updatedEntry.status {
         AppLog.translation.info("Translation completed with \(result.providerName, privacy: .public)")

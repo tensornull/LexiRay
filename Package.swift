@@ -8,5 +8,7 @@ let package = Package(
     .macOS(.v15)
   ],
   products: [],
-  dependencies: []
+  dependencies: [
+    .package(url: "https://github.com/apple/swift-markdown.git", from: "0.5.0")
+  ]
 )

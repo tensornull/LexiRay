@@ -10,11 +10,16 @@ struct LexiRayApp: App {
     Window("LexiRay", id: "main") {
       MainView(controller: controller)
         .frame(minWidth: 760, minHeight: 500)
+        .background {
+          WindowReportingView { window in
+            AppWindowPresenter.registerMainWindow(window)
+          }
+        }
     }
     .defaultSize(width: 820, height: 560)
     .defaultLaunchBehavior(.presented)
 
-    MenuBarExtra("LexiRay", image: "MenuBarIcon", isInserted: showsMenuBarIcon) {
+    MenuBarExtra("LexiRay", systemImage: "translate", isInserted: showsMenuBarIcon) {
       MenuBarView(controller: controller)
     }
     .menuBarExtraStyle(.menu)

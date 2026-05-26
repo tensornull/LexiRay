@@ -2,9 +2,24 @@ import Foundation
 
 struct TranslationRequest: Equatable, Hashable {
   let text: String
+  let llmInputText: String
   let sourceLanguage: String?
   let targetLanguage: String
   let selectionSource: SelectionSource
+
+  init(
+    text: String,
+    llmInputText: String? = nil,
+    sourceLanguage: String?,
+    targetLanguage: String,
+    selectionSource: SelectionSource
+  ) {
+    self.text = text
+    self.llmInputText = llmInputText ?? text
+    self.sourceLanguage = sourceLanguage
+    self.targetLanguage = targetLanguage
+    self.selectionSource = selectionSource
+  }
 }
 
 struct TranslationResult: Equatable, Identifiable {

@@ -1,5 +1,6 @@
-@testable import LexiRay
 import Carbon
+@testable import LexiRay
+import SwiftUI
 import XCTest
 
 @MainActor
@@ -113,6 +114,34 @@ final class SettingsStoreTests: XCTestCase {
     XCTAssertEqual(HotKeyConfiguration.defaultTranslate.keyEquivalent, "T")
   }
 
+  func testHotKeyConvertsToMenuKeyboardShortcut() {
+    let shortcut = HotKeyConfiguration.defaultTranslate.menuKeyboardShortcut
+
+    XCTAssertNotNil(shortcut)
+    XCTAssertEqual(shortcut?.modifiers, SwiftUI.EventModifiers([.command, .option, .shift]))
+  }
+
+  func testResetHotKeysRestoresDefaults() throws {
+    let defaults = try makeDefaults()
+    let providerFileStore = makeProviderFileStore()
+    let store = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+    store.translateHotKey = HotKeyConfiguration(
+      keyCode: UInt32(kVK_ANSI_R),
+      modifiers: UInt32(controlKey) | UInt32(optionKey),
+      keyEquivalent: "R"
+    )
+    store.ocrHotKey = HotKeyConfiguration(
+      keyCode: UInt32(kVK_ANSI_P),
+      modifiers: UInt32(controlKey) | UInt32(cmdKey),
+      keyEquivalent: "P"
+    )
+
+    store.resetHotKeys()
+
+    XCTAssertEqual(store.translateHotKey, .defaultTranslate)
+    XCTAssertEqual(store.ocrHotKey, .defaultOCR)
+  }
+
   func testLegacyDockTranslateHotKeyMigratesToDefault() throws {
     let defaults = try makeDefaults()
     let providerFileStore = makeProviderFileStore()
@@ -121,7 +150,7 @@ final class SettingsStoreTests: XCTestCase {
       modifiers: UInt32(cmdKey) | UInt32(optionKey),
       keyEquivalent: "D"
     )
-    defaults.set(try JSONEncoder().encode(legacyHotKey), forKey: "translateHotKey")
+    try defaults.set(JSONEncoder().encode(legacyHotKey), forKey: "translateHotKey")
 
     let store = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
 

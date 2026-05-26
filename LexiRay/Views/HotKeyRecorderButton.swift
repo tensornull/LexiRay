@@ -14,7 +14,7 @@ struct HotKeyRecorderButton: NSViewRepresentable {
   }
 
   func updateNSView(_ nsView: RecorderButton, context _: Context) {
-    nsView.hotKey = hotKey
+    nsView.applyHotKey(hotKey)
   }
 }
 
@@ -32,6 +32,12 @@ final class RecorderButton: NSButton {
     target = self
     action = #selector(beginRecording)
     updateTitle()
+  }
+
+  func applyHotKey(_ hotKey: HotKeyConfiguration) {
+    self.hotKey = hotKey
+    updateTitle()
+    needsDisplay = true
   }
 
   required init?(coder: NSCoder) {
@@ -84,6 +90,7 @@ final class RecorderButton: NSButton {
 
   private func updateTitle() {
     title = isRecording ? "Press shortcut..." : hotKey.displayString
+    needsDisplay = true
   }
 }
 

@@ -1,6 +1,6 @@
 import Foundation
 
-struct ServerSentEvent: Equatable, Sendable {
+struct ServerSentEvent: Equatable {
   let event: String?
   let data: String
 }

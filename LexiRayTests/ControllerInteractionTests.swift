@@ -1,6 +1,6 @@
-@testable import LexiRay
 import AppKit
 import Carbon
+@testable import LexiRay
 import XCTest
 
 @MainActor
@@ -71,25 +71,51 @@ final class ControllerInteractionTests: XCTestCase {
   func testShortResultUsesCompactFloatingPanelHeight() {
     let panel = MockFloatingPanelPresenter()
     let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
-    let request = TranslationRequest(
-      text: "hello",
-      sourceLanguage: "en",
-      targetLanguage: "zh-Hans",
-      selectionSource: .manual
-    )
-    controller.panelState = .result(
-      TranslationResult(
-        request: request,
-        providerID: .mock,
-        providerName: "Mock",
-        translatedText: "你好"
-      )
-    )
+    controller.panelState = .result(makeTranslationResult(text: "你好"))
 
     let size = FloatingPanelController.contentSize(for: controller)
 
     XCTAssertEqual(size.width, 660)
     XCTAssertLessThanOrEqual(size.height, 410)
+  }
+
+  func testLongResultUsesTallerFloatingPanelHeight() {
+    let panel = MockFloatingPanelPresenter()
+    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
+    controller.panelState = .result(makeTranslationResult(text: String(repeating: "这是一段较长的翻译结果，用于验证悬浮窗会按内容增加高度。\n", count: 10)))
+
+    let shortHeight = FloatingPanelController.contentSize(for: makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: MockFloatingPanelPresenter())).height
+    let longHeight = FloatingPanelController.contentSize(for: controller).height
+
+    XCTAssertGreaterThan(longHeight, shortHeight)
+    XCTAssertLessThanOrEqual(longHeight, FloatingPanelController.maximumContentHeight(isExpanded: false))
+  }
+
+  func testBatchHeightGrowsWithProviderContent() {
+    let panel = MockFloatingPanelPresenter()
+    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
+    let request = TranslationRequest(text: "hello", sourceLanguage: "en", targetLanguage: "zh-Hans", selectionSource: .manual)
+    let shortBatch = TranslationBatch(
+      request: request,
+      entries: [
+        ProviderTranslationEntry(providerConfigurationID: "short", providerID: .mock, providerName: "Short", status: .success(makeTranslationResult(text: "短句")))
+      ]
+    )
+    let longBatch = TranslationBatch(
+      request: request,
+      entries: [
+        ProviderTranslationEntry(providerConfigurationID: "short", providerID: .mock, providerName: "Short", status: .success(makeTranslationResult(text: "短句"))),
+        ProviderTranslationEntry(providerConfigurationID: "long", providerID: .systemDictionary, providerName: "Long", status: .success(makeTranslationResult(text: String(repeating: "Long translated content wraps across multiple visible lines. ", count: 18))))
+      ]
+    )
+
+    controller.panelState = .batch(shortBatch)
+    let shortHeight = FloatingPanelController.contentSize(for: controller).height
+    controller.panelState = .batch(longBatch)
+    let longHeight = FloatingPanelController.contentSize(for: controller).height
+
+    XCTAssertGreaterThan(longHeight, shortHeight)
+    XCTAssertLessThanOrEqual(longHeight, FloatingPanelController.maximumContentHeight(isExpanded: false))
   }
 
   func testEmptyPanelSourceSubmitDoesNotStartTranslation() {
@@ -149,9 +175,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(controller.panelSourceText, "hello")
   }
 
-  func testStreamingPartialRefreshesPanelWithoutRepositioningShow() async {
+  func testStreamingPartialRefreshesPanelWithoutRepositioningShow() async throws {
     let panel = MockFloatingPanelPresenter()
-    let defaults = UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)")!
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -326,9 +352,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertTrue(speech.speakRequests.isEmpty)
   }
 
-  func testProviderToggleDisablesStreamingProvider() async {
+  func testProviderToggleDisablesStreamingProvider() async throws {
     let panel = MockFloatingPanelPresenter()
-    let defaults = UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)")!
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -368,9 +394,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertTrue(entry.status.isDisabled)
   }
 
-  func testProviderToggleEnablesDisabledProviderForCurrentRequest() async {
+  func testProviderToggleEnablesDisabledProviderForCurrentRequest() async throws {
     let panel = MockFloatingPanelPresenter()
-    let defaults = UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)")!
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -408,9 +434,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertTrue(settings.configuration(for: .mock).isEnabled)
   }
 
-  func testProviderToggleMissingAPIKeyDoesNotPersistEnabled() async {
+  func testProviderToggleMissingAPIKeyDoesNotPersistEnabled() async throws {
     let panel = MockFloatingPanelPresenter()
-    let defaults = UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)")!
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -504,10 +530,49 @@ final class ControllerInteractionTests: XCTestCase {
     )
   }
 
-  func testWindowMatchingDoesNotFallbackToUnrelatedVisibleWindow() {
+  func testWindowPresentationCanTargetHiddenMainWindowWithoutCompletingRequest() {
     let windows = [
       AppWindowPresenter.WindowSnapshot(isVisible: true, identifier: "settings", title: "LexiRay Settings"),
       AppWindowPresenter.WindowSnapshot(isVisible: false, identifier: "main", title: "LexiRay")
+    ]
+
+    XCTAssertEqual(AppWindowPresenter.presentationCandidateIndex(in: windows, kind: .main), 1)
+    XCTAssertFalse(AppWindowPresenter.presentationSucceeded(windows[1], kind: .main))
+  }
+
+  func testWindowPresentationCompletesOnlyForVisibleKeyableMainWindow() {
+    let hidden = AppWindowPresenter.WindowSnapshot(isVisible: false, identifier: "main", title: "LexiRay")
+    let miniaturized = AppWindowPresenter.WindowSnapshot(isVisible: true, identifier: "main", title: "LexiRay", isMiniaturized: true)
+    let nonKeyable = AppWindowPresenter.WindowSnapshot(isVisible: true, identifier: "main", title: "LexiRay", canBecomeKey: false)
+    let visible = AppWindowPresenter.WindowSnapshot(isVisible: true, identifier: "main", title: "LexiRay")
+
+    XCTAssertFalse(AppWindowPresenter.presentationSucceeded(hidden, kind: .main))
+    XCTAssertFalse(AppWindowPresenter.presentationSucceeded(miniaturized, kind: .main))
+    XCTAssertFalse(AppWindowPresenter.presentationSucceeded(nonKeyable, kind: .main))
+    XCTAssertTrue(AppWindowPresenter.presentationSucceeded(visible, kind: .main))
+  }
+
+  func testWindowPresentationIgnoresClosingMainWindow() {
+    let windows = [
+      AppWindowPresenter.WindowSnapshot(isVisible: false, identifier: "main", title: "LexiRay", isClosing: true)
+    ]
+
+    XCTAssertNil(AppWindowPresenter.presentationCandidateIndex(in: windows, kind: .main))
+    XCTAssertFalse(AppWindowPresenter.presentationSucceeded(windows[0], kind: .main))
+  }
+
+  func testWindowPresentationIgnoresFloatingPanelWithAppTitle() {
+    let windows = [
+      AppWindowPresenter.WindowSnapshot(isVisible: true, identifier: "", title: "LexiRay", isNormalWindowLevel: false)
+    ]
+
+    XCTAssertNil(AppWindowPresenter.presentationCandidateIndex(in: windows, kind: .main))
+    XCTAssertFalse(AppWindowPresenter.presentationSucceeded(windows[0], kind: .main))
+  }
+
+  func testWindowMatchingDoesNotFallbackToUnrelatedVisibleWindow() {
+    let windows = [
+      AppWindowPresenter.WindowSnapshot(isVisible: true, identifier: "settings", title: "LexiRay Settings")
     ]
 
     XCTAssertNil(AppWindowPresenter.matchingWindowIndex(in: windows, kind: .main))
@@ -571,6 +636,20 @@ final class ControllerInteractionTests: XCTestCase {
       .appendingPathComponent("LexiRayControllerTests-\(UUID().uuidString)", isDirectory: true)
       .appendingPathComponent("providers.json", isDirectory: false)
     return ProviderSettingsFileStore(fileURL: fileURL)
+  }
+
+  private func makeTranslationResult(text: String) -> TranslationResult {
+    TranslationResult(
+      request: TranslationRequest(
+        text: "hello",
+        sourceLanguage: "en",
+        targetLanguage: "zh-Hans",
+        selectionSource: .manual
+      ),
+      providerID: .mock,
+      providerName: "Mock",
+      translatedText: text
+    )
   }
 
   private func enableOnly(_ providers: Set<ProviderID>, in settings: SettingsStore) {

@@ -38,9 +38,11 @@ final class TranslationPipeline {
 
     let sourceLanguage = LanguageDetector.dominantLanguageCode(for: text)
     let targetLanguage = settings.resolvedTargetLanguage(for: sourceLanguage)
+    let llmInputText = SourceMarkdownPreparer.prepare(text)
 
     let request = TranslationRequest(
       text: text,
+      llmInputText: llmInputText,
       sourceLanguage: sourceLanguage,
       targetLanguage: targetLanguage,
       selectionSource: selectionSource
@@ -111,7 +113,7 @@ final class TranslationPipeline {
   private func translate(
     request: TranslationRequest,
     providerConfigurationID: String,
-    providerID: ProviderID,
+    providerID _: ProviderID,
     providerName: String,
     onPartial: (@MainActor (String) -> Void)? = nil
   ) async throws -> TranslationResult {

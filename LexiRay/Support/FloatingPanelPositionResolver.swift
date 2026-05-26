@@ -11,40 +11,39 @@ enum FloatingPanelPositionResolver {
     mouseLocation: NSPoint,
     lastOrigin: NSPoint?
   ) -> NSPoint {
-    let rawOrigin: NSPoint
-    switch placement {
+    let rawOrigin: NSPoint = switch placement {
     case .nearCursor:
-      rawOrigin = NSPoint(
+      NSPoint(
         x: mouseLocation.x + cursorOffset,
         y: mouseLocation.y - panelSize.height - cursorOffset
       )
     case .screenCenter:
-      rawOrigin = NSPoint(
+      NSPoint(
         x: visibleFrame.midX - panelSize.width / 2,
         y: visibleFrame.midY - panelSize.height / 2
       )
     case .topLeft:
-      rawOrigin = NSPoint(
+      NSPoint(
         x: visibleFrame.minX + margin,
         y: visibleFrame.maxY - panelSize.height - margin
       )
     case .topRight:
-      rawOrigin = NSPoint(
+      NSPoint(
         x: visibleFrame.maxX - panelSize.width - margin,
         y: visibleFrame.maxY - panelSize.height - margin
       )
     case .bottomLeft:
-      rawOrigin = NSPoint(
+      NSPoint(
         x: visibleFrame.minX + margin,
         y: visibleFrame.minY + margin
       )
     case .bottomRight:
-      rawOrigin = NSPoint(
+      NSPoint(
         x: visibleFrame.maxX - panelSize.width - margin,
         y: visibleFrame.minY + margin
       )
     case .lastPosition:
-      rawOrigin = lastOrigin ?? NSPoint(
+      lastOrigin ?? NSPoint(
         x: visibleFrame.midX - panelSize.width / 2,
         y: visibleFrame.midY - panelSize.height / 2
       )

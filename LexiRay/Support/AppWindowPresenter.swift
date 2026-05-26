@@ -3,9 +3,16 @@ import AppKit
 @MainActor
 enum AppWindowPresenter {
   private static var windowCloseObserver: NSObjectProtocol?
+  private weak static var mainWindow: NSWindow?
+  private static var mainWindowObservers: [NSObjectProtocol] = []
+  private static var closingMainWindowIDs = Set<ObjectIdentifier>()
+  private static var pendingMainWindowPresentation = false
+  private static var pendingPresentationRetryScheduled = false
+  private static var pendingPresentationRetryDeadline: Date?
 
   static func bringMainWindowToFrontSoon() {
-    bringToFrontSoon(.main)
+    requestMainWindowPresentation()
+    presentMainWindowIfAvailable()
   }
 
   static func bringSettingsWindowToFrontSoon() {
@@ -29,13 +36,14 @@ enum AppWindowPresenter {
   }
 
   static func showDockAndActivate() {
-    NSApp.setActivationPolicy(.regular)
+    if NSApp.activationPolicy() != .regular {
+      NSApp.setActivationPolicy(.regular)
+    }
     NSApp.unhide(nil)
-    NSApp.activate()
+    NSApp.activate(ignoringOtherApps: true)
   }
 
   static func hideDockIfNoRegularWindowsSoon(showsMenuBarIcon: Bool) {
-    scheduleDockVisibilityUpdate(after: 0.05, showsMenuBarIcon: showsMenuBarIcon)
     scheduleDockVisibilityUpdate(after: 0.2, showsMenuBarIcon: showsMenuBarIcon)
   }
 
@@ -54,30 +62,159 @@ enum AppWindowPresenter {
     hideDockIfNoRegularWindowsSoon(showsMenuBarIcon: showsMenuBarIcon)
   }
 
-  private static func bringToFrontSoon(_ kind: WindowKind) {
-    bringToFront(kind)
-    scheduleBringToFront(kind, after: 0.05)
-    scheduleBringToFront(kind, after: 0.2)
-  }
-
-  private static func scheduleBringToFront(_ kind: WindowKind, after delay: TimeInterval) {
-    DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-      Task { @MainActor in
-        bringToFront(kind)
-      }
+  static func registerMainWindow(_ window: NSWindow) {
+    window.identifier = NSUserInterfaceItemIdentifier("main")
+    closingMainWindowIDs.remove(ObjectIdentifier(window))
+    guard mainWindow !== window else {
+      presentMainWindowIfAvailable()
+      return
     }
+
+    removeMainWindowObservers()
+    mainWindow = window
+    observeMainWindow(window)
+    presentMainWindowIfAvailable()
   }
 
-  private static func bringToFront(_ kind: WindowKind) {
+  static func requestMainWindowPresentation() {
+    pendingMainWindowPresentation = true
+    pendingPresentationRetryDeadline = Date().addingTimeInterval(5)
+    showDockAndActivate()
+  }
+
+  @discardableResult
+  static func presentMainWindowIfAvailable() -> Bool {
+    guard pendingMainWindowPresentation else {
+      return false
+    }
+
     showDockAndActivate()
 
-    let candidate = NSApp.windows.first { window in
-      window.isVisible && matches(window, kind: kind)
+    guard let window = mainWindowCandidate() else {
+      schedulePendingPresentationRetry()
+      return false
     }
 
-    candidate?.deminiaturize(nil)
-    candidate?.makeKeyAndOrderFront(nil)
-    candidate?.orderFrontRegardless()
+    bringToFront(window)
+    guard presentationSucceeded(window) else {
+      schedulePendingPresentationRetry()
+      return false
+    }
+
+    pendingMainWindowPresentation = false
+    pendingPresentationRetryDeadline = nil
+    return true
+  }
+
+  private static func bringToFront(_ window: NSWindow) {
+    window.deminiaturize(nil)
+    window.makeKeyAndOrderFront(nil)
+    window.orderFrontRegardless()
+  }
+
+  private static func observeMainWindow(_ window: NSWindow) {
+    let notificationCenter = NotificationCenter.default
+    let windowID = ObjectIdentifier(window)
+    let retryNotifications: [NSNotification.Name] = [
+      NSWindow.didBecomeKeyNotification,
+      NSWindow.didBecomeMainNotification,
+      NSWindow.didChangeOcclusionStateNotification,
+      NSWindow.didDeminiaturizeNotification
+    ]
+
+    mainWindowObservers = retryNotifications.map { notificationName in
+      notificationCenter.addObserver(
+        forName: notificationName,
+        object: window,
+        queue: .main
+      ) { _ in
+        Task { @MainActor in
+          presentMainWindowIfAvailable()
+        }
+      }
+    }
+
+    mainWindowObservers.append(
+      notificationCenter.addObserver(
+        forName: NSWindow.willCloseNotification,
+        object: window,
+        queue: .main
+      ) { _ in
+        Task { @MainActor in
+          handleMainWindowWillClose(windowID: windowID)
+        }
+      }
+    )
+  }
+
+  private static func removeMainWindowObservers() {
+    for observer in mainWindowObservers {
+      NotificationCenter.default.removeObserver(observer)
+    }
+    mainWindowObservers.removeAll()
+  }
+
+  private static func handleMainWindowWillClose(windowID: ObjectIdentifier) {
+    closingMainWindowIDs.insert(windowID)
+    if let window = mainWindow, ObjectIdentifier(window) == windowID {
+      mainWindow = nil
+    }
+
+    schedulePendingPresentationRetry()
+  }
+
+  private static func mainWindowCandidate() -> NSWindow? {
+    if let mainWindow, isPresentationCandidate(mainWindow) {
+      return mainWindow
+    }
+
+    return NSApp.windows.first { window in
+      isPresentationCandidate(window)
+    }
+  }
+
+  private static func isPresentationCandidate(_ window: NSWindow) -> Bool {
+    isPresentationCandidate(
+      identifier: window.identifier?.rawValue ?? "",
+      title: window.title,
+      canBecomeKey: window.canBecomeKey,
+      isNormalWindowLevel: window.level == .normal,
+      isClosing: closingMainWindowIDs.contains(ObjectIdentifier(window)),
+      kind: .main
+    )
+  }
+
+  private static func presentationSucceeded(_ window: NSWindow) -> Bool {
+    presentationSucceeded(
+      WindowSnapshot(
+        isVisible: window.isVisible,
+        identifier: window.identifier?.rawValue ?? "",
+        title: window.title,
+        isMiniaturized: window.isMiniaturized,
+        canBecomeKey: window.canBecomeKey,
+        isNormalWindowLevel: window.level == .normal,
+        isClosing: closingMainWindowIDs.contains(ObjectIdentifier(window))
+      ),
+      kind: .main
+    )
+  }
+
+  private static func schedulePendingPresentationRetry() {
+    guard pendingMainWindowPresentation, !pendingPresentationRetryScheduled else {
+      return
+    }
+
+    guard pendingPresentationRetryDeadline.map({ Date() < $0 }) ?? true else {
+      return
+    }
+
+    pendingPresentationRetryScheduled = true
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+      Task { @MainActor in
+        pendingPresentationRetryScheduled = false
+        presentMainWindowIfAvailable()
+      }
+    }
   }
 
   private static func scheduleDockVisibilityUpdate(after delay: TimeInterval, showsMenuBarIcon: Bool) {
@@ -89,12 +226,18 @@ enum AppWindowPresenter {
   }
 
   private static func updateDockVisibility(showsMenuBarIcon: Bool) {
-    NSApp.setActivationPolicy(
-      activationPolicy(
-        hasVisibleRegularWindows: hasVisibleRegularWindows(),
-        showsMenuBarIcon: showsMenuBarIcon
-      )
+    let desiredPolicy = activationPolicy(
+      hasVisibleRegularWindows: hasVisibleRegularWindows(),
+      showsMenuBarIcon: showsMenuBarIcon
     )
+    guard NSApp.activationPolicy() != desiredPolicy else {
+      return
+    }
+
+    NSApp.setActivationPolicy(desiredPolicy)
+    if desiredPolicy == .accessory {
+      NSApp.hide(nil)
+    }
   }
 
   private static func hasVisibleRegularWindows() -> Bool {
@@ -117,15 +260,49 @@ enum AppWindowPresenter {
   }
 
   static func matchingWindowIndex(in windows: [WindowSnapshot], kind: WindowKind) -> Int? {
+    presentationCandidateIndex(in: windows, kind: kind)
+  }
+
+  static func presentationCandidateIndex(in windows: [WindowSnapshot], kind: WindowKind) -> Int? {
     windows.firstIndex { window in
-      window.isVisible && matches(identifier: window.identifier, title: window.title, kind: kind)
+      isPresentationCandidate(
+        identifier: window.identifier,
+        title: window.title,
+        canBecomeKey: window.canBecomeKey,
+        isNormalWindowLevel: window.isNormalWindowLevel,
+        isClosing: window.isClosing,
+        kind: kind
+      )
     }
+  }
+
+  static func presentationSucceeded(_ window: WindowSnapshot, kind: WindowKind) -> Bool {
+    matches(identifier: window.identifier, title: window.title, kind: kind)
+      && window.isVisible
+      && !window.isMiniaturized
+      && window.canBecomeKey
+      && window.isNormalWindowLevel
+      && !window.isClosing
+  }
+
+  private static func isPresentationCandidate(
+    identifier: String,
+    title: String,
+    canBecomeKey: Bool,
+    isNormalWindowLevel: Bool,
+    isClosing: Bool,
+    kind: WindowKind
+  ) -> Bool {
+    matches(identifier: identifier, title: title, kind: kind)
+      && canBecomeKey
+      && isNormalWindowLevel
+      && !isClosing
   }
 
   static func matches(identifier: String, title: String, kind: WindowKind) -> Bool {
     switch kind {
     case .main:
-      return identifier == "main" || title == AppConstants.appName
+      identifier == "main" || title == AppConstants.appName
     }
   }
 
@@ -133,9 +310,31 @@ enum AppWindowPresenter {
     let isVisible: Bool
     let identifier: String
     let title: String
+    let isMiniaturized: Bool
+    let canBecomeKey: Bool
+    let isNormalWindowLevel: Bool
+    let isClosing: Bool
+
+    init(
+      isVisible: Bool,
+      identifier: String,
+      title: String,
+      isMiniaturized: Bool = false,
+      canBecomeKey: Bool = true,
+      isNormalWindowLevel: Bool = true,
+      isClosing: Bool = false
+    ) {
+      self.isVisible = isVisible
+      self.identifier = identifier
+      self.title = title
+      self.isMiniaturized = isMiniaturized
+      self.canBecomeKey = canBecomeKey
+      self.isNormalWindowLevel = isNormalWindowLevel
+      self.isClosing = isClosing
+    }
   }
 
-  enum WindowKind {
+  enum WindowKind: Hashable {
     case main
   }
 }

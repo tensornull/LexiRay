@@ -172,6 +172,7 @@ private struct HotKeySettingsRow: View {
       Spacer()
       HotKeyRecorderButton(hotKey: $hotKey)
         .frame(width: 190, height: 28)
+        .id(hotKey.displayString)
       Button("Reset") {
         hotKey = defaultHotKey
       }

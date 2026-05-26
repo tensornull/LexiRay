@@ -1,4 +1,5 @@
 import AppKit
+import Markdown
 import SwiftUI
 
 struct RichTranslationText: View {
@@ -7,22 +8,141 @@ struct RichTranslationText: View {
   var lineLimit: Int?
 
   var body: some View {
-    Text(RichTranslationRenderer.attributedString(for: text))
-      .font(font)
-      .textSelection(.enabled)
-      .fixedSize(horizontal: false, vertical: true)
-      .frame(maxWidth: .infinity, alignment: .topLeading)
-      .lineLimit(lineLimit)
+    RichTranslationContentView(text: text, font: font, lineLimit: lineLimit)
   }
 }
 
+struct RichTranslationContentView: View {
+  let text: String
+  var font: Font
+  var lineLimit: Int?
+
+  private var blocks: [RichTranslationBlock] {
+    RichTranslationRenderer.blocks(for: text)
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+        blockView(block)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .topLeading)
+  }
+
+  @ViewBuilder
+  private func blockView(_ block: RichTranslationBlock) -> some View {
+    switch block {
+    case let .text(attributed):
+      Text(attributed)
+        .font(font)
+        .textSelection(.enabled)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .lineLimit(lineLimit)
+    case let .heading(level, attributed):
+      Text(attributed)
+        .font(headingFont(level: level))
+        .textSelection(.enabled)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    case let .listItem(index, attributed):
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        Text(index.map { "\($0)." } ?? "•")
+          .font(font)
+          .foregroundStyle(.secondary)
+          .frame(width: index == nil ? 12 : 24, alignment: .trailing)
+        Text(attributed)
+          .font(font)
+          .textSelection(.enabled)
+          .fixedSize(horizontal: false, vertical: true)
+          .frame(maxWidth: .infinity, alignment: .topLeading)
+      }
+    case let .quote(attributed):
+      HStack(alignment: .top, spacing: 10) {
+        Rectangle()
+          .fill(Color.secondary.opacity(0.35))
+          .frame(width: 3)
+        Text(attributed)
+          .font(font)
+          .foregroundStyle(.secondary)
+          .textSelection(.enabled)
+          .fixedSize(horizontal: false, vertical: true)
+          .frame(maxWidth: .infinity, alignment: .topLeading)
+      }
+    case let .code(language, code):
+      VStack(alignment: .leading, spacing: 6) {
+        if let language, !language.isEmpty {
+          Text(language)
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(.secondary)
+        }
+        ScrollView(.horizontal, showsIndicators: true) {
+          Text(code)
+            .font(.system(.body, design: .monospaced))
+            .textSelection(.enabled)
+            .fixedSize(horizontal: true, vertical: true)
+            .padding(10)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .topLeading)
+      .background(Color(nsColor: .textBackgroundColor).opacity(0.42), in: RoundedRectangle(cornerRadius: 6))
+      .overlay {
+        RoundedRectangle(cornerRadius: 6)
+          .stroke(Color(nsColor: .separatorColor).opacity(0.38), lineWidth: 1)
+      }
+    }
+  }
+
+  private func headingFont(level: Int) -> Font {
+    switch level {
+    case 1:
+      .title3.weight(.semibold)
+    case 2:
+      .headline.weight(.semibold)
+    default:
+      font.weight(.semibold)
+    }
+  }
+}
+
+enum RichTranslationBlock: Equatable {
+  case text(AttributedString)
+  case heading(Int, AttributedString)
+  case listItem(Int?, AttributedString)
+  case quote(AttributedString)
+  case code(language: String?, code: String)
+}
+
 enum RichTranslationRenderer {
+  static func blocks(for text: String) -> [RichTranslationBlock] {
+    if looksLikeHTML(text), let html = htmlAttributedString(for: text) {
+      return [.text(html)]
+    }
+
+    if let language = SourceMarkdownPreparer.inferredCodeLanguage(for: text), !looksLikeMarkdown(text) {
+      return [.code(language: language, code: text)]
+    }
+
+    if looksLikeMarkdown(text) {
+      let document = Document(parsing: markdownPreservingVisibleLineBreaks(text))
+      let rendered = document.children.flatMap(renderBlock)
+      if !rendered.isEmpty {
+        return rendered
+      }
+    }
+
+    return [.text(AttributedString(text))]
+  }
+
   static func attributedString(for text: String) -> AttributedString {
     if looksLikeHTML(text), let html = htmlAttributedString(for: text) {
       return html
     }
 
-    if let markdown = try? AttributedString(markdown: text) {
+    if looksLikeMarkdown(text),
+       let markdown = try? AttributedString(markdown: markdownPreservingVisibleLineBreaks(text))
+    {
       return markdown
     }
 
@@ -30,7 +150,15 @@ enum RichTranslationRenderer {
   }
 
   static func plainString(for text: String) -> String {
-    String(attributedString(for: text).characters)
+    blocks(for: text).map { block in
+      switch block {
+      case let .text(attributed), let .heading(_, attributed), let .listItem(_, attributed), let .quote(attributed):
+        String(attributed.characters)
+      case let .code(_, code):
+        code
+      }
+    }
+    .joined(separator: "\n")
   }
 
   static func htmlString(for text: String) -> String {
@@ -79,11 +207,214 @@ enum RichTranslationRenderer {
     return sanitized
   }
 
+  static func markdownPreservingVisibleLineBreaks(_ markdown: String) -> String {
+    let lines = markdown.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    var result: [String] = []
+    var isInFence = false
+
+    for index in lines.indices {
+      let line = lines[index]
+      let trimmed = line.trimmingCharacters(in: .whitespaces)
+      let isFenceLine = trimmed.hasPrefix("```")
+
+      result.append(line)
+
+      if isFenceLine {
+        isInFence.toggle()
+      }
+
+      guard index < lines.index(before: lines.endIndex), !isInFence, !isFenceLine else {
+        continue
+      }
+
+      let nextLine = lines[lines.index(after: index)]
+      if shouldPreserveVisibleBreak(after: line, before: nextLine) {
+        result[result.index(before: result.endIndex)] += "  "
+      }
+    }
+
+    return result.joined(separator: "\n")
+  }
+
+  private static func renderBlock(_ markup: Markup) -> [RichTranslationBlock] {
+    switch markup {
+    case let heading as Heading:
+      [.heading(heading.level, inlineAttributedString(for: heading))]
+    case let paragraph as Paragraph:
+      renderProseWithStructuredTail(
+        paragraph.format().trimmedForQuery,
+        textBlock: { .text($0) }
+      )
+    case let codeBlock as CodeBlock:
+      [.code(language: codeBlock.language, code: codeBlock.code.trimmingSingleTrailingNewline)]
+    case let unorderedList as UnorderedList:
+      unorderedList.children.flatMap { renderListItem($0, index: nil) }
+    case let orderedList as OrderedList:
+      orderedList.children.enumerated().flatMap { offset, item in
+        renderListItem(item, index: offset + 1)
+      }
+    case let blockQuote as BlockQuote:
+      [.quote(inlineAttributedString(for: blockQuote))]
+    default:
+      markup.children.flatMap(renderBlock)
+    }
+  }
+
+  private static func renderListItem(_ item: Markup, index: Int?) -> [RichTranslationBlock] {
+    let children = Array(item.children)
+    if children.count >= 2,
+       let paragraph = children[0] as? Paragraph,
+       let codeBlock = children[1] as? CodeBlock
+    {
+      let prose = paragraph.format().trimmedForQuery.removingMarkdownListMarker
+      if prose.hasSuffix("{") || prose.hasSuffix("[") {
+        let marker = String(prose.suffix(1))
+        let trimmedProse = String(prose.dropLast()).trimmedForQuery
+        let code = [marker, codeBlock.code.trimmingSingleTrailingNewline]
+          .joined(separator: "\n")
+          .removingMarkdownContinuationIndent
+        return [
+          .listItem(index, inlineAttributedString(forMarkdown: trimmedProse)),
+          .code(language: SourceMarkdownPreparer.inferredCodeLanguage(for: code) ?? codeBlock.language, code: code)
+        ]
+      }
+    }
+
+    return renderProseWithStructuredTail(
+      item.format().trimmedForQuery.removingMarkdownListMarker,
+      textBlock: { .listItem(index, $0) }
+    )
+  }
+
+  private static func renderProseWithStructuredTail(
+    _ markdown: String,
+    textBlock: (AttributedString) -> RichTranslationBlock
+  ) -> [RichTranslationBlock] {
+    guard let split = splitStructuredTail(in: markdown) else {
+      return [textBlock(inlineAttributedString(forMarkdown: markdown))]
+    }
+
+    var blocks: [RichTranslationBlock] = []
+    if !split.prose.isEmpty {
+      blocks.append(textBlock(inlineAttributedString(forMarkdown: split.prose)))
+    }
+    blocks.append(.code(language: split.language, code: split.code))
+    return blocks
+  }
+
+  private static func splitStructuredTail(in markdown: String) -> (prose: String, language: String, code: String)? {
+    let lines = markdown.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    guard lines.count >= 3 else {
+      return nil
+    }
+
+    for index in lines.indices {
+      if let sameLineSplit = splitStructuredTailStartingOnLine(lines: lines, index: index) {
+        return sameLineSplit
+      }
+
+      let tail = lines[index...].joined(separator: "\n").trimmedForQuery.removingMarkdownContinuationIndent
+      let code = tail.normalizingMarkdownSmartQuotesForCode
+      guard let language = SourceMarkdownPreparer.inferredCodeLanguage(for: code) else {
+        continue
+      }
+
+      var prose = lines[..<index].joined(separator: "\n").trimmedForQuery
+      guard !prose.isEmpty else {
+        return nil
+      }
+
+      var normalizedCode = code
+      if prose.hasSuffix("{") || prose.hasSuffix("[") {
+        let marker = String(prose.suffix(1))
+        prose = String(prose.dropLast()).trimmedForQuery
+        normalizedCode = [marker, normalizedCode].joined(separator: "\n")
+      }
+
+      return (prose: prose, language: language, code: normalizedCode)
+    }
+
+    return nil
+  }
+
+  private static func splitStructuredTailStartingOnLine(
+    lines: [String],
+    index: Int
+  ) -> (prose: String, language: String, code: String)? {
+    let line = lines[index]
+    guard let markerRange = line.range(of: #"[\{\[]"#, options: .regularExpression),
+          markerRange.lowerBound > line.startIndex
+    else {
+      return nil
+    }
+
+    let tailFirstLine = String(line[markerRange.lowerBound...])
+    let tail = ([tailFirstLine] + Array(lines[(index + 1)...]))
+      .joined(separator: "\n")
+      .trimmedForQuery
+      .removingMarkdownContinuationIndent
+      .normalizingMarkdownSmartQuotesForCode
+    guard let language = SourceMarkdownPreparer.inferredCodeLanguage(for: tail) else {
+      return nil
+    }
+
+    let proseFirstLine = String(line[..<markerRange.lowerBound]).trimmedForQuery
+    let prose = (Array(lines[..<index]) + [proseFirstLine])
+      .joined(separator: "\n")
+      .trimmedForQuery
+    guard !prose.isEmpty else {
+      return nil
+    }
+
+    return (prose: prose, language: language, code: tail)
+  }
+
+  private static func inlineAttributedString(for markup: Markup) -> AttributedString {
+    inlineAttributedString(forMarkdown: markup.format().trimmedForQuery)
+  }
+
+  private static func inlineAttributedString(forMarkdown markdown: String) -> AttributedString {
+    if let attributed = try? AttributedString(markdown: markdownPreservingVisibleLineBreaks(markdown)) {
+      return attributed
+    }
+    return AttributedString(markdown)
+  }
+
   private static func looksLikeHTML(_ text: String) -> Bool {
     text.range(
       of: #"<[A-Za-z][A-Za-z0-9:-]*(\s|>|/)"#,
       options: .regularExpression
     ) != nil
+  }
+
+  private static func looksLikeMarkdown(_ text: String) -> Bool {
+    let patterns = [
+      #"(?m)^\s{0,3}#{1,6}\s+"#,
+      #"(?m)^\s{0,3}([-*+]|\d+\.)\s+"#,
+      #"(?m)^\s{0,3}>\s+"#,
+      #"```"#,
+      #"`[^`\n]+`"#,
+      #"\*\*[^*\n]+\*\*"#,
+      #"__[^_\n]+__"#,
+      #"\[[^\]\n]+\]\([^)]+\)"#
+    ]
+
+    return patterns.contains { pattern in
+      text.range(of: pattern, options: .regularExpression) != nil
+    }
+  }
+
+  private static func shouldPreserveVisibleBreak(after line: String, before nextLine: String) -> Bool {
+    if line.isEmpty || nextLine.isEmpty {
+      return false
+    }
+
+    let trimmed = line.trimmingCharacters(in: .whitespaces)
+    if trimmed.hasSuffix("  ") || trimmed.hasSuffix("\\") {
+      return false
+    }
+
+    return true
   }
 
   private static func htmlAttributedString(for html: String) -> AttributedString? {

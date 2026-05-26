@@ -243,37 +243,66 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   }
 
   private static func contentHeight(for controller: LexiRayController) -> CGFloat {
-    if controller.isExpanded {
-      return 420
-    }
-
+    let maximumHeight = maximumContentHeight(isExpanded: controller.isExpanded)
     switch controller.panelState {
     case .idle:
       return 330
     case let .loading(state):
       let preview = state.preview ?? state.title
-      return preview.count > 120 ? 390 : 360
+      let estimatedHeight = 300 + estimatedTextHeight(preview, charsPerLine: 54)
+      return clampedContentHeight(estimatedHeight, minimum: 360, maximum: maximumHeight)
     case let .error(message):
-      return message.count > 110 ? 420 : 380
+      let estimatedHeight = 320 + estimatedTextHeight(message, charsPerLine: 54)
+      return clampedContentHeight(estimatedHeight, minimum: 380, maximum: maximumHeight)
     case let .batch(batch):
-      let baseHeight: CGFloat = controller.isExpanded ? 620 : 500
-      let rowHeight = batch.entries.reduce(CGFloat(0)) { height, entry in
-        height + (entry.status.isDisabled ? 36 : 84)
+      let estimatedHeight = batch.entries.reduce(CGFloat(224)) { height, entry in
+        height + estimatedEntryHeight(entry, isExpanded: controller.isExpanded)
       }
-      return min(baseHeight, max(390, rowHeight + 224))
+      return clampedContentHeight(estimatedHeight, minimum: 390, maximum: maximumHeight)
     case let .result(result):
-      let text = result.translatedText
-      if text.count > 260 || text.lineCount > 6 {
-        return 460
-      }
-      if text.count > 120 || text.lineCount > 3 {
-        return 420
-      }
-      return 390
+      let estimatedHeight = 278 + estimatedTextHeight(result.translatedText, charsPerLine: 48)
+      return clampedContentHeight(estimatedHeight, minimum: 390, maximum: maximumHeight)
     }
   }
 
-  nonisolated private static func isSubmitShortcut(_ event: NSEvent) -> Bool {
+  static func maximumContentHeight(isExpanded: Bool) -> CGFloat {
+    let mouseLocation = NSEvent.mouseLocation
+    let screen = NSScreen.screens.first { NSMouseInRect(mouseLocation, $0.frame, false) } ?? NSScreen.main
+    let visibleHeight = screen?.visibleFrame.height ?? 900
+    let appMaximum: CGFloat = isExpanded ? 760 : 680
+    return max(390, min(appMaximum, visibleHeight - 96))
+  }
+
+  private static func clampedContentHeight(_ height: CGFloat, minimum: CGFloat, maximum: CGFloat) -> CGFloat {
+    min(maximum, max(minimum, height.rounded(.up)))
+  }
+
+  private static func estimatedEntryHeight(_ entry: ProviderTranslationEntry, isExpanded: Bool) -> CGFloat {
+    switch entry.status {
+    case .disabled:
+      38
+    case .translating:
+      64
+    case let .streaming(text):
+      54 + estimatedTextHeight(text, charsPerLine: isExpanded ? 54 : 48)
+    case let .success(result):
+      54 + estimatedTextHeight(result.translatedText, charsPerLine: isExpanded ? 54 : 48)
+    case let .failure(message):
+      54 + estimatedTextHeight(message, charsPerLine: 54)
+    }
+  }
+
+  private static func estimatedTextHeight(_ text: String, charsPerLine: Int) -> CGFloat {
+    CGFloat(estimatedLineCount(text, charsPerLine: charsPerLine)) * 22
+  }
+
+  private static func estimatedLineCount(_ text: String, charsPerLine: Int) -> Int {
+    text.components(separatedBy: .newlines).reduce(0) { count, line in
+      count + max(1, Int(ceil(Double(max(1, line.count)) / Double(charsPerLine))))
+    }
+  }
+
+  private nonisolated static func isSubmitShortcut(_ event: NSEvent) -> Bool {
     let keyCode = event.keyCode
     return (keyCode == 36 || keyCode == 76)
       && event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command)

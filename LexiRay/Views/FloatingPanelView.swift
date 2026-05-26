@@ -176,8 +176,9 @@ struct FloatingPanelView: View {
         controller: controller,
         batch: batch,
         showsSourcePreview: false,
-        resultLineLimit: controller.isExpanded ? nil : 6
+        resultLineLimit: nil
       )
+      .padding(.trailing, 12)
       .frame(maxWidth: .infinity, alignment: .topLeading)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -217,8 +218,9 @@ struct FloatingPanelView: View {
 
   private func openSettings() {
     controller.openSettingsFromFloatingPanel()
+    AppWindowPresenter.requestMainWindowPresentation()
     openWindow(id: "main")
-    AppWindowPresenter.bringMainWindowToFrontSoon()
+    AppWindowPresenter.presentMainWindowIfAvailable()
   }
 
   private var statusTitle: String {
@@ -310,9 +312,9 @@ struct FloatingPanelView: View {
     batch.entries.contains { entry in
       switch entry.status {
       case .translating, .streaming:
-        return true
+        true
       case .disabled, .success, .failure:
-        return false
+        false
       }
     }
   }

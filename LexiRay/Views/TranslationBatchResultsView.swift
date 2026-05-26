@@ -66,9 +66,8 @@ private struct ProviderTranslationResultRow: View {
   var body: some View {
     VStack(alignment: .leading, spacing: compact ? 7 : 8) {
       HStack(alignment: .center, spacing: 8) {
-        Image(systemName: entry.providerID.systemImage)
-          .foregroundStyle(.secondary)
-          .frame(width: 15)
+        ProviderIconView(providerID: entry.providerID)
+          .frame(width: 17)
 
         Text(entry.providerName)
           .font((compact ? Font.callout : Font.body).weight(.semibold))
