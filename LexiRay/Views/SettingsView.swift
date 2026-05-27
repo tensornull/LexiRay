@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct DashboardSettingsView: View {
+  @Environment(\.scenePhase) private var scenePhase
   @ObservedObject var controller: LexiRayController
+  @State private var permissions = PermissionStatus.current
 
   private var settings: SettingsStore {
     controller.settings
@@ -14,6 +16,13 @@ struct DashboardSettingsView: View {
       floatingPanel
       permissionPanel
       advancedPanel
+    }
+    .onAppear(perform: refreshPermissions)
+    .onChange(of: scenePhase) { _, newPhase in
+      guard newPhase == .active else {
+        return
+      }
+      refreshPermissions()
     }
   }
 
@@ -70,15 +79,15 @@ struct DashboardSettingsView: View {
       VStack(alignment: .leading, spacing: 10) {
         PermissionSettingsRow(
           title: "Accessibility",
-          detail: PermissionService.isAccessibilityTrusted ? "Enabled" : "Needed for selected text",
-          isEnabled: PermissionService.isAccessibilityTrusted,
+          detail: permissions.isAccessibilityTrusted ? "Enabled" : "Needed for selected text",
+          isEnabled: permissions.isAccessibilityTrusted,
           action: PermissionService.openAccessibilitySettings
         )
 
         PermissionSettingsRow(
           title: "Screen Recording",
-          detail: PermissionService.isScreenCaptureTrusted ? "Enabled" : "Needed for OCR",
-          isEnabled: PermissionService.isScreenCaptureTrusted,
+          detail: permissions.isScreenCaptureTrusted ? "Enabled" : "Needed for OCR",
+          isEnabled: permissions.isScreenCaptureTrusted,
           action: PermissionService.openScreenCaptureSettings
         )
 
@@ -135,6 +144,22 @@ struct DashboardSettingsView: View {
     Binding(
       get: { settings.floatingPanelPlacement },
       set: { settings.floatingPanelPlacement = $0 }
+    )
+  }
+
+  private func refreshPermissions() {
+    permissions = .current
+  }
+}
+
+private struct PermissionStatus: Equatable {
+  let isAccessibilityTrusted: Bool
+  let isScreenCaptureTrusted: Bool
+
+  static var current: PermissionStatus {
+    PermissionStatus(
+      isAccessibilityTrusted: PermissionService.isAccessibilityTrusted,
+      isScreenCaptureTrusted: PermissionService.isScreenCaptureTrusted
     )
   }
 }

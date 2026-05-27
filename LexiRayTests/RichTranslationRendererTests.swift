@@ -51,6 +51,23 @@ final class RichTranslationRendererTests: XCTestCase {
     XCTAssertTrue(blocks.contains { if case .code("json", #"{"ok": true}"#) = $0 { true } else { false } })
   }
 
+  func testCollapsedChangelogMarkdownBuildsBlockModel() {
+    let markdown = "# 更新日志 本项目的所有显著变更都将记录在此文件中。 格式基于 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，并且本项目遵循 [语义化版本控制](https://semver.org/spec/v2.0.0.html)。 ## [0.3.0] - 2026-05-26 ### 新增 - `models` 现在默认读取公共模型目录。 - `model info` 显示模型的详细目录元数据。"
+
+    let blocks = RichTranslationRenderer.blocks(for: markdown)
+    let plain = RichTranslationRenderer.plainString(for: markdown)
+
+    XCTAssertTrue(blocks.contains { if case let .heading(1, text) = $0 { String(text.characters) == "更新日志" } else { false } })
+    XCTAssertTrue(blocks.contains { if case .heading(2, _) = $0 { true } else { false } })
+    XCTAssertTrue(blocks.contains { if case .heading(3, _) = $0 { true } else { false } })
+    XCTAssertEqual(blocks.count(where: { if case .listItem = $0 { true } else { false } }), 2)
+    XCTAssertTrue(plain.contains("Keep a Changelog"))
+    XCTAssertTrue(plain.contains("models 现在默认读取公共模型目录。"))
+    XCTAssertFalse(plain.contains("# 更新日志"))
+    XCTAssertFalse(plain.contains("[Keep a Changelog]("))
+    XCTAssertFalse(plain.contains("`models`"))
+  }
+
   func testStructuredPlainTextBuildsCodeBlock() {
     let blocks = RichTranslationRenderer.blocks(for: """
     {

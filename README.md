@@ -30,7 +30,7 @@ Generate and build:
 
 ```bash
 xcodegen generate
-xcodebuild -project LexiRay.xcodeproj -scheme LexiRay -configuration Debug CODE_SIGNING_ALLOWED=NO build
+./script/build_and_run.sh --verify
 ```
 
 Run from Codex or terminal:
@@ -39,10 +39,24 @@ Run from Codex or terminal:
 ./script/build_and_run.sh
 ```
 
+The run script owns the local development SOP: it removes stale development app bundles,
+creates a stable `LexiRay Local Development` signing identity when needed, signs the
+workspace debug app with it, disables Debug dylib splitting for local runs, verifies the
+result is not ad hoc signed, and launches only:
+
+```text
+build/DerivedData/Build/Products/Debug/LexiRay.app
+```
+
+Grant Accessibility and Screen & System Audio Recording to that app once in System
+Settings. Normal rebuilds should not reset TCC or require reauthorizing permissions.
+
 Run tests:
 
 ```bash
+./script/clean_dev_apps.sh --apply
 xcodebuild test -project LexiRay.xcodeproj -scheme LexiRay -configuration Debug CODE_SIGNING_ALLOWED=NO
+./script/clean_dev_apps.sh --apply
 ```
 
 ## Clean-Room Rule

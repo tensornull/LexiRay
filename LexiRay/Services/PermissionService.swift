@@ -38,6 +38,7 @@ enum PermissionService {
   }
 
   static func openAccessibilitySettings() {
+    requestAccessibilityIfNeeded(prompt: true)
     openSettings(path: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
   }
 
@@ -55,6 +56,7 @@ enum PermissionService {
   }
 
   static func openScreenCaptureSettings() {
+    requestScreenCaptureIfNeeded()
     openSettings(path: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
   }
 

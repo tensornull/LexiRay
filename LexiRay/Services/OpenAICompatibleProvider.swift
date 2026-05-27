@@ -317,6 +317,7 @@ enum TranslationPrompt {
     Translate the user's text into \(targetLanguage). Return only the translation.
 
     Preserve paragraph count, paragraph order, blank lines, Markdown structure, fenced code block boundaries, names, numbers, URLs, keys, and identifiers.
+    Preserve actual newline characters in Markdown. Do not collapse Markdown headings, lists, quotes, or code fences into one paragraph.
     If the input contains fenced code blocks, keep the fences and language tags. Inside code blocks, translate only natural-language prose, comments, or string values when that is clearly intended; do not change JSON keys, code syntax, indentation, or punctuation.
     Never convert a fenced code block into a bullet list, paragraph, quote, or inline text.
     Do not merge separate paragraphs. Do not add explanations.
@@ -502,7 +503,7 @@ private func makeStreamingTranslation(
           continuation.yield(.partial(accumulatedText))
         case let .finalText(text):
           finalText = text
-          continuation.yield(.partial(text))
+          continuation.yield(.partial(preferredStreamText(finalText: text, accumulatedText: accumulatedText)))
         case .done:
           shouldStop = true
         }
@@ -523,7 +524,7 @@ private func makeStreamingTranslation(
           try handle(event)
         }
 
-        guard let translatedText = (finalText ?? accumulatedText).nonEmptyTrimmed else {
+        guard let translatedText = preferredStreamText(finalText: finalText, accumulatedText: accumulatedText).nonEmptyTrimmed else {
           throw TranslationError.invalidResponse
         }
 
@@ -548,6 +549,55 @@ private func makeStreamingTranslation(
       task.cancel()
     }
   }
+}
+
+private func preferredStreamText(finalText: String?, accumulatedText: String) -> String {
+  guard let finalText = finalText?.nonEmptyTrimmed else {
+    return accumulatedText
+  }
+
+  guard let accumulatedText = accumulatedText.nonEmptyTrimmed else {
+    return finalText
+  }
+
+  if isMarkdownStructureDowngrade(finalText: finalText, accumulatedText: accumulatedText) {
+    return accumulatedText
+  }
+
+  return finalText
+}
+
+private func isMarkdownStructureDowngrade(finalText: String, accumulatedText: String) -> Bool {
+  let accumulatedScore = markdownBlockStructureScore(accumulatedText)
+  guard accumulatedScore > 0 else {
+    return false
+  }
+
+  let finalScore = markdownBlockStructureScore(finalText)
+  let accumulatedLines = nonEmptyLineCount(accumulatedText)
+  let finalLines = nonEmptyLineCount(finalText)
+
+  return finalScore < accumulatedScore && accumulatedLines >= finalLines + 1
+}
+
+private func markdownBlockStructureScore(_ text: String) -> Int {
+  countMatches(
+    in: text,
+    pattern: #"(?m)^\s{0,3}(?:#{1,6}\s+|[-*+]\s+|\d+\.\s+|>\s+|```)"#
+  )
+}
+
+private func nonEmptyLineCount(_ text: String) -> Int {
+  text.components(separatedBy: .newlines).filter { !$0.trimmedForQuery.isEmpty }.count
+}
+
+private func countMatches(in text: String, pattern: String) -> Int {
+  guard let expression = try? NSRegularExpression(pattern: pattern) else {
+    return 0
+  }
+
+  let range = NSRange(text.startIndex ..< text.endIndex, in: text)
+  return expression.numberOfMatches(in: text, range: range)
 }
 
 private enum ProviderStreamAction {

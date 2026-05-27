@@ -124,8 +124,9 @@ enum RichTranslationRenderer {
       return [.code(language: language, code: text)]
     }
 
-    if looksLikeMarkdown(text) {
-      let document = Document(parsing: markdownPreservingVisibleLineBreaks(text))
+    let markdown = markdownPreparedForRendering(text)
+    if looksLikeMarkdown(markdown) {
+      let document = Document(parsing: markdownPreservingVisibleLineBreaks(markdown))
       let rendered = document.children.flatMap(renderBlock)
       if !rendered.isEmpty {
         return rendered
@@ -140,8 +141,9 @@ enum RichTranslationRenderer {
       return html
     }
 
-    if looksLikeMarkdown(text),
-       let markdown = try? AttributedString(markdown: markdownPreservingVisibleLineBreaks(text))
+    let renderableMarkdown = markdownPreparedForRendering(text)
+    if looksLikeMarkdown(renderableMarkdown),
+       let markdown = try? AttributedString(markdown: markdownPreservingVisibleLineBreaks(renderableMarkdown))
     {
       return markdown
     }
@@ -234,6 +236,78 @@ enum RichTranslationRenderer {
     }
 
     return result.joined(separator: "\n")
+  }
+
+  private static func markdownPreparedForRendering(_ text: String) -> String {
+    guard looksLikeMarkdown(text), !looksLikeHTML(text), !containsCodeFence(text) else {
+      return text
+    }
+
+    let restoredBlocks = restoreCollapsedMarkdownBlockBreaks(in: text)
+    return splitCollapsedHeadingProse(in: restoredBlocks)
+  }
+
+  private static func restoreCollapsedMarkdownBlockBreaks(in text: String) -> String {
+    var restored = text
+    restored = replacingMatches(
+      in: restored,
+      pattern: #"([^\n])\s+(#{1,6}\s+)"#,
+      options: [],
+      with: "$1\n$2"
+    )
+
+    if hasMarkdownBlockHeading(restored) || countMatches(in: restored, pattern: #"(?m)(?:^|\s)(?:[-*+]\s+(?!\d{4}-\d{2}-\d{2})|\d+\.\s+)\S"#) >= 2 {
+      restored = replacingMatches(
+        in: restored,
+        pattern: #"([^\n])\s+((?:[-*+]\s+(?!\d{4}-\d{2}-\d{2})|\d+\.\s+)(?=\S))"#,
+        options: [],
+        with: "$1\n$2"
+      )
+    }
+
+    if hasMarkdownBlockHeading(restored) || countMatches(in: restored, pattern: #"\s>\s+\S"#) >= 1 {
+      restored = replacingMatches(
+        in: restored,
+        pattern: #"([^\n])\s+(>\s+(?=\S))"#,
+        options: [],
+        with: "$1\n$2"
+      )
+    }
+
+    return restored
+  }
+
+  private static func splitCollapsedHeadingProse(in text: String) -> String {
+    text
+      .split(separator: "\n", omittingEmptySubsequences: false)
+      .flatMap { splitCollapsedHeadingLine(String($0)) }
+      .joined(separator: "\n")
+  }
+
+  private static func splitCollapsedHeadingLine(_ line: String) -> [String] {
+    guard let match = firstMatch(in: line, pattern: #"^(#{1,6})\s+(\S+)\s+(.+)$"#),
+          let markerRange = Range(match.range(at: 1), in: line),
+          let titleRange = Range(match.range(at: 2), in: line),
+          let remainderRange = Range(match.range(at: 3), in: line)
+    else {
+      return [line]
+    }
+
+    let marker = String(line[markerRange])
+    let title = String(line[titleRange])
+    let remainder = String(line[remainderRange])
+    guard title.count <= 32, looksLikeCollapsedHeadingRemainder(remainder) else {
+      return [line]
+    }
+
+    return ["\(marker) \(title)", remainder]
+  }
+
+  private static func looksLikeCollapsedHeadingRemainder(_ text: String) -> Bool {
+    text.range(of: #"^((?:[-*+]\s+(?!\d{4}-\d{2}-\d{2})|\d+\.\s+)|>\s+|#{1,6}\s+)"#, options: .regularExpression) != nil
+      || text.range(of: #"\[[^\]\n]+\]\([^)]+\)"#, options: .regularExpression) != nil
+      || text.range(of: #"[。！？.!?]"#, options: .regularExpression) != nil
+      || text.count >= 60
   }
 
   private static func renderBlock(_ markup: Markup) -> [RichTranslationBlock] {
@@ -387,6 +461,14 @@ enum RichTranslationRenderer {
     ) != nil
   }
 
+  private static func containsCodeFence(_ text: String) -> Bool {
+    text.range(of: #"```"#, options: .regularExpression) != nil
+  }
+
+  private static func hasMarkdownBlockHeading(_ text: String) -> Bool {
+    text.range(of: #"(?m)^\s{0,3}#{1,6}\s+"#, options: .regularExpression) != nil
+  }
+
   private static func looksLikeMarkdown(_ text: String) -> Bool {
     let patterns = [
       #"(?m)^\s{0,3}#{1,6}\s+"#,
@@ -449,6 +531,24 @@ enum RichTranslationRenderer {
 
     let range = NSRange(text.startIndex ..< text.endIndex, in: text)
     return expression.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: replacement)
+  }
+
+  private static func countMatches(in text: String, pattern: String) -> Int {
+    guard let expression = try? NSRegularExpression(pattern: pattern) else {
+      return 0
+    }
+
+    let range = NSRange(text.startIndex ..< text.endIndex, in: text)
+    return expression.numberOfMatches(in: text, range: range)
+  }
+
+  private static func firstMatch(in text: String, pattern: String) -> NSTextCheckingResult? {
+    guard let expression = try? NSRegularExpression(pattern: pattern) else {
+      return nil
+    }
+
+    let range = NSRange(text.startIndex ..< text.endIndex, in: text)
+    return expression.firstMatch(in: text, range: range)
   }
 
   private static func escapeHTML(_ text: String) -> String {

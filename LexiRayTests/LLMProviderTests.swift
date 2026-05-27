@@ -99,6 +99,34 @@ final class LLMProviderTests: XCTestCase {
     XCTAssertEqual(try client.boolBodyValue("stream"), true)
   }
 
+  func testOpenAIResponsesKeepsStructuredMarkdownWhenFinalTextIsCollapsed() async throws {
+    let structuredMarkdown = "# 更新日志\n\n本项目的所有显著变更都将记录在此文件中。\n\n## [0.3.0] - 2026-05-26\n\n### 新增\n\n- `models` 现在默认读取公共模型目录。\n- `model info` 显示模型的详细目录元数据。"
+    let collapsedMarkdown = "# 更新日志 本项目的所有显著变更都将记录在此文件中。 ## [0.3.0] - 2026-05-26 ### 新增 - `models` 现在默认读取公共模型目录。 - `model info` 显示模型的详细目录元数据。"
+    let client = MockHTTPClient(
+      responseJSON: "{}",
+      streamLines: [
+        "event: response.output_text.delta",
+        "data: \(try jsonObjectLine(type: "response.output_text.delta", key: "delta", value: structuredMarkdown))",
+        "",
+        "event: response.output_text.done",
+        "data: \(try jsonObjectLine(type: "response.output_text.done", key: "text", value: collapsedMarkdown))",
+        "",
+        "event: response.completed",
+        #"data: {"type":"response.completed"}"#,
+        ""
+      ]
+    )
+    let provider = OpenAIResponsesProvider(
+      configuration: makeConfiguration(provider: .openAIResponses),
+      client: client
+    )
+
+    let (partials, result) = try await collectStream(from: provider)
+
+    XCTAssertEqual(partials.last, structuredMarkdown)
+    XCTAssertEqual(result?.translatedText, structuredMarkdown)
+  }
+
   func testAnthropicMessagesRequestAndResponse() async throws {
     let client = MockHTTPClient(responseJSON: #"{"content":[{"type":"text","text":"你好"}]}"#)
     let provider = AnthropicMessagesProvider(
@@ -321,4 +349,13 @@ private final class MockHTTPClient: HTTPClient {
   func boolBodyValue(_ key: String) throws -> Bool? {
     try jsonBody()[key] as? Bool
   }
+}
+
+private func jsonObjectLine(type: String, key: String, value: String) throws -> String {
+  let object = [
+    "type": type,
+    key: value
+  ]
+  let data = try JSONSerialization.data(withJSONObject: object)
+  return try XCTUnwrap(String(data: data, encoding: .utf8))
 }
