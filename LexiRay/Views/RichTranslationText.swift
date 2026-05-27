@@ -33,43 +33,26 @@ struct RichTranslationContentView: View {
   @ViewBuilder
   private func blockView(_ block: RichTranslationBlock) -> some View {
     switch block {
-    case let .text(attributed):
-      Text(attributed)
-        .font(font)
-        .textSelection(.enabled)
-        .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .lineLimit(lineLimit)
-    case let .heading(level, attributed):
-      Text(attributed)
-        .font(headingFont(level: level))
-        .textSelection(.enabled)
-        .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    case let .listItem(index, attributed):
+    case let .text(content):
+      RichInlineTextView(content: content, font: font, lineLimit: lineLimit)
+    case let .heading(level, content):
+      RichInlineTextView(content: content, font: headingFont(level: level), lineLimit: nil)
+    case let .listItem(index, content):
       HStack(alignment: .firstTextBaseline, spacing: 8) {
         Text(index.map { "\($0)." } ?? "•")
           .font(font)
           .foregroundStyle(Color.accentColor)
           .frame(width: index == nil ? 12 : 24, alignment: .trailing)
-        Text(attributed)
-          .font(font)
-          .textSelection(.enabled)
-          .fixedSize(horizontal: false, vertical: true)
-          .frame(maxWidth: .infinity, alignment: .topLeading)
+        RichInlineTextView(content: content, font: font, lineLimit: nil)
       }
       .padding(.vertical, 1)
-    case let .quote(attributed):
+    case let .quote(content):
       HStack(alignment: .top, spacing: 10) {
         Rectangle()
           .fill(Color.accentColor.opacity(0.65))
           .frame(width: 3)
-        Text(attributed)
-          .font(font)
+        RichInlineTextView(content: content, font: font, lineLimit: nil)
           .foregroundStyle(.secondary)
-          .textSelection(.enabled)
-          .fixedSize(horizontal: false, vertical: true)
-          .frame(maxWidth: .infinity, alignment: .topLeading)
       }
       .padding(.vertical, 5)
       .padding(.horizontal, 8)
@@ -88,6 +71,188 @@ struct RichTranslationContentView: View {
     default:
       font.weight(.semibold)
     }
+  }
+}
+
+private struct RichInlineTextView: View {
+  let content: RichInlineContent
+  let font: Font
+  let lineLimit: Int?
+
+  var body: some View {
+    Group {
+      if content.segments.contains(where: \.isCode) {
+        RichInlineFlowTextView(content: content, font: font)
+      } else {
+        Text(content.attributed)
+          .font(font)
+          .lineLimit(lineLimit)
+      }
+    }
+    .textSelection(.enabled)
+    .fixedSize(horizontal: false, vertical: true)
+    .frame(maxWidth: .infinity, alignment: .topLeading)
+  }
+}
+
+private struct RichInlineFlowTextView: View {
+  let content: RichInlineContent
+  let font: Font
+
+  private var tokens: [RichInlineToken] {
+    content.segments.flatMap { segment in
+      switch segment {
+      case let .text(attributed):
+        return textTokens(from: attributed).map(RichInlineToken.text)
+      case let .code(text):
+        return [.code(text)]
+      }
+    }
+  }
+
+  var body: some View {
+    InlineFlowLayout(verticalSpacing: 5) {
+      ForEach(Array(tokens.enumerated()), id: \.offset) { _, token in
+        switch token {
+        case let .text(attributed):
+          Text(attributed)
+            .font(font)
+        case let .code(text):
+          InlineCodeChip(text: text)
+        }
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .topLeading)
+  }
+
+  private func textTokens(from attributed: AttributedString) -> [AttributedString] {
+    guard !attributed.characters.isEmpty else {
+      return []
+    }
+
+    var tokens: [AttributedString] = []
+    var tokenStart = attributed.startIndex
+    var tokenIsWhitespace: Bool?
+    var index = attributed.startIndex
+
+    while index < attributed.endIndex {
+      let character = attributed.characters[index]
+      let isWhitespace = character.isInlineWhitespace
+      if tokenIsWhitespace == nil {
+        tokenIsWhitespace = isWhitespace
+        tokenStart = index
+      } else if tokenIsWhitespace != isWhitespace {
+        tokens.append(AttributedString(attributed[tokenStart ..< index]))
+        tokenStart = index
+        tokenIsWhitespace = isWhitespace
+      }
+      index = attributed.characters.index(after: index)
+    }
+
+    tokens.append(AttributedString(attributed[tokenStart ..< attributed.endIndex]))
+    return tokens.filter { !$0.characters.isEmpty }
+  }
+}
+
+private enum RichInlineToken {
+  case text(AttributedString)
+  case code(String)
+}
+
+private struct InlineCodeChip: View {
+  @Environment(\.colorScheme) private var colorScheme
+
+  let text: String
+
+  var body: some View {
+    Text(text)
+      .font(.system(.body, design: .monospaced).weight(.medium))
+      .foregroundStyle(.primary)
+      .lineLimit(1)
+      .padding(.horizontal, 5)
+      .padding(.vertical, 1.5)
+      .background(backgroundColor, in: RoundedRectangle(cornerRadius: 4))
+      .overlay {
+        RoundedRectangle(cornerRadius: 4)
+          .stroke(borderColor, lineWidth: 1)
+      }
+  }
+
+  private var backgroundColor: Color {
+    colorScheme == .dark ? Color.white.opacity(0.11) : Color.black.opacity(0.075)
+  }
+
+  private var borderColor: Color {
+    colorScheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.12)
+  }
+}
+
+private struct InlineFlowLayout: Layout {
+  var verticalSpacing: CGFloat
+
+  func sizeThatFits(
+    proposal: ProposedViewSize,
+    subviews: Subviews,
+    cache: inout ()
+  ) -> CGSize {
+    let maxWidth = proposal.width ?? .greatestFiniteMagnitude
+    var lineWidth: CGFloat = 0
+    var lineHeight: CGFloat = 0
+    var totalWidth: CGFloat = 0
+    var totalHeight: CGFloat = 0
+
+    for subview in subviews {
+      let size = subview.sizeThatFits(.unspecified)
+      if lineWidth > 0, lineWidth + size.width > maxWidth {
+        totalWidth = max(totalWidth, lineWidth)
+        totalHeight += lineHeight + verticalSpacing
+        lineWidth = 0
+        lineHeight = 0
+      }
+      lineWidth += size.width
+      lineHeight = max(lineHeight, size.height)
+    }
+
+    totalWidth = max(totalWidth, lineWidth)
+    totalHeight += lineHeight
+
+    return CGSize(
+      width: proposal.width.map { min(max(totalWidth, 0), $0) } ?? totalWidth,
+      height: totalHeight
+    )
+  }
+
+  func placeSubviews(
+    in bounds: CGRect,
+    proposal: ProposedViewSize,
+    subviews: Subviews,
+    cache: inout ()
+  ) {
+    let maxWidth = bounds.width
+    var x = bounds.minX
+    var y = bounds.minY
+    var lineHeight: CGFloat = 0
+
+    for subview in subviews {
+      let size = subview.sizeThatFits(.unspecified)
+      if x > bounds.minX, x + size.width > bounds.minX + maxWidth {
+        x = bounds.minX
+        y += lineHeight + verticalSpacing
+        lineHeight = 0
+      }
+      subview.place(
+        at: CGPoint(x: x, y: y),
+        proposal: ProposedViewSize(width: size.width, height: size.height)
+      )
+      x += size.width
+      lineHeight = max(lineHeight, size.height)
+    }
+  }
+}
+
+private extension Character {
+  var isInlineWhitespace: Bool {
+    unicodeScalars.allSatisfy { CharacterSet.whitespacesAndNewlines.contains($0) }
   }
 }
 
@@ -143,17 +308,51 @@ struct TranslationCodeBlockView: View {
 }
 
 enum RichTranslationBlock: Equatable {
-  case text(AttributedString)
-  case heading(Int, AttributedString)
-  case listItem(Int?, AttributedString)
-  case quote(AttributedString)
+  case text(RichInlineContent)
+  case heading(Int, RichInlineContent)
+  case listItem(Int?, RichInlineContent)
+  case quote(RichInlineContent)
   case code(language: String?, code: String)
+}
+
+struct RichInlineContent: Equatable {
+  let attributed: AttributedString
+  let segments: [RichInlineSegment]
+
+  var characters: AttributedString.CharacterView {
+    attributed.characters
+  }
+
+  var plainString: String {
+    segments.map(\.plainString).joined()
+  }
+}
+
+enum RichInlineSegment: Equatable {
+  case text(AttributedString)
+  case code(String)
+
+  var plainString: String {
+    switch self {
+    case let .text(attributed):
+      String(attributed.characters)
+    case let .code(text):
+      text
+    }
+  }
+
+  var isCode: Bool {
+    if case .code = self {
+      return true
+    }
+    return false
+  }
 }
 
 enum RichTranslationRenderer {
   static func blocks(for text: String) -> [RichTranslationBlock] {
     if looksLikeHTML(text), let html = htmlAttributedString(for: text) {
-      return [.text(html)]
+      return [.text(RichInlineContent(attributed: html, segments: [.text(html)]))]
     }
 
     if let language = SourceMarkdownPreparer.inferredCodeLanguage(for: text), !looksLikeMarkdown(text) {
@@ -169,7 +368,8 @@ enum RichTranslationRenderer {
       }
     }
 
-    return [.text(AttributedString(text))]
+    let attributed = AttributedString(text)
+    return [.text(RichInlineContent(attributed: attributed, segments: [.text(attributed)]))]
   }
 
   static func attributedString(for text: String) -> AttributedString {
@@ -181,7 +381,7 @@ enum RichTranslationRenderer {
     if looksLikeMarkdown(renderableMarkdown),
        let markdown = try? AttributedString(markdown: markdownPreservingVisibleLineBreaks(renderableMarkdown))
     {
-      return markdown
+      return styledInlineContent(markdown).attributed
     }
 
     return AttributedString(text)
@@ -190,8 +390,8 @@ enum RichTranslationRenderer {
   static func plainString(for text: String) -> String {
     blocks(for: text).map { block in
       switch block {
-      case let .text(attributed), let .heading(_, attributed), let .listItem(_, attributed), let .quote(attributed):
-        String(attributed.characters)
+      case let .text(content), let .heading(_, content), let .listItem(_, content), let .quote(content):
+        content.plainString
       case let .code(_, code):
         code
       }
@@ -349,7 +549,7 @@ enum RichTranslationRenderer {
   private static func renderBlock(_ markup: Markup) -> [RichTranslationBlock] {
     switch markup {
     case let heading as Heading:
-      [.heading(heading.level, inlineAttributedString(for: heading))]
+      [.heading(heading.level, inlineContent(for: heading))]
     case let paragraph as Paragraph:
       renderProseWithStructuredTail(
         paragraph.format().trimmedForQuery,
@@ -364,7 +564,7 @@ enum RichTranslationRenderer {
         renderListItem(item, index: offset + 1)
       }
     case let blockQuote as BlockQuote:
-      [.quote(inlineAttributedString(for: blockQuote))]
+      [.quote(inlineContent(for: blockQuote))]
     default:
       markup.children.flatMap(renderBlock)
     }
@@ -384,7 +584,7 @@ enum RichTranslationRenderer {
           .joined(separator: "\n")
           .removingMarkdownContinuationIndent
         return [
-          .listItem(index, inlineAttributedString(forMarkdown: trimmedProse)),
+          .listItem(index, inlineContent(forMarkdown: trimmedProse)),
           .code(language: SourceMarkdownPreparer.inferredCodeLanguage(for: code) ?? codeBlock.language, code: code)
         ]
       }
@@ -398,15 +598,15 @@ enum RichTranslationRenderer {
 
   private static func renderProseWithStructuredTail(
     _ markdown: String,
-    textBlock: (AttributedString) -> RichTranslationBlock
+    textBlock: (RichInlineContent) -> RichTranslationBlock
   ) -> [RichTranslationBlock] {
     guard let split = splitStructuredTail(in: markdown) else {
-      return [textBlock(inlineAttributedString(forMarkdown: markdown))]
+      return [textBlock(inlineContent(forMarkdown: markdown))]
     }
 
     var blocks: [RichTranslationBlock] = []
     if !split.prose.isEmpty {
-      blocks.append(textBlock(inlineAttributedString(forMarkdown: split.prose)))
+      blocks.append(textBlock(inlineContent(forMarkdown: split.prose)))
     }
     blocks.append(.code(language: split.language, code: split.code))
     return blocks
@@ -479,22 +679,94 @@ enum RichTranslationRenderer {
     return (prose: prose, language: language, code: tail)
   }
 
-  private static func inlineAttributedString(for markup: Markup) -> AttributedString {
-    inlineAttributedString(forMarkdown: markup.format().trimmedForQuery)
+  private static func inlineContent(for markup: Markup) -> RichInlineContent {
+    inlineContent(forMarkdown: markup.format().trimmedForQuery)
   }
 
-  private static func inlineAttributedString(forMarkdown markdown: String) -> AttributedString {
+  private static func inlineContent(forMarkdown markdown: String) -> RichInlineContent {
     if let attributed = try? AttributedString(markdown: markdownPreservingVisibleLineBreaks(markdown)) {
-      return attributed
+      return styledInlineContent(attributed)
     }
-    return AttributedString(markdown)
+    return RichInlineContent(attributed: AttributedString(markdown), segments: [.text(AttributedString(markdown))])
+  }
+
+  static func inlineSegments(forMarkdown markdown: String) -> [RichInlineSegment] {
+    inlineContent(forMarkdown: markdown).segments
+  }
+
+  private static func styledInlineContent(_ base: AttributedString) -> RichInlineContent {
+    var attributed = base
+    let segments = inlineSegments(from: attributed)
+    let codeRanges = attributed.runs.compactMap { run -> Range<AttributedString.Index>? in
+      guard run.inlinePresentationIntent?.contains(.code) == true else {
+        return nil
+      }
+      return run.range
+    }
+
+    for range in codeRanges {
+      attributed[range].font = .system(.body, design: .monospaced)
+      attributed[range].backgroundColor = Color.accentColor.opacity(0.12)
+      attributed[range].foregroundColor = Color.primary
+    }
+
+    return RichInlineContent(attributed: attributed, segments: segments)
+  }
+
+  private static func inlineSegments(from attributed: AttributedString) -> [RichInlineSegment] {
+    var segments: [RichInlineSegment] = []
+
+    for run in attributed.runs {
+      let runText = AttributedString(attributed[run.range])
+      if run.inlinePresentationIntent?.contains(.code) == true {
+        segments.append(.code(String(runText.characters)))
+      } else {
+        segments.append(.text(runText))
+      }
+    }
+
+    return coalescedInlineSegments(segments)
+  }
+
+  private static func coalescedInlineSegments(_ segments: [RichInlineSegment]) -> [RichInlineSegment] {
+    var coalesced: [RichInlineSegment] = []
+
+    for segment in segments {
+      switch (coalesced.last, segment) {
+      case let (.code(previous)?, .code(current)):
+        coalesced[coalesced.index(before: coalesced.endIndex)] = .code(previous + current)
+      case let (.text(previous)?, .text(current)):
+        var merged = previous
+        merged.append(current)
+        coalesced[coalesced.index(before: coalesced.endIndex)] = .text(merged)
+      default:
+        coalesced.append(segment)
+      }
+    }
+
+    return coalesced
   }
 
   private static func looksLikeHTML(_ text: String) -> Bool {
-    text.range(
+    htmlDetectionText(for: text).range(
       of: #"<[A-Za-z][A-Za-z0-9:-]*(\s|>|/)"#,
       options: .regularExpression
     ) != nil
+  }
+
+  private static func htmlDetectionText(for text: String) -> String {
+    let withoutFences = replacingMatches(
+      in: text,
+      pattern: #"(?s)```.*?```"#,
+      options: [],
+      with: ""
+    )
+    return replacingMatches(
+      in: withoutFences,
+      pattern: #"`[^`\n]*`"#,
+      options: [],
+      with: ""
+    )
   }
 
   private static func containsCodeFence(_ text: String) -> Bool {

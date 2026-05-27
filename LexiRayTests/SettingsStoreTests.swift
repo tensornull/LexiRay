@@ -222,6 +222,28 @@ final class SettingsStoreTests: XCTestCase {
     XCTAssertFalse(reloaded.configuration(for: .anthropicMessages).isEnabled)
   }
 
+  func testOpenAIResponsesAdvancedParametersPersistAndReset() throws {
+    let defaults = try makeDefaults()
+    let providerFileStore = makeProviderFileStore()
+    let store = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+    var configuration = store.configuration(for: .openAIResponses)
+    configuration.advancedParameters = ProviderAdvancedParameters(
+      temperature: 0.4,
+      maxOutputTokens: 2048,
+      reasoningEffort: .high,
+      reasoningSummary: .auto,
+      textVerbosity: .low
+    )
+
+    store.updateConfiguration(configuration)
+
+    let reloaded = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+    XCTAssertEqual(reloaded.configuration(for: .openAIResponses).advancedParameters, configuration.advancedParameters)
+
+    reloaded.resetProviderSettings()
+    XCTAssertTrue(reloaded.configuration(for: .openAIResponses).advancedParameters.isEmpty)
+  }
+
   func testCustomProviderInstancesPersistInOrder() throws {
     let defaults = try makeDefaults()
     let providerFileStore = makeProviderFileStore()
@@ -329,6 +351,7 @@ final class SettingsStoreTests: XCTestCase {
 
     XCTAssertEqual(store.configuration(for: .openAIResponses).displayName, "")
     XCTAssertEqual(store.configuration(for: .openAIResponses).effectiveDisplayName, ProviderID.openAIResponses.displayName)
+    XCTAssertTrue(store.configuration(for: .openAIResponses).advancedParameters.isEmpty)
     XCTAssertEqual(store.apiKey(for: .openAIResponses), "secret")
   }
 

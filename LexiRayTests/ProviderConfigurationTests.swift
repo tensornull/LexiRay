@@ -14,6 +14,7 @@ final class ProviderConfigurationTests: XCTestCase {
 
     XCTAssertEqual(configuration.displayName, "")
     XCTAssertEqual(configuration.effectiveDisplayName, ProviderID.openAIResponses.displayName)
+    XCTAssertTrue(configuration.advancedParameters.isEmpty)
   }
 
   func testNormalizeBaseURLTrimsTrailingSlashes() {

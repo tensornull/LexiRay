@@ -275,7 +275,8 @@ final class SettingsStore: ObservableObject {
           baseURL: configuration.baseURL,
           model: configuration.model,
           isEnabled: configuration.isEnabled,
-          apiKey: providerAPIKeys[configuration.id] ?? ""
+          apiKey: providerAPIKeys[configuration.id] ?? "",
+          advancedParameters: configuration.advancedParameters
         )
       )
     })
@@ -437,7 +438,8 @@ final class SettingsStore: ObservableObject {
         displayName: value.displayName,
         baseURL: value.baseURL,
         model: value.model,
-        isEnabled: value.isEnabled
+        isEnabled: value.isEnabled,
+        advancedParameters: value.advancedParameters
       )
     }
 
@@ -473,7 +475,8 @@ final class SettingsStore: ObservableObject {
           displayName: stored.displayName,
           baseURL: stored.baseURL,
           model: stored.model,
-          isEnabled: stored.isEnabled
+          isEnabled: stored.isEnabled,
+          advancedParameters: stored.advancedParameters
         )
 
         let apiKey = stored.apiKey.trimmedForQuery
@@ -558,6 +561,7 @@ final class SettingsStore: ObservableObject {
     let baseURL: String
     let model: String
     let isEnabled: Bool
+    let advancedParameters: ProviderAdvancedParameters
 
     init(from decoder: Decoder) throws {
       let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -565,6 +569,7 @@ final class SettingsStore: ObservableObject {
       baseURL = try container.decode(String.self, forKey: .baseURL)
       model = try container.decode(String.self, forKey: .model)
       isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
+      advancedParameters = try container.decodeIfPresent(ProviderAdvancedParameters.self, forKey: .advancedParameters) ?? ProviderAdvancedParameters()
     }
   }
 

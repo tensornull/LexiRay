@@ -208,7 +208,8 @@ final class TranslationPipeline {
       provider: configuration.providerID,
       baseURL: configuration.baseURL,
       apiKey: settings.apiKey(forConfigurationID: configuration.id),
-      model: configuration.model
+      model: configuration.model,
+      advancedParameters: configuration.advancedParameters
     )
   }
 }

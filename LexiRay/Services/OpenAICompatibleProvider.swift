@@ -5,6 +5,21 @@ struct LLMProviderConfiguration {
   let baseURL: String
   let apiKey: String
   let model: String
+  let advancedParameters: ProviderAdvancedParameters
+
+  init(
+    provider: ProviderID,
+    baseURL: String,
+    apiKey: String,
+    model: String,
+    advancedParameters: ProviderAdvancedParameters = ProviderAdvancedParameters()
+  ) {
+    self.provider = provider
+    self.baseURL = baseURL
+    self.apiKey = apiKey
+    self.model = model
+    self.advancedParameters = advancedParameters
+  }
 
   var normalizedBaseURL: String {
     ProviderConfiguration.normalizeBaseURL(baseURL)
@@ -103,7 +118,7 @@ struct OpenAIResponsesProvider: TranslationProvider {
       model: configuration.model,
       instructions: TranslationPrompt.instructions(targetLanguage: request.targetLanguage),
       input: text,
-      temperature: 0.2
+      advancedParameters: configuration.advancedParameters
     )
 
     let response: OpenAIResponsesResponse = try await performJSONRequest(
@@ -131,7 +146,7 @@ struct OpenAIResponsesProvider: TranslationProvider {
       model: configuration.model,
       instructions: TranslationPrompt.instructions(targetLanguage: request.targetLanguage),
       input: text,
-      temperature: 0.2,
+      advancedParameters: configuration.advancedParameters,
       stream: true
     )
 
@@ -968,15 +983,65 @@ private struct OpenAIResponsesRequest: Encodable {
   let model: String
   let instructions: String
   let input: String
-  let temperature: Double
+  let temperature: Double?
+  let maxOutputTokens: Int?
+  let reasoning: OpenAIResponsesReasoning?
+  let text: OpenAIResponsesText?
   let stream: Bool?
 
-  init(model: String, instructions: String, input: String, temperature: Double, stream: Bool? = nil) {
+  init(
+    model: String,
+    instructions: String,
+    input: String,
+    advancedParameters: ProviderAdvancedParameters,
+    stream: Bool? = nil
+  ) {
     self.model = model
     self.instructions = instructions
     self.input = input
-    self.temperature = temperature
+    temperature = advancedParameters.temperature.map { min(max($0, 0), 2) }
+    maxOutputTokens = advancedParameters.maxOutputTokens.flatMap { $0 > 0 ? $0 : nil }
+    reasoning = OpenAIResponsesReasoning(
+      effort: advancedParameters.reasoningEffort,
+      summary: advancedParameters.reasoningSummary
+    )
+    text = OpenAIResponsesText(verbosity: advancedParameters.textVerbosity)
     self.stream = stream
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case model
+    case instructions
+    case input
+    case temperature
+    case maxOutputTokens = "max_output_tokens"
+    case reasoning
+    case text
+    case stream
+  }
+}
+
+private struct OpenAIResponsesReasoning: Encodable {
+  let effort: OpenAIReasoningEffort?
+  let summary: OpenAIReasoningSummary?
+
+  init?(effort: OpenAIReasoningEffort?, summary: OpenAIReasoningSummary?) {
+    guard effort != nil || summary != nil else {
+      return nil
+    }
+    self.effort = effort
+    self.summary = summary
+  }
+}
+
+private struct OpenAIResponsesText: Encodable {
+  let verbosity: OpenAITextVerbosity?
+
+  init?(verbosity: OpenAITextVerbosity?) {
+    guard verbosity != nil else {
+      return nil
+    }
+    self.verbosity = verbosity
   }
 }
 

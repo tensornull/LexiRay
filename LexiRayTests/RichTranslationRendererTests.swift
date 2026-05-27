@@ -31,6 +31,53 @@ final class RichTranslationRendererTests: XCTestCase {
     XCTAssertTrue(rendered.runs.contains { $0.link?.absoluteString == "https://example.test" })
   }
 
+  func testMarkdownInlineCodeBuildsCodeSegments() {
+    let segments = RichTranslationRenderer.inlineSegments(
+      forMarkdown: "For `<content>` and `POST /v1/videos`, use `input_reference`."
+    )
+    let codes = segments.compactMap { segment in
+      if case let .code(text) = segment {
+        return text
+      }
+      return nil
+    }
+
+    XCTAssertEqual(codes, ["<content>", "POST /v1/videos", "input_reference"])
+    XCTAssertEqual(
+      RichTranslationRenderer.plainString(for: "For `<content>` and `POST /v1/videos`, use `input_reference`."),
+      "For <content> and POST /v1/videos, use input_reference."
+    )
+  }
+
+  func testMarkdownInlineCodeSegmentsAppearInParagraphListAndQuote() {
+    let blocks = RichTranslationRenderer.blocks(for: """
+    Paragraph `POST /v1/videos`
+
+    - List `input_reference`
+
+    > Quote `<content>`
+    """)
+
+    XCTAssertTrue(blocks.contains { block in
+      if case let .text(content) = block {
+        return content.segments.contains(.code("POST /v1/videos"))
+      }
+      return false
+    })
+    XCTAssertTrue(blocks.contains { block in
+      if case let .listItem(_, content) = block {
+        return content.segments.contains(.code("input_reference"))
+      }
+      return false
+    })
+    XCTAssertTrue(blocks.contains { block in
+      if case let .quote(content) = block {
+        return content.segments.contains(.code("<content>"))
+      }
+      return false
+    })
+  }
+
   func testMarkdownBuildsBlockModel() {
     let blocks = RichTranslationRenderer.blocks(for: """
     ## Title

@@ -55,6 +55,38 @@ final class LLMProviderTests: XCTestCase {
     XCTAssertEqual(client.request?.url?.absoluteString, "https://api.example.test/v1/responses")
     XCTAssertEqual(client.request?.value(forHTTPHeaderField: "Authorization"), "Bearer test-key")
     XCTAssertEqual(try client.stringBodyValue("input"), "hello")
+    XCTAssertNil(try client.jsonBody()["temperature"])
+    XCTAssertNil(try client.jsonBody()["max_output_tokens"])
+    XCTAssertNil(try client.jsonBody()["reasoning"])
+    XCTAssertNil(try client.jsonBody()["text"])
+  }
+
+  func testOpenAIResponsesIncludesEnabledAdvancedParameters() async throws {
+    let client = MockHTTPClient(responseJSON: #"{"output":[{"content":[{"type":"output_text","text":"你好"}]}]}"#)
+    let provider = OpenAIResponsesProvider(
+      configuration: makeConfiguration(
+        provider: .openAIResponses,
+        advancedParameters: ProviderAdvancedParameters(
+          temperature: 0.3,
+          maxOutputTokens: 4096,
+          reasoningEffort: .low,
+          reasoningSummary: .auto,
+          textVerbosity: .high
+        )
+      ),
+      client: client
+    )
+
+    _ = try await provider.translate(makeRequest())
+    let body = try client.jsonBody()
+    let reasoning = try XCTUnwrap(body["reasoning"] as? [String: Any])
+    let text = try XCTUnwrap(body["text"] as? [String: Any])
+
+    XCTAssertEqual(try XCTUnwrap(body["temperature"] as? NSNumber).doubleValue, 0.3, accuracy: 0.001)
+    XCTAssertEqual(try XCTUnwrap(body["max_output_tokens"] as? NSNumber).intValue, 4096)
+    XCTAssertEqual(reasoning["effort"] as? String, "low")
+    XCTAssertEqual(reasoning["summary"] as? String, "auto")
+    XCTAssertEqual(text["verbosity"] as? String, "high")
   }
 
   func testOpenAIResponsesSkipsOutputItemsWithoutTextContent() async throws {
@@ -97,6 +129,39 @@ final class LLMProviderTests: XCTestCase {
     XCTAssertEqual(partials, ["你", "你好", "你好"])
     XCTAssertEqual(result?.translatedText, "你好")
     XCTAssertEqual(try client.boolBodyValue("stream"), true)
+  }
+
+  func testOpenAIResponsesStreamingIncludesEnabledAdvancedParameters() async throws {
+    let client = MockHTTPClient(
+      responseJSON: "{}",
+      streamLines: [
+        "event: response.output_text.delta",
+        #"data: {"type":"response.output_text.delta","delta":"你"}"#,
+        "",
+        "event: response.completed",
+        #"data: {"type":"response.completed"}"#,
+        ""
+      ]
+    )
+    let provider = OpenAIResponsesProvider(
+      configuration: makeConfiguration(
+        provider: .openAIResponses,
+        advancedParameters: ProviderAdvancedParameters(
+          maxOutputTokens: 512,
+          textVerbosity: .low
+        )
+      ),
+      client: client
+    )
+
+    _ = try await collectStream(from: provider)
+    let body = try client.jsonBody()
+    let text = try XCTUnwrap(body["text"] as? [String: Any])
+
+    XCTAssertEqual(try client.boolBodyValue("stream"), true)
+    XCTAssertNil(body["temperature"])
+    XCTAssertEqual(try XCTUnwrap(body["max_output_tokens"] as? NSNumber).intValue, 512)
+    XCTAssertEqual(text["verbosity"] as? String, "low")
   }
 
   func testOpenAIResponsesKeepsStructuredMarkdownWhenFinalTextIsCollapsed() async throws {
@@ -348,9 +413,16 @@ final class LLMProviderTests: XCTestCase {
     provider: ProviderID,
     baseURL: String = "https://api.example.test/v1",
     apiKey: String = "test-key",
-    model: String = "test-model"
+    model: String = "test-model",
+    advancedParameters: ProviderAdvancedParameters = ProviderAdvancedParameters()
   ) -> LLMProviderConfiguration {
-    LLMProviderConfiguration(provider: provider, baseURL: baseURL, apiKey: apiKey, model: model)
+    LLMProviderConfiguration(
+      provider: provider,
+      baseURL: baseURL,
+      apiKey: apiKey,
+      model: model,
+      advancedParameters: advancedParameters
+    )
   }
 }
 

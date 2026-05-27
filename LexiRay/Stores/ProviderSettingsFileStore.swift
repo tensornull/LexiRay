@@ -34,6 +34,17 @@ struct StoredProviderSettings: Codable, Equatable {
   var model: String
   var isEnabled: Bool
   var apiKey: String
+  var advancedParameters: ProviderAdvancedParameters
+
+  enum CodingKeys: String, CodingKey {
+    case providerID
+    case displayName
+    case baseURL
+    case model
+    case isEnabled
+    case apiKey
+    case advancedParameters
+  }
 
   init(
     providerID: ProviderID? = nil,
@@ -41,7 +52,8 @@ struct StoredProviderSettings: Codable, Equatable {
     baseURL: String,
     model: String,
     isEnabled: Bool,
-    apiKey: String
+    apiKey: String,
+    advancedParameters: ProviderAdvancedParameters = ProviderAdvancedParameters()
   ) {
     self.providerID = providerID
     self.displayName = displayName
@@ -49,6 +61,7 @@ struct StoredProviderSettings: Codable, Equatable {
     self.model = model
     self.isEnabled = isEnabled
     self.apiKey = apiKey
+    self.advancedParameters = advancedParameters
   }
 
   init(from decoder: Decoder) throws {
@@ -59,6 +72,20 @@ struct StoredProviderSettings: Codable, Equatable {
     model = try container.decode(String.self, forKey: .model)
     isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
     apiKey = try container.decodeIfPresent(String.self, forKey: .apiKey) ?? ""
+    advancedParameters = try container.decodeIfPresent(ProviderAdvancedParameters.self, forKey: .advancedParameters) ?? ProviderAdvancedParameters()
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encodeIfPresent(providerID, forKey: .providerID)
+    try container.encode(displayName, forKey: .displayName)
+    try container.encode(baseURL, forKey: .baseURL)
+    try container.encode(model, forKey: .model)
+    try container.encode(isEnabled, forKey: .isEnabled)
+    try container.encode(apiKey, forKey: .apiKey)
+    if !advancedParameters.isEmpty {
+      try container.encode(advancedParameters, forKey: .advancedParameters)
+    }
   }
 }
 
