@@ -18,7 +18,7 @@ final class ControllerInteractionTests: XCTestCase {
     selectionReader.resume(with: SelectionReadResult(text: "hello", source: .simulatedCopy))
 
     await waitUntil { !panel.events.isEmpty }
-    XCTAssertEqual(panel.events.first, .show(activating: false, repositioning: true))
+    XCTAssertEqual(panel.events.first, .show(activating: false, repositioning: false))
     XCTAssertEqual(controller.lastSelectionSource, .simulatedCopy)
     XCTAssertEqual(controller.panelSourceText, "hello")
   }
@@ -42,7 +42,7 @@ final class ControllerInteractionTests: XCTestCase {
 
     XCTAssertTrue(message.contains("Grant Accessibility permission"))
     XCTAssertEqual(permissions.promptRequests, [true])
-    XCTAssertEqual(panel.events.first, .show(activating: false, repositioning: true))
+    XCTAssertEqual(panel.events.first, .show(activating: false, repositioning: false))
   }
 
   func testPinnedAndCloseActionsReachPanelPresenter() {
@@ -150,6 +150,7 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(batch.request.text, "edited source")
     XCTAssertEqual(batch.request.selectionSource, .manual)
     XCTAssertEqual(controller.panelSourceText, "edited source")
+    XCTAssertFalse(panel.events.contains(where: \.isRepositioningShow))
   }
 
   func testManualTranslationUpdatesBatchResult() async {
@@ -173,6 +174,88 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(batch.successfulResults.first?.providerName, "Mock")
     XCTAssertTrue(batch.entries.dropFirst().allSatisfy(\.status.isDisabled))
     XCTAssertEqual(controller.panelSourceText, "hello")
+  }
+
+  func testManualRetranslateBypassesCacheForSameText() async throws {
+    let panel = MockFloatingPanelPresenter()
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let settings = SettingsStore(
+      defaults: defaults,
+      providerFileStore: makeProviderFileStore(),
+      allowsMockProvider: true
+    )
+    enableOnly([.mock], in: settings)
+    let counter = ControllerProviderCallCounter()
+    let pipeline = TranslationPipeline(settings: settings, providerFactory: { _ in
+      ControllerCountingTranslationProvider(counter: counter)
+    })
+    let controller = LexiRayController(
+      settings: settings,
+      selectionService: ImmediateSelectionReader(result: .unavailable),
+      permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
+      floatingPanelFactory: { _ in panel },
+      pipeline: pipeline
+    )
+
+    controller.translateManualText("hello")
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      return batch.successfulResults.first?.translatedText == "call 1"
+    }
+
+    controller.translateManualText("hello")
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      return batch.successfulResults.first?.translatedText == "call 2"
+    }
+
+    XCTAssertEqual(counter.callCount, 2)
+    XCTAssertFalse(panel.events.contains(where: \.isRepositioningShow))
+  }
+
+  func testTranslateCurrentSelectionBypassesCacheForSameText() async throws {
+    let panel = MockFloatingPanelPresenter()
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let settings = SettingsStore(
+      defaults: defaults,
+      providerFileStore: makeProviderFileStore(),
+      allowsMockProvider: true
+    )
+    enableOnly([.mock], in: settings)
+    let counter = ControllerProviderCallCounter()
+    let pipeline = TranslationPipeline(settings: settings, providerFactory: { _ in
+      ControllerCountingTranslationProvider(counter: counter)
+    })
+    let controller = LexiRayController(
+      settings: settings,
+      selectionService: ImmediateSelectionReader(result: SelectionReadResult(text: "hello", source: .simulatedCopy)),
+      permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
+      floatingPanelFactory: { _ in panel },
+      pipeline: pipeline
+    )
+
+    controller.translateCurrentSelection()
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      return batch.successfulResults.first?.translatedText == "call 1"
+    }
+
+    controller.translateCurrentSelection()
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      return batch.successfulResults.first?.translatedText == "call 2"
+    }
+
+    XCTAssertEqual(counter.callCount, 2)
+    XCTAssertFalse(panel.events.contains(where: \.isRepositioningShow))
   }
 
   func testStreamingPartialRefreshesPanelWithoutRepositioningShow() async throws {
@@ -206,7 +289,7 @@ final class ControllerInteractionTests: XCTestCase {
       return text == "partial"
     }
 
-    XCTAssertEqual(panel.events.filter(\.isRepositioningShow).count, 1)
+    XCTAssertEqual(panel.events.filter(\.isRepositioningShow).count, 0)
     XCTAssertGreaterThanOrEqual(panel.refreshContentLayoutCount, 1)
 
     await waitUntil {
@@ -216,7 +299,7 @@ final class ControllerInteractionTests: XCTestCase {
       return batch.successfulResults.first?.translatedText == "complete"
     }
 
-    XCTAssertEqual(panel.events.filter(\.isRepositioningShow).count, 1)
+    XCTAssertEqual(panel.events.filter(\.isRepositioningShow).count, 0)
   }
 
   func testCopySpecificBatchResult() {
@@ -848,5 +931,28 @@ private struct StreamingTestProvider: TranslationProvider {
         continuation.finish()
       }
     }
+  }
+}
+
+@MainActor
+private final class ControllerProviderCallCounter {
+  var callCount = 0
+}
+
+@MainActor
+private struct ControllerCountingTranslationProvider: TranslationProvider {
+  let id: ProviderID = .mock
+  let name = "Counting Mock"
+  let counter: ControllerProviderCallCounter
+
+  func translate(_ request: TranslationRequest) async throws -> TranslationResult {
+    counter.callCount += 1
+    return TranslationResult(
+      request: request,
+      providerID: id,
+      providerName: name,
+      translatedText: "call \(counter.callCount)",
+      detectedLanguage: request.sourceLanguage
+    )
   }
 }

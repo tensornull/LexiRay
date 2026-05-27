@@ -111,6 +111,25 @@ final class TranslationPipelineTests: XCTestCase {
     XCTAssertTrue(batch.entries.contains(where: { $0.providerConfigurationID == custom.id }))
   }
 
+  func testBatchTranslationCanBypassCacheForExplicitRetranslate() async throws {
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayPipelineTests-\(UUID().uuidString)"))
+    let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
+    enableOnly([.mock], in: settings)
+    let counter = ProviderCallCounter()
+    let pipeline = TranslationPipeline(settings: settings, providerFactory: { _ in
+      CountingTranslationProvider(counter: counter)
+    })
+
+    let first = try await pipeline.translateBatch(text: "hello", selectionSource: .manual)
+    let cached = try await pipeline.translateBatch(text: "hello", selectionSource: .manual)
+    let refreshed = try await pipeline.translateBatch(text: "hello", selectionSource: .manual, bypassCache: true)
+
+    XCTAssertEqual(counter.callCount, 2)
+    XCTAssertEqual(first.successfulResults.first?.translatedText, "call 1")
+    XCTAssertEqual(cached.successfulResults.first?.translatedText, "call 1")
+    XCTAssertEqual(refreshed.successfulResults.first?.translatedText, "call 2")
+  }
+
   func testBatchTranslationShowsDisabledRowsWhenNoProviderEnabled() async throws {
     let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayPipelineTests-\(UUID().uuidString)"))
     let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
@@ -169,6 +188,29 @@ private struct StaticTranslationProvider: TranslationProvider {
       providerID: id,
       providerName: name,
       translatedText: "translated \(request.text)",
+      detectedLanguage: request.sourceLanguage
+    )
+  }
+}
+
+@MainActor
+private final class ProviderCallCounter {
+  var callCount = 0
+}
+
+@MainActor
+private struct CountingTranslationProvider: TranslationProvider {
+  let id: ProviderID = .mock
+  let name = "Counting"
+  let counter: ProviderCallCounter
+
+  func translate(_ request: TranslationRequest) async throws -> TranslationResult {
+    counter.callCount += 1
+    return TranslationResult(
+      request: request,
+      providerID: id,
+      providerName: name,
+      translatedText: "call \(counter.callCount)",
       detectedLanguage: request.sourceLanguage
     )
   }

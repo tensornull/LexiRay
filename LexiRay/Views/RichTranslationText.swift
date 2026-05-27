@@ -50,7 +50,7 @@ struct RichTranslationContentView: View {
       HStack(alignment: .firstTextBaseline, spacing: 8) {
         Text(index.map { "\($0)." } ?? "•")
           .font(font)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(Color.accentColor)
           .frame(width: index == nil ? 12 : 24, alignment: .trailing)
         Text(attributed)
           .font(font)
@@ -58,10 +58,11 @@ struct RichTranslationContentView: View {
           .fixedSize(horizontal: false, vertical: true)
           .frame(maxWidth: .infinity, alignment: .topLeading)
       }
+      .padding(.vertical, 1)
     case let .quote(attributed):
       HStack(alignment: .top, spacing: 10) {
         Rectangle()
-          .fill(Color.secondary.opacity(0.35))
+          .fill(Color.accentColor.opacity(0.65))
           .frame(width: 3)
         Text(attributed)
           .font(font)
@@ -70,27 +71,11 @@ struct RichTranslationContentView: View {
           .fixedSize(horizontal: false, vertical: true)
           .frame(maxWidth: .infinity, alignment: .topLeading)
       }
+      .padding(.vertical, 5)
+      .padding(.horizontal, 8)
+      .background(Color.accentColor.opacity(0.055), in: RoundedRectangle(cornerRadius: 6))
     case let .code(language, code):
-      VStack(alignment: .leading, spacing: 6) {
-        if let language, !language.isEmpty {
-          Text(language)
-            .font(.caption2.weight(.medium))
-            .foregroundStyle(.secondary)
-        }
-        ScrollView(.horizontal, showsIndicators: true) {
-          Text(code)
-            .font(.system(.body, design: .monospaced))
-            .textSelection(.enabled)
-            .fixedSize(horizontal: true, vertical: true)
-            .padding(10)
-        }
-      }
-      .frame(maxWidth: .infinity, alignment: .topLeading)
-      .background(Color(nsColor: .textBackgroundColor).opacity(0.42), in: RoundedRectangle(cornerRadius: 6))
-      .overlay {
-        RoundedRectangle(cornerRadius: 6)
-          .stroke(Color(nsColor: .separatorColor).opacity(0.38), lineWidth: 1)
-      }
+      TranslationCodeBlockView(language: language, code: code)
     }
   }
 
@@ -103,6 +88,57 @@ struct RichTranslationContentView: View {
     default:
       font.weight(.semibold)
     }
+  }
+}
+
+struct TranslationCodeBlockView: View {
+  @Environment(\.colorScheme) private var colorScheme
+
+  let language: String?
+  let code: String
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(spacing: 8) {
+        Text((language?.nonEmptyTrimmed ?? "code").uppercased())
+          .font(.system(.caption2, design: .monospaced).weight(.semibold))
+          .foregroundStyle(.secondary)
+        Spacer(minLength: 8)
+      }
+      .padding(.horizontal, 11)
+      .padding(.vertical, 6)
+      .background(headerBackground)
+
+      ScrollView(.horizontal, showsIndicators: true) {
+        Text(code)
+          .font(.system(size: 13, weight: .regular, design: .monospaced))
+          .lineSpacing(3)
+          .foregroundStyle(.primary)
+          .textSelection(.enabled)
+          .fixedSize(horizontal: true, vertical: true)
+          .padding(.horizontal, 12)
+          .padding(.vertical, 11)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .topLeading)
+    .background(blockBackground, in: RoundedRectangle(cornerRadius: 7))
+    .overlay {
+      RoundedRectangle(cornerRadius: 7)
+        .stroke(borderColor, lineWidth: 1)
+    }
+    .clipShape(RoundedRectangle(cornerRadius: 7))
+  }
+
+  private var blockBackground: Color {
+    colorScheme == .dark ? Color.white.opacity(0.075) : Color.black.opacity(0.045)
+  }
+
+  private var headerBackground: Color {
+    colorScheme == .dark ? Color.white.opacity(0.055) : Color.black.opacity(0.05)
+  }
+
+  private var borderColor: Color {
+    colorScheme == .dark ? Color.white.opacity(0.13) : Color.black.opacity(0.11)
   }
 }
 

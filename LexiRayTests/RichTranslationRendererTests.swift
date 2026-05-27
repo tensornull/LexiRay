@@ -68,6 +68,47 @@ final class RichTranslationRendererTests: XCTestCase {
     XCTAssertFalse(plain.contains("`models`"))
   }
 
+  func testCometAPIMarkdownFixtureBuildsReadableBlocks() {
+    let markdown = """
+    Hello,
+
+    For `doubao-seedance-2-0` on CometAPI, the current public `POST /v1/videos` reference-file support is:
+
+    - Image references: use multipart field `input_reference`
+    - Multiple image references: repeat the same `input_reference` field in upload order
+    - Video references: not currently exposed as a multipart reference field on this Seedance route
+    - Audio references: not currently exposed as a multipart reference field on this Seedance route
+
+    Uploaded files are mapped by order, not by the local filename or by a separate marker field.
+
+    ```bash
+    export COMETAPI_KEY="YOUR_COMETAPI_KEY"
+
+    curl -sS https://api.cometapi.com/v1/videos \\
+      -H "Authorization: Bearer $COMETAPI_KEY"
+    ```
+
+    Poll the returned `id` / `task_id`:
+
+    ```bash
+    curl -sS "https://api.cometapi.com/v1/videos/TASK_ID" \\
+      -H "Authorization: Bearer $COMETAPI_KEY"
+    ```
+    """
+
+    let blocks = RichTranslationRenderer.blocks(for: markdown)
+    let plain = RichTranslationRenderer.plainString(for: markdown)
+
+    XCTAssertEqual(blocks.count(where: { if case .listItem = $0 { true } else { false } }), 4)
+    XCTAssertEqual(blocks.count(where: { if case .code("bash", _) = $0 { true } else { false } }), 2)
+    XCTAssertTrue(plain.contains("doubao-seedance-2-0"))
+    XCTAssertTrue(plain.contains("POST /v1/videos"))
+    XCTAssertTrue(plain.contains("curl -sS"))
+    XCTAssertFalse(plain.contains("`doubao-seedance-2-0`"))
+    XCTAssertFalse(plain.contains("- Image references"))
+    XCTAssertFalse(plain.contains("```bash"))
+  }
+
   func testStructuredPlainTextBuildsCodeBlock() {
     let blocks = RichTranslationRenderer.blocks(for: """
     {

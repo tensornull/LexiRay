@@ -164,10 +164,7 @@ private struct ProviderTranslationResultRow: View {
         lineLimit: resultLineLimit
       )
     case let .failure(message):
-      Text(message)
-        .font(.body)
-        .foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
+      ProviderFailureDetailView(message: message)
     }
   }
 
@@ -215,6 +212,96 @@ private struct ProviderTranslationResultRow: View {
     }
     .buttonStyle(.borderless)
     .help(help)
+  }
+}
+
+private struct ProviderFailureDetailView: View {
+  let message: String
+
+  private var parts: ProviderFailureMessageParts {
+    ProviderFailureMessageParts(message)
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(parts.summary)
+        .font(.body)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+
+      ForEach(Array(parts.details.enumerated()), id: \.offset) { _, detail in
+        TranslationCodeBlockView(language: detail.title, code: detail.body)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .topLeading)
+  }
+}
+
+private struct ProviderFailureMessageParts {
+  let summary: String
+  let details: [(title: String, body: String)]
+
+  init(_ message: String) {
+    let markers = ["Response body:", "Stream event:"]
+    var earliestMarker: (range: Range<String.Index>, marker: String)?
+
+    for marker in markers {
+      guard let range = message.range(of: marker) else {
+        continue
+      }
+      if earliestMarker == nil || range.lowerBound < earliestMarker!.range.lowerBound {
+        earliestMarker = (range, marker)
+      }
+    }
+
+    guard let firstMarker = earliestMarker else {
+      summary = message
+      details = []
+      return
+    }
+
+    summary = String(message[..<firstMarker.range.lowerBound]).trimmedForQuery
+    details = ProviderFailureMessageParts.extractDetails(
+      from: String(message[firstMarker.range.lowerBound...]),
+      markers: markers
+    )
+  }
+
+  private static func extractDetails(
+    from text: String,
+    markers: [String]
+  ) -> [(title: String, body: String)] {
+    var details: [(title: String, body: String)] = []
+    var remaining = text
+
+    while let marker = markers.compactMap({ marker -> (String, Range<String.Index>)? in
+      remaining.range(of: marker).map { (marker, $0) }
+    }).min(by: { $0.1.lowerBound < $1.1.lowerBound }) {
+      let bodyStart = marker.1.upperBound
+      let tail = String(remaining[bodyStart...])
+      let nextMarkerRange = markers
+        .compactMap { tail.range(of: $0) }
+        .min(by: { $0.lowerBound < $1.lowerBound })
+
+      let body: String
+      if let nextMarkerRange {
+        body = String(tail[..<nextMarkerRange.lowerBound]).trimmedForQuery
+        remaining = String(tail[nextMarkerRange.lowerBound...])
+      } else {
+        body = tail.trimmedForQuery
+        remaining = ""
+      }
+
+      if !body.isEmpty {
+        details.append((title: marker.0.replacingOccurrences(of: ":", with: ""), body: body))
+      }
+
+      if remaining.isEmpty {
+        break
+      }
+    }
+
+    return details
   }
 }
 

@@ -16,8 +16,8 @@ final class TranslationPipeline {
     self.providerFactory = providerFactory
   }
 
-  func translate(text rawText: String, selectionSource: SelectionSource) async throws -> TranslationResult {
-    let batch = try await translateBatch(text: rawText, selectionSource: selectionSource)
+  func translate(text rawText: String, selectionSource: SelectionSource, bypassCache: Bool = false) async throws -> TranslationResult {
+    let batch = try await translateBatch(text: rawText, selectionSource: selectionSource, bypassCache: bypassCache)
     if let result = batch.successfulResults.first {
       return result
     }
@@ -66,13 +66,14 @@ final class TranslationPipeline {
   func translateBatch(
     text rawText: String,
     selectionSource: SelectionSource,
+    bypassCache: Bool = false,
     onUpdate: (@MainActor (TranslationBatch) -> Void)? = nil
   ) async throws -> TranslationBatch {
     var batch = try makeBatch(text: rawText, selectionSource: selectionSource)
     let request = batch.request
     let tasks = batch.entries.filter(\.isTranslatable).map { entry in
       Task { @MainActor in
-        await self.translate(entry, request: request)
+        await self.translate(entry, request: request, bypassCache: bypassCache)
       }
     }
 
@@ -85,13 +86,18 @@ final class TranslationPipeline {
     return batch
   }
 
-  func translate(_ entry: ProviderTranslationEntry, request: TranslationRequest) async -> ProviderTranslationEntry {
-    await stream(entry, request: request, onUpdate: nil)
+  func translate(
+    _ entry: ProviderTranslationEntry,
+    request: TranslationRequest,
+    bypassCache: Bool = false
+  ) async -> ProviderTranslationEntry {
+    await stream(entry, request: request, bypassCache: bypassCache, onUpdate: nil)
   }
 
   func stream(
     _ entry: ProviderTranslationEntry,
     request: TranslationRequest,
+    bypassCache: Bool = false,
     onUpdate: (@MainActor (ProviderTranslationEntry) -> Void)?
   ) async -> ProviderTranslationEntry {
     do {
@@ -100,6 +106,7 @@ final class TranslationPipeline {
         providerConfigurationID: entry.providerConfigurationID,
         providerID: entry.providerID,
         providerName: entry.providerName,
+        bypassCache: bypassCache,
         onPartial: { partialText in
           onUpdate?(entry.updating(status: .streaming(partialText)))
         }
@@ -115,6 +122,7 @@ final class TranslationPipeline {
     providerConfigurationID: String,
     providerID _: ProviderID,
     providerName: String,
+    bypassCache: Bool = false,
     onPartial: (@MainActor (String) -> Void)? = nil
   ) async throws -> TranslationResult {
     let provider = try makeProvider(forConfigurationID: providerConfigurationID)
@@ -127,7 +135,7 @@ final class TranslationPipeline {
       targetLanguage: request.targetLanguage
     )
 
-    if let cached = await cache.value(for: cacheKey) {
+    if !bypassCache, let cached = await cache.value(for: cacheKey) {
       AppLog.translation.debug("Using cached result for provider \(provider.name, privacy: .public)")
       return cached.withProviderIdentity(providerConfigurationID: providerConfigurationID, providerName: providerName)
     }

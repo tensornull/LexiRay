@@ -443,7 +443,13 @@ private func decodeResponse<Response: Decodable>(
     }
 
     guard (200 ..< 300).contains(httpResponse.statusCode) else {
-      let message = ProviderErrorMessage.message(from: data) ?? providerFailureMessage
+      let responseBody = debugText(from: data)
+      let message = providerHTTPFailureMessage(
+        statusCode: httpResponse.statusCode,
+        providerFailureMessage: providerFailureMessage,
+        providerMessage: ProviderErrorMessage.message(from: data),
+        responseBody: responseBody
+      )
       throw TranslationError.network(message)
     }
 
@@ -468,7 +474,14 @@ private func openLineStream(
     }
 
     guard (200 ..< 300).contains(httpResponse.statusCode) else {
-      throw TranslationError.network(providerFailureMessage)
+      let responseBody = await collectFailureBody(from: stream.lines)
+      let message = providerHTTPFailureMessage(
+        statusCode: httpResponse.statusCode,
+        providerFailureMessage: providerFailureMessage,
+        providerMessage: ProviderErrorMessage.message(fromText: responseBody),
+        responseBody: responseBody
+      )
+      throw TranslationError.network(message)
     }
 
     return stream
@@ -477,6 +490,119 @@ private func openLineStream(
   } catch {
     throw TranslationError.network(error.localizedDescription)
   }
+}
+
+private let providerDebugBodyCharacterLimit = 6_000
+
+private func providerHTTPFailureMessage(
+  statusCode: Int,
+  providerFailureMessage: String,
+  providerMessage: String?,
+  responseBody: String?
+) -> String {
+  var sections = ["\(providerFailureMessage) (HTTP \(statusCode))"]
+
+  if let providerMessage = providerMessage?.nonEmptyTrimmed,
+     providerMessage != providerFailureMessage
+  {
+    sections.append(providerMessage)
+  }
+
+  if let responseBody = sanitizedDebugSnippet(responseBody) {
+    sections.append("Response body:\n\(responseBody)")
+  }
+
+  return sections.joined(separator: "\n\n")
+}
+
+private func providerStreamFailureMessage(
+  providerFailureMessage: String,
+  object: [String: Any]
+) -> String {
+  let providerMessage = ProviderErrorMessage.message(from: object)
+  var sections = [providerFailureMessage]
+
+  if let providerMessage = providerMessage?.nonEmptyTrimmed,
+     providerMessage != providerFailureMessage
+  {
+    sections.append(providerMessage)
+  }
+
+  if let eventText = sanitizedDebugSnippet(debugText(fromJSONObject: object)) {
+    sections.append("Stream event:\n\(eventText)")
+  }
+
+  return sections.joined(separator: "\n\n")
+}
+
+@MainActor
+private func collectFailureBody(from lines: AsyncThrowingStream<String, Error>) async -> String? {
+  var collected: [String] = []
+  var characterCount = 0
+
+  do {
+    for try await line in lines {
+      collected.append(line)
+      characterCount += line.count + 1
+      if characterCount >= providerDebugBodyCharacterLimit {
+        break
+      }
+    }
+  } catch {
+    collected.append("Failed to read response body: \(error.localizedDescription)")
+  }
+
+  return collected.joined(separator: "\n").nonEmptyTrimmed
+}
+
+private func debugText(from data: Data) -> String? {
+  guard !data.isEmpty else {
+    return nil
+  }
+
+  if let object = try? JSONSerialization.jsonObject(with: data),
+     let text = debugText(fromJSONObject: object)
+  {
+    return text
+  }
+
+  return String(data: data, encoding: .utf8)?.nonEmptyTrimmed ?? "\(data.count) response bytes"
+}
+
+private func debugText(fromJSONObject object: Any) -> String? {
+  guard JSONSerialization.isValidJSONObject(object),
+        let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+  else {
+    return nil
+  }
+
+  return String(data: data, encoding: .utf8)?.nonEmptyTrimmed
+}
+
+private func sanitizedDebugSnippet(_ rawText: String?) -> String? {
+  guard var text = rawText?.nonEmptyTrimmed else {
+    return nil
+  }
+
+  text = replacingMatches(
+    in: text,
+    pattern: #"(?i)(Bearer\s+)[A-Za-z0-9._~+/\-=]+"#,
+    options: [],
+    with: "$1[redacted]"
+  )
+  text = replacingMatches(
+    in: text,
+    pattern: #"(?i)("(?:authorization|api[_-]?key|x-api-key|x-goog-api-key)"\s*:\s*")[^"]+(")"#,
+    options: [],
+    with: "$1[redacted]$2"
+  )
+
+  guard text.count > providerDebugBodyCharacterLimit else {
+    return text
+  }
+
+  let omittedCount = text.count - providerDebugBodyCharacterLimit
+  return "\(String(text.prefix(providerDebugBodyCharacterLimit)))\n[truncated \(omittedCount) characters]"
 }
 
 @MainActor
@@ -600,6 +726,20 @@ private func countMatches(in text: String, pattern: String) -> Int {
   return expression.numberOfMatches(in: text, range: range)
 }
 
+private func replacingMatches(
+  in text: String,
+  pattern: String,
+  options: NSRegularExpression.Options,
+  with replacement: String
+) -> String {
+  guard let expression = try? NSRegularExpression(pattern: pattern, options: options) else {
+    return text
+  }
+
+  let range = NSRange(text.startIndex ..< text.endIndex, in: text)
+  return expression.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: replacement)
+}
+
 private enum ProviderStreamAction {
   case ignore
   case append(String)
@@ -641,11 +781,15 @@ private func openAIResponsesStreamAction(_ event: ServerSentEvent) throws -> Pro
   }
 
   let object = try streamJSONObject(from: event)
-  if let message = ProviderErrorMessage.message(from: object), isFailureEvent(object, fallbackEventName: event.event) {
+  let type = object["type"] as? String ?? event.event ?? ""
+  if let message = ProviderErrorMessage.message(from: object),
+     isFailureEvent(object, fallbackEventName: event.event),
+     type != "response.failed",
+     type != "response.incomplete"
+  {
     throw TranslationError.network(message)
   }
 
-  let type = object["type"] as? String ?? event.event ?? ""
   switch type {
   case "response.output_text.delta":
     return stringValue("delta", in: object)?.isEmpty == false ? .append(stringValue("delta", in: object) ?? "") : .ignore
@@ -654,7 +798,10 @@ private func openAIResponsesStreamAction(_ event: ServerSentEvent) throws -> Pro
   case "response.completed":
     return .done
   case "response.failed", "response.incomplete":
-    throw TranslationError.network(ProviderErrorMessage.message(from: object) ?? "OpenAI Responses stream failed")
+    throw TranslationError.network(providerStreamFailureMessage(
+      providerFailureMessage: "OpenAI Responses stream failed",
+      object: object
+    ))
   default:
     return .ignore
   }
@@ -728,6 +875,9 @@ private enum ProviderErrorMessage {
 
   static func message(from object: [String: Any]) -> String? {
     guard let error = object["error"] else {
+      if let response = object["response"] as? [String: Any] {
+        return message(from: response)
+      }
       return nil
     }
 
@@ -745,6 +895,16 @@ private enum ProviderErrorMessage {
     }
 
     return nil
+  }
+
+  static func message(fromText text: String?) -> String? {
+    guard let text = text?.nonEmptyTrimmed,
+          let data = text.data(using: .utf8)
+    else {
+      return nil
+    }
+
+    return message(from: data)
   }
 }
 

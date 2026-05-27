@@ -233,6 +233,64 @@ final class LLMProviderTests: XCTestCase {
     }
   }
 
+  func testOpenAIResponsesStreamHTTPFailureIncludesResponseBodyAndRedactsSecrets() async throws {
+    let client = MockHTTPClient(
+      responseJSON: "{}",
+      statusCode: 400,
+      streamLines: [
+        #"{"error":{"message":"Bad request from provider"},"authorization":"Bearer test-key","api_key":"test-key"}"#
+      ]
+    )
+    let provider = OpenAIResponsesProvider(
+      configuration: makeConfiguration(provider: .openAIResponses),
+      client: client
+    )
+
+    do {
+      _ = try await provider.streamTranslation(makeRequest())
+      XCTFail("Expected provider error")
+    } catch let error as TranslationError {
+      let message = error.localizedDescription
+      XCTAssertTrue(message.contains("OpenAI Responses request failed (HTTP 400)"))
+      XCTAssertTrue(message.contains("Bad request from provider"))
+      XCTAssertTrue(message.contains("Response body:"))
+      XCTAssertTrue(message.contains("[redacted]"))
+      XCTAssertFalse(message.contains("Bearer test-key"))
+      XCTAssertFalse(message.contains("test-key"))
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
+
+  func testOpenAIResponsesStreamFailureIncludesNestedErrorAndEventBody() async throws {
+    let client = MockHTTPClient(
+      responseJSON: "{}",
+      streamLines: [
+        #"data: {"type":"response.failed","response":{"error":{"message":"Upstream timeout"}},"authorization":"Bearer test-key"}"#,
+        ""
+      ]
+    )
+    let provider = OpenAIResponsesProvider(
+      configuration: makeConfiguration(provider: .openAIResponses),
+      client: client
+    )
+
+    do {
+      _ = try await collectStream(from: provider)
+      XCTFail("Expected provider error")
+    } catch let error as TranslationError {
+      let message = error.localizedDescription
+      XCTAssertTrue(message.contains("OpenAI Responses stream failed"))
+      XCTAssertTrue(message.contains("Upstream timeout"))
+      XCTAssertTrue(message.contains("Stream event:"))
+      XCTAssertTrue(message.contains("response.failed"))
+      XCTAssertTrue(message.contains("[redacted]"))
+      XCTAssertFalse(message.contains("Bearer test-key"))
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
+
   func testProviderRejectsMissingAPIKey() async throws {
     let client = MockHTTPClient(responseJSON: #"{"choices":[]}"#)
     let provider = OpenAIChatCompletionsProvider(

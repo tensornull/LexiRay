@@ -102,16 +102,16 @@ final class LexiRayController: ObservableObject {
 
       guard let text = selection.text?.nonEmptyTrimmed else {
         panelState = .error(selectionUnavailableMessage(for: selection.failureReason))
-        floatingPanel.show()
+        floatingPanel.show(activating: false, repositioning: false)
         return
       }
 
       panelSourceText = text
       panelState = .loading(PanelLoadingState(title: "Translating...", preview: text))
-      floatingPanel.show()
+      floatingPanel.show(activating: false, repositioning: false)
       await Task.yield()
 
-      startBatchTranslation(text: text, source: selection.source)
+      startBatchTranslation(text: text, source: selection.source, bypassCache: true)
     }
   }
 
@@ -137,7 +137,7 @@ final class LexiRayController: ObservableObject {
     panelSourceText = ""
     panelState = .loading(PanelLoadingState(title: "Drag to select an OCR region...", preview: nil))
     lastSelectionSource = .ocr
-    floatingPanel.show()
+    floatingPanel.show(activating: false, repositioning: false)
 
     ocrSelectionOverlay.beginSelection { [weak self] rect in
       guard let self else {
@@ -163,7 +163,7 @@ final class LexiRayController: ObservableObject {
     isExpanded = false
     panelSourceText = ""
     panelState = .loading(PanelLoadingState(title: "Recognizing text...", preview: nil))
-    floatingPanel.show()
+    floatingPanel.show(activating: false, repositioning: false)
 
     translationTask = Task { @MainActor [weak self] in
       guard let self else {
@@ -180,7 +180,7 @@ final class LexiRayController: ObservableObject {
         await translateRecognizedText(text)
       } catch {
         panelState = .error(error.localizedDescription)
-        floatingPanel.show()
+        floatingPanel.show(activating: false, repositioning: false)
         AppLog.ocr.error("OCR failed: \(error.localizedDescription, privacy: .public)")
       }
     }
@@ -190,10 +190,10 @@ final class LexiRayController: ObservableObject {
     lastSelectionSource = .ocr
     panelSourceText = text
     panelState = .loading(PanelLoadingState(title: "Translating OCR text...", preview: text))
-    floatingPanel.show()
+    floatingPanel.show(activating: false, repositioning: false)
     await Task.yield()
 
-    startBatchTranslation(text: text, source: .ocr)
+    startBatchTranslation(text: text, source: .ocr, bypassCache: true)
   }
 
   private func translate(text: String, source: SelectionSource) {
@@ -202,9 +202,9 @@ final class LexiRayController: ObservableObject {
     panelSourceText = text.nonEmptyTrimmed ?? text
     panelState = .loading(PanelLoadingState(title: "Translating...", preview: text))
     lastSelectionSource = source
-    floatingPanel.show()
+    floatingPanel.show(activating: false, repositioning: false)
 
-    startBatchTranslation(text: text, source: source)
+    startBatchTranslation(text: text, source: source, bypassCache: true)
   }
 
   func copyResultToClipboard() {
@@ -338,7 +338,7 @@ final class LexiRayController: ObservableObject {
       .store(in: &settingsCancellables)
   }
 
-  private func startBatchTranslation(text: String, source: SelectionSource) {
+  private func startBatchTranslation(text: String, source: SelectionSource, bypassCache: Bool) {
     cancelProviderTranslationTasks()
 
     do {
@@ -351,7 +351,7 @@ final class LexiRayController: ObservableObject {
       let batchID = batch.id
       let request = batch.request
       for entry in batch.entries where entry.isTranslatable {
-        startProviderTranslation(entry, batchID: batchID, request: request)
+        startProviderTranslation(entry, batchID: batchID, request: request, bypassCache: bypassCache)
       }
     } catch {
       activeBatchID = nil
@@ -361,14 +361,19 @@ final class LexiRayController: ObservableObject {
     }
   }
 
-  private func startProviderTranslation(_ entry: ProviderTranslationEntry, batchID: UUID, request: TranslationRequest) {
+  private func startProviderTranslation(
+    _ entry: ProviderTranslationEntry,
+    batchID: UUID,
+    request: TranslationRequest,
+    bypassCache: Bool = false
+  ) {
     providerTranslationTasks[entry.providerConfigurationID]?.cancel()
     providerTranslationTasks[entry.providerConfigurationID] = Task { @MainActor [weak self] in
       guard let self else {
         return
       }
 
-      let updatedEntry = await pipeline.stream(entry, request: request) { partialEntry in
+      let updatedEntry = await pipeline.stream(entry, request: request, bypassCache: bypassCache) { partialEntry in
         guard !Task.isCancelled, self.activeBatchID == batchID else {
           return
         }
