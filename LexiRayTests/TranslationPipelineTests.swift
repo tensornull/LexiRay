@@ -32,6 +32,19 @@ final class TranslationPipelineTests: XCTestCase {
     XCTAssertEqual(result.request.targetLanguage, "en")
   }
 
+  func testPipelineTreatsShortEnglishTextAsEnglishSource() throws {
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayPipelineTests-\(UUID().uuidString)"))
+    let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
+    settings.language1 = "en"
+    settings.language2 = "zh-Hans"
+    let pipeline = TranslationPipeline(settings: settings)
+
+    let batch = try pipeline.makeBatch(text: "hi", selectionSource: .manual)
+
+    XCTAssertEqual(batch.request.sourceLanguage, "en")
+    XCTAssertEqual(batch.request.targetLanguage, "zh-Hans")
+  }
+
   func testBatchKeepsOriginalTextAndAddsPreparedLLMInput() throws {
     let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayPipelineTests-\(UUID().uuidString)"))
     let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)

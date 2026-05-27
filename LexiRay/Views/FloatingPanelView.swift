@@ -301,7 +301,11 @@ struct FloatingPanelView: View {
       )
     case .idle, .loading, .error:
       let sourceLanguage = controller.panelSourceText.nonEmptyTrimmed.flatMap {
-        LanguageDetector.dominantLanguageCode(for: $0)
+        LanguageDetector.sourceLanguageCode(
+          for: $0,
+          language1: controller.settings.language1,
+          language2: controller.settings.language2
+        )
       }
       return LanguageDetector.directionLabel(
         sourceLanguage: sourceLanguage,

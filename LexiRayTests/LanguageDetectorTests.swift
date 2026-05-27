@@ -6,6 +6,40 @@ final class LanguageDetectorTests: XCTestCase {
     XCTAssertEqual(LanguageDetector.dominantLanguageCode(for: "A clean translation app for macOS"), "en")
   }
 
+  func testShortEnglishSourceLanguageUsesConfiguredEnglish() {
+    for text in ["hi", "Hi", "hi!", "ok"] {
+      XCTAssertEqual(
+        LanguageDetector.sourceLanguageCode(for: text, language1: "en", language2: "zh-Hans"),
+        "en"
+      )
+    }
+  }
+
+  func testLongerTextStillUsesNaturalLanguageDetection() {
+    XCTAssertEqual(
+      LanguageDetector.sourceLanguageCode(
+        for: "A clean translation app for macOS",
+        language1: "en",
+        language2: "zh-Hans"
+      ),
+      "en"
+    )
+  }
+
+  func testShortTextEnglishOverrideRequiresEnglishLanguage1() {
+    XCTAssertEqual(
+      LanguageDetector.sourceLanguageCode(for: "hi", language1: "fr", language2: "zh-Hans"),
+      LanguageDetector.dominantLanguageCode(for: "hi")
+    )
+  }
+
+  func testShortTextEnglishOverrideIgnoresCodeLikeText() {
+    XCTAssertEqual(
+      LanguageDetector.sourceLanguageCode(for: "hi1", language1: "en", language2: "zh-Hans"),
+      LanguageDetector.dominantLanguageCode(for: "hi1")
+    )
+  }
+
   func testDefaultTargetLanguageUsesEnglishForChineseSource() {
     XCTAssertEqual(
       LanguageDetector.defaultTargetLanguage(for: "zh-Hans", locale: Locale(identifier: "zh_CN")),

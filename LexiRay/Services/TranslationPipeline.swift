@@ -36,7 +36,11 @@ final class TranslationPipeline {
       throw TranslationError.emptyInput
     }
 
-    let sourceLanguage = LanguageDetector.dominantLanguageCode(for: text)
+    let sourceLanguage = LanguageDetector.sourceLanguageCode(
+      for: text,
+      language1: settings.language1,
+      language2: settings.language2
+    )
     let targetLanguage = settings.resolvedTargetLanguage(for: sourceLanguage)
     let llmInputText = SourceMarkdownPreparer.prepare(text)
 
