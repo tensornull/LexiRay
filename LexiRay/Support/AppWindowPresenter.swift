@@ -3,6 +3,7 @@ import AppKit
 @MainActor
 enum AppWindowPresenter {
   private static var windowCloseObserver: NSObjectProtocol?
+  private static var appResignObserver: NSObjectProtocol?
   private weak static var mainWindow: NSWindow?
   private static var mainWindowObservers: [NSObjectProtocol] = []
   private static var closingMainWindowIDs = Set<ObjectIdentifier>()
@@ -77,9 +78,20 @@ enum AppWindowPresenter {
   }
 
   static func requestMainWindowPresentation() {
+    startPresentationCancellationObservation()
     pendingMainWindowPresentation = true
     pendingPresentationRetryDeadline = Date().addingTimeInterval(5)
     showDockAndActivate()
+  }
+
+  static var isMainWindowPresentationPending: Bool {
+    pendingMainWindowPresentation
+  }
+
+  static func cancelPendingMainWindowPresentation() {
+    pendingMainWindowPresentation = false
+    pendingPresentationRetryScheduled = false
+    pendingPresentationRetryDeadline = nil
   }
 
   @discardableResult
@@ -87,8 +99,6 @@ enum AppWindowPresenter {
     guard pendingMainWindowPresentation else {
       return false
     }
-
-    showDockAndActivate()
 
     guard let window = mainWindowCandidate() else {
       schedulePendingPresentationRetry()
@@ -102,6 +112,7 @@ enum AppWindowPresenter {
     }
 
     pendingMainWindowPresentation = false
+    pendingPresentationRetryScheduled = false
     pendingPresentationRetryDeadline = nil
     return true
   }
@@ -109,7 +120,6 @@ enum AppWindowPresenter {
   private static func bringToFront(_ window: NSWindow) {
     window.deminiaturize(nil)
     window.makeKeyAndOrderFront(nil)
-    window.orderFrontRegardless()
   }
 
   private static func observeMainWindow(_ window: NSWindow) {
@@ -136,6 +146,18 @@ enum AppWindowPresenter {
 
     mainWindowObservers.append(
       notificationCenter.addObserver(
+        forName: NSWindow.didResignKeyNotification,
+        object: window,
+        queue: .main
+      ) { _ in
+        Task { @MainActor in
+          cancelPendingMainWindowPresentation()
+        }
+      }
+    )
+
+    mainWindowObservers.append(
+      notificationCenter.addObserver(
         forName: NSWindow.willCloseNotification,
         object: window,
         queue: .main
@@ -145,6 +167,22 @@ enum AppWindowPresenter {
         }
       }
     )
+  }
+
+  private static func startPresentationCancellationObservation() {
+    guard appResignObserver == nil else {
+      return
+    }
+
+    appResignObserver = NotificationCenter.default.addObserver(
+      forName: NSApplication.didResignActiveNotification,
+      object: NSApp,
+      queue: .main
+    ) { _ in
+      Task { @MainActor in
+        cancelPendingMainWindowPresentation()
+      }
+    }
   }
 
   private static func removeMainWindowObservers() {
@@ -205,6 +243,7 @@ enum AppWindowPresenter {
     }
 
     guard pendingPresentationRetryDeadline.map({ Date() < $0 }) ?? true else {
+      cancelPendingMainWindowPresentation()
       return
     }
 

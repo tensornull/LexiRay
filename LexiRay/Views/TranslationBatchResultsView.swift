@@ -192,8 +192,7 @@ private struct ProviderTranslationResultRow: View {
         }
       }
     } label: {
-      Image(systemName: "chevron.down")
-        .frame(width: 22, height: 22)
+      FloatingPanelIconMenuLabel(systemName: "chevron.down")
     }
     .menuStyle(.borderlessButton)
     .help("Copy Format")
@@ -207,10 +206,8 @@ private struct ProviderTranslationResultRow: View {
   ) -> some View {
     Button(action: action) {
       Image(systemName: systemName)
-        .frame(width: 22, height: 22)
-        .foregroundStyle(isActive ? Color.accentColor : Color.primary)
     }
-    .buttonStyle(.borderless)
+    .buttonStyle(FloatingPanelIconButtonStyle(isActive: isActive))
     .help(help)
   }
 }

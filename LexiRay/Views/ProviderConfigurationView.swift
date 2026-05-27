@@ -14,7 +14,11 @@ struct ProviderConfigurationList: View {
             Button {
               settings.addProvider(providerID: providerID)
             } label: {
-              Label(providerID.displayName, systemImage: providerID.systemImage)
+              HStack(spacing: 8) {
+                ProviderIconView(providerID: providerID)
+                  .frame(width: 16)
+                Text(providerID.displayName)
+              }
             }
           }
         } label: {
@@ -85,7 +89,10 @@ private struct ProviderConfigurationCard: View {
 
   private var titleRow: some View {
     HStack(spacing: 8) {
-      Label(configuration.effectiveDisplayName, systemImage: configuration.providerID.systemImage)
+      ProviderIconView(providerID: configuration.providerID)
+        .frame(width: 18)
+
+      Text(configuration.effectiveDisplayName)
         .font(.headline)
         .lineLimit(1)
 

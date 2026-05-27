@@ -16,24 +16,34 @@ struct MainView: View {
       .listStyle(.sidebar)
       .navigationSplitViewColumnWidth(min: 180, ideal: 210)
     } detail: {
-      ScrollView {
-        VStack(alignment: .leading, spacing: 20) {
-          switch controller.selectedMainSection {
-          case .dashboard:
-            header
-            quickActions
-            languagePanel
-            resultPanel
-          case .providers:
-            providerPanel
-          case .settings:
-            DashboardSettingsView(controller: controller)
+      ZStack(alignment: .top) {
+        ScrollView {
+          VStack(alignment: .leading, spacing: 20) {
+            switch controller.selectedMainSection {
+            case .dashboard:
+              header
+              quickActions
+              languagePanel
+              resultPanel
+            case .providers:
+              providerPanel
+            case .settings:
+              DashboardSettingsView(controller: controller)
+            }
           }
+          .padding(24)
+          .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+
+        if let toast = controller.copyToast {
+          CopyToastView(toast: toast)
+            .padding(.top, 18)
+            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            .zIndex(2)
+        }
       }
       .navigationTitle(controller.selectedMainSection.title)
+      .animation(.easeInOut(duration: 0.16), value: controller.copyToast?.id)
     }
   }
 

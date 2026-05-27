@@ -44,6 +44,7 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
 
     let panel = panel ?? makePanel(controller: controller)
     self.panel = panel
+    Self.updatePanelPresentation(panel, isPinned: controller.isPanelPinned)
 
     let shouldPosition = repositioning || !panel.isVisible
     resize(panel, for: controller, preservingTopLeft: panel.isVisible && !shouldPosition)
@@ -71,10 +72,11 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     hide()
   }
 
-  func updatePinnedState(isPinned _: Bool) {
-    guard panel?.isVisible == true else {
+  func updatePinnedState(isPinned: Bool) {
+    guard let panel else {
       return
     }
+    Self.updatePanelPresentation(panel, isPinned: isPinned)
     startDismissMonitors()
   }
 
@@ -103,8 +105,7 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     )
 
     panel.title = "LexiRay"
-    panel.isFloatingPanel = true
-    panel.level = .floating
+    Self.updatePanelPresentation(panel, isPinned: controller.isPanelPinned)
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     panel.isMovableByWindowBackground = true
     panel.hidesOnDeactivate = false
@@ -240,6 +241,15 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
 
   static func contentSize(for controller: LexiRayController) -> NSSize {
     NSSize(width: 660, height: contentHeight(for: controller))
+  }
+
+  static func panelLevel(isPinned: Bool) -> NSWindow.Level {
+    isPinned ? .floating : .normal
+  }
+
+  private static func updatePanelPresentation(_ panel: NSPanel, isPinned: Bool) {
+    panel.isFloatingPanel = isPinned
+    panel.level = panelLevel(isPinned: isPinned)
   }
 
   private static func contentHeight(for controller: LexiRayController) -> CGFloat {

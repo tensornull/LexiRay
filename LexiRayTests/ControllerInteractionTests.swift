@@ -337,6 +337,7 @@ final class ControllerInteractionTests: XCTestCase {
     controller.copyResultToClipboard(second)
 
     XCTAssertEqual(NSPasteboard.general.string(forType: .string), "two")
+    XCTAssertEqual(controller.copyToast?.message, "Copied")
   }
 
   func testCopySpecificFormatUpdatesDefaultCopyFormat() {
@@ -357,6 +358,7 @@ final class ControllerInteractionTests: XCTestCase {
     controller.copyResultToClipboard(result, format: .html)
 
     XCTAssertEqual(controller.settings.defaultCopyFormat, .html)
+    XCTAssertEqual(controller.copyToast?.message, "Copied")
     XCTAssertTrue(NSPasteboard.general.string(forType: .html)?.contains("Hello") == true)
     XCTAssertTrue(NSPasteboard.general.string(forType: .string)?.contains("Hello world") == true)
   }
@@ -562,6 +564,17 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertFalse(style.contains(.fullSizeContentView))
   }
 
+  func testFloatingPanelLevelOnlyFloatsWhenPinned() {
+    XCTAssertEqual(FloatingPanelController.panelLevel(isPinned: false), .normal)
+    XCTAssertEqual(FloatingPanelController.panelLevel(isPinned: true), .floating)
+  }
+
+  func testSourceTextEditorUsesSharedTextInsets() {
+    XCTAssertEqual(SourceTextEditor.textInset.width, 11)
+    XCTAssertEqual(SourceTextEditor.textInset.height, 9)
+    XCTAssertEqual(SourceTextEditor.lineFragmentPadding, 0)
+  }
+
   func testFloatingPanelSettingsActionSelectsSettingsAndHidesIfNeeded() {
     let panel = MockFloatingPanelPresenter()
     let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
@@ -611,6 +624,33 @@ final class ControllerInteractionTests: XCTestCase {
       AppWindowPresenter.activationPolicy(hasVisibleRegularWindows: false, showsMenuBarIcon: false),
       .regular
     )
+  }
+
+  func testPendingMainWindowPresentationCancelsWhenAppResigns() async {
+    defer {
+      AppWindowPresenter.cancelPendingMainWindowPresentation()
+    }
+
+    AppWindowPresenter.requestMainWindowPresentation()
+
+    XCTAssertTrue(AppWindowPresenter.isMainWindowPresentationPending)
+
+    NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: NSApp)
+
+    await waitUntil {
+      !AppWindowPresenter.isMainWindowPresentationPending
+    }
+    XCTAssertFalse(AppWindowPresenter.isMainWindowPresentationPending)
+  }
+
+  func testPendingMainWindowPresentationCanBeCancelled() {
+    AppWindowPresenter.requestMainWindowPresentation()
+
+    XCTAssertTrue(AppWindowPresenter.isMainWindowPresentationPending)
+
+    AppWindowPresenter.cancelPendingMainWindowPresentation()
+
+    XCTAssertFalse(AppWindowPresenter.isMainWindowPresentationPending)
   }
 
   func testWindowPresentationCanTargetHiddenMainWindowWithoutCompletingRequest() {

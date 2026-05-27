@@ -5,18 +5,29 @@ struct FloatingPanelView: View {
   @Environment(\.openWindow) private var openWindow
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      header
-      sourceComposer
-      resultArea
+    ZStack(alignment: .top) {
+      VStack(alignment: .leading, spacing: 10) {
+        header
+        sourceComposer
+        resultArea
+      }
+      .padding(12)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+      if let toast = controller.copyToast {
+        CopyToastView(toast: toast)
+          .padding(.top, 18)
+          .transition(.opacity.combined(with: .scale(scale: 0.96)))
+          .zIndex(2)
+      }
     }
-    .padding(12)
     .frame(width: panelSize.width, height: panelSize.height, alignment: .topLeading)
     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
     .overlay {
       RoundedRectangle(cornerRadius: 12)
         .stroke(Color(nsColor: .separatorColor).opacity(0.7), lineWidth: 1)
     }
+    .animation(.easeInOut(duration: 0.16), value: controller.copyToast?.id)
   }
 
   private var header: some View {
@@ -79,9 +90,10 @@ struct FloatingPanelView: View {
 
         Spacer()
 
-        if !controller.panelSourceText.isEmpty {
-          panelButton(systemName: "xmark.circle.fill", help: "Clear Source", action: controller.clearPanelSourceText)
-        }
+        panelButton(systemName: "xmark.circle.fill", help: "Clear Source", action: controller.clearPanelSourceText)
+          .opacity(controller.panelSourceText.isEmpty ? 0 : 1)
+          .disabled(controller.panelSourceText.isEmpty)
+          .accessibilityHidden(controller.panelSourceText.isEmpty)
 
         Button {
           controller.submitPanelSourceText()
@@ -90,10 +102,12 @@ struct FloatingPanelView: View {
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.small)
+        .frame(width: 132, height: 30)
         .keyboardShortcut(.return, modifiers: [.command])
         .disabled(controller.panelSourceText.nonEmptyTrimmed == nil)
         .help("Translate")
       }
+      .frame(height: 30)
 
       SourceTextEditor(
         text: $controller.panelSourceText,
@@ -107,6 +121,9 @@ struct FloatingPanelView: View {
     .overlay {
       RoundedRectangle(cornerRadius: 8)
         .stroke(Color(nsColor: .separatorColor).opacity(0.48), lineWidth: 1)
+    }
+    .transaction { transaction in
+      transaction.animation = nil
     }
   }
 
@@ -209,10 +226,8 @@ struct FloatingPanelView: View {
   ) -> some View {
     Button(action: action) {
       Image(systemName: systemName)
-        .frame(width: 24, height: 24)
-        .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
     }
-    .buttonStyle(.borderless)
+    .buttonStyle(FloatingPanelIconButtonStyle(isActive: isActive))
     .help(help)
   }
 

@@ -13,6 +13,7 @@ final class LexiRayController: ObservableObject {
   @Published var lastSelectionSource: SelectionSource = .unavailable
   @Published var lastOCRText = ""
   @Published var selectedMainSection: MainSection = .dashboard
+  @Published private(set) var copyToast: CopyToast?
   @Published private(set) var speakingResultID: UUID?
 
   let settings: SettingsStore
@@ -27,6 +28,7 @@ final class LexiRayController: ObservableObject {
   private var floatingPanel: FloatingPanelPresenting!
   private var translationTask: Task<Void, Never>?
   private var providerTranslationTasks: [String: Task<Void, Never>] = [:]
+  private var copyToastTask: Task<Void, Never>?
   private var activeBatchID: UUID?
   private var settingsCancellables: Set<AnyCancellable> = []
 
@@ -222,6 +224,7 @@ final class LexiRayController: ObservableObject {
   func copyResultToClipboard(_ result: TranslationResult, format: CopyFormat) {
     TranslationPasteboardWriter.write(result: result, format: format)
     settings.defaultCopyFormat = format
+    showCopyToast()
   }
 
   func speakResult() {
@@ -500,5 +503,17 @@ final class LexiRayController: ObservableObject {
   private func cancelProviderTranslationTasks() {
     providerTranslationTasks.values.forEach { $0.cancel() }
     providerTranslationTasks = [:]
+  }
+
+  private func showCopyToast() {
+    copyToastTask?.cancel()
+    copyToast = CopyToast(message: "Copied")
+    copyToastTask = Task { @MainActor [weak self] in
+      try? await Task.sleep(nanoseconds: 1_300_000_000)
+      guard !Task.isCancelled else {
+        return
+      }
+      self?.copyToast = nil
+    }
   }
 }
