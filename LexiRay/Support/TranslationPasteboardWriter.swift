@@ -2,7 +2,9 @@ import AppKit
 import Foundation
 
 enum TranslationPasteboardWriter {
-  static let markdownPasteboardType = NSPasteboard.PasteboardType("net.daringfireball.markdown")
+  static var markdownPasteboardType: NSPasteboard.PasteboardType {
+    NSPasteboard.PasteboardType("net.daringfireball.markdown")
+  }
 
   static func write(
     result: TranslationResult,

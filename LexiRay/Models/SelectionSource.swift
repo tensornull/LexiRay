@@ -37,7 +37,9 @@ struct SelectionReadResult: Equatable {
     self.failureReason = failureReason
   }
 
-  static let unavailable = SelectionReadResult(text: nil, source: .unavailable, failureReason: .noSelection)
+  static var unavailable: SelectionReadResult {
+    SelectionReadResult(text: nil, source: .unavailable, failureReason: .noSelection)
+  }
 }
 
 enum SelectionFailureReason: Equatable {

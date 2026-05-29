@@ -6,17 +6,21 @@ struct HotKeyConfiguration: Codable, Equatable {
   var modifiers: UInt32
   var keyEquivalent: String
 
-  static let defaultTranslate = HotKeyConfiguration(
-    keyCode: UInt32(kVK_ANSI_A),
-    modifiers: UInt32(controlKey) | UInt32(optionKey),
-    keyEquivalent: "A"
-  )
+  static var defaultTranslate: HotKeyConfiguration {
+    HotKeyConfiguration(
+      keyCode: UInt32(kVK_ANSI_A),
+      modifiers: UInt32(controlKey) | UInt32(optionKey),
+      keyEquivalent: "A"
+    )
+  }
 
-  static let defaultOCR = HotKeyConfiguration(
-    keyCode: UInt32(kVK_ANSI_S),
-    modifiers: UInt32(controlKey) | UInt32(optionKey),
-    keyEquivalent: "S"
-  )
+  static var defaultOCR: HotKeyConfiguration {
+    HotKeyConfiguration(
+      keyCode: UInt32(kVK_ANSI_S),
+      modifiers: UInt32(controlKey) | UInt32(optionKey),
+      keyEquivalent: "S"
+    )
+  }
 
   var isValidGlobalShortcut: Bool {
     modifiers != 0 && !keyEquivalent.trimmedForQuery.isEmpty

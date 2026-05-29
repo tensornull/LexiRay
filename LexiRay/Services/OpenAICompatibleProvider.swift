@@ -518,7 +518,9 @@ private func openLineStream(
   }
 }
 
-private let providerDebugBodyCharacterLimit = 6000
+private var providerDebugBodyCharacterLimit: Int {
+  6000
+}
 
 private func providerHTTPFailureMessage(
   statusCode: Int,

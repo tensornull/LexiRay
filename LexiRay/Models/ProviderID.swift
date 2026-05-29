@@ -10,21 +10,25 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable {
 
   static let productDefault: ProviderID = .openAIResponses
 
-  static let productCases: [ProviderID] = [
-    .openAIResponses,
-    .openAIChatCompletions,
-    .anthropicMessages,
-    .geminiGenerateContent,
-    .systemDictionary
-  ]
+  static var productCases: [ProviderID] {
+    [
+      .openAIResponses,
+      .openAIChatCompletions,
+      .anthropicMessages,
+      .geminiGenerateContent,
+      .systemDictionary
+    ]
+  }
 
-  static let addableCases: [ProviderID] = [
-    .openAIResponses,
-    .openAIChatCompletions,
-    .anthropicMessages,
-    .geminiGenerateContent,
-    .systemDictionary
-  ]
+  static var addableCases: [ProviderID] {
+    [
+      .openAIResponses,
+      .openAIChatCompletions,
+      .anthropicMessages,
+      .geminiGenerateContent,
+      .systemDictionary
+    ]
+  }
 
   var id: String {
     rawValue

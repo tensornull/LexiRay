@@ -4,8 +4,13 @@ import Foundation
 
 @MainActor
 final class SettingsStore: ObservableObject {
-  nonisolated static let defaultTranslationHistoryLimit = 100
-  nonisolated static let translationHistoryLimitRange = 1 ... 100
+  nonisolated static var defaultTranslationHistoryLimit: Int {
+    100
+  }
+
+  nonisolated static var translationHistoryLimitRange: ClosedRange<Int> {
+    1 ... 100
+  }
 
   @Published var preferredProvider: ProviderID {
     didSet {
@@ -693,22 +698,72 @@ final class SettingsStore: ObservableObject {
   }
 
   private enum Keys {
-    static let preferredProvider = "preferredProvider"
-    static let targetLanguage = "targetLanguage"
-    static let language1 = "language1"
-    static let language2 = "language2"
-    static let autoSwitchLanguages = "autoSwitchLanguages"
-    static let showsMenuBarIcon = "showsMenuBarIcon"
-    static let translateHotKey = "translateHotKey"
-    static let ocrHotKey = "ocrHotKey"
-    static let floatingPanelPlacement = "floatingPanelPlacement"
-    static let floatingPanelLastOrigin = "floatingPanelLastOrigin"
-    static let floatingPanelLastSize = "floatingPanelLastSize"
-    static let defaultCopyFormat = "defaultCopyFormat"
-    static let translationHistoryLimit = "translationHistoryLimit"
-    static let providerConfigurations = "providerConfigurations"
-    static let openAIBaseURL = "openAIBaseURL"
-    static let openAIModel = "openAIModel"
-    static let openAIAPIKey = "openAIAPIKey"
+    static var preferredProvider: String {
+      "preferredProvider"
+    }
+
+    static var targetLanguage: String {
+      "targetLanguage"
+    }
+
+    static var language1: String {
+      "language1"
+    }
+
+    static var language2: String {
+      "language2"
+    }
+
+    static var autoSwitchLanguages: String {
+      "autoSwitchLanguages"
+    }
+
+    static var showsMenuBarIcon: String {
+      "showsMenuBarIcon"
+    }
+
+    static var translateHotKey: String {
+      "translateHotKey"
+    }
+
+    static var ocrHotKey: String {
+      "ocrHotKey"
+    }
+
+    static var floatingPanelPlacement: String {
+      "floatingPanelPlacement"
+    }
+
+    static var floatingPanelLastOrigin: String {
+      "floatingPanelLastOrigin"
+    }
+
+    static var floatingPanelLastSize: String {
+      "floatingPanelLastSize"
+    }
+
+    static var defaultCopyFormat: String {
+      "defaultCopyFormat"
+    }
+
+    static var translationHistoryLimit: String {
+      "translationHistoryLimit"
+    }
+
+    static var providerConfigurations: String {
+      "providerConfigurations"
+    }
+
+    static var openAIBaseURL: String {
+      "openAIBaseURL"
+    }
+
+    static var openAIModel: String {
+      "openAIModel"
+    }
+
+    static var openAIAPIKey: String {
+      "openAIAPIKey"
+    }
   }
 }
