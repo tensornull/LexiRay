@@ -1,5 +1,5 @@
-@testable import LexiRay
 import CoreGraphics
+@testable import LexiRay
 import XCTest
 
 final class OCRServiceTests: XCTestCase {

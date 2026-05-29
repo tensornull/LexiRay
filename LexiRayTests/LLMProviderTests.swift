@@ -167,14 +167,14 @@ final class LLMProviderTests: XCTestCase {
   func testOpenAIResponsesKeepsStructuredMarkdownWhenFinalTextIsCollapsed() async throws {
     let structuredMarkdown = "# 更新日志\n\n本项目的所有显著变更都将记录在此文件中。\n\n## [0.3.0] - 2026-05-26\n\n### 新增\n\n- `models` 现在默认读取公共模型目录。\n- `model info` 显示模型的详细目录元数据。"
     let collapsedMarkdown = "# 更新日志 本项目的所有显著变更都将记录在此文件中。 ## [0.3.0] - 2026-05-26 ### 新增 - `models` 现在默认读取公共模型目录。 - `model info` 显示模型的详细目录元数据。"
-    let client = MockHTTPClient(
+    let client = try MockHTTPClient(
       responseJSON: "{}",
       streamLines: [
         "event: response.output_text.delta",
-        "data: \(try jsonObjectLine(type: "response.output_text.delta", key: "delta", value: structuredMarkdown))",
+        "data: \(jsonObjectLine(type: "response.output_text.delta", key: "delta", value: structuredMarkdown))",
         "",
         "event: response.output_text.done",
-        "data: \(try jsonObjectLine(type: "response.output_text.done", key: "text", value: collapsedMarkdown))",
+        "data: \(jsonObjectLine(type: "response.output_text.done", key: "text", value: collapsedMarkdown))",
         "",
         "event: response.completed",
         #"data: {"type":"response.completed"}"#,

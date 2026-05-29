@@ -518,7 +518,7 @@ private func openLineStream(
   }
 }
 
-private let providerDebugBodyCharacterLimit = 6_000
+private let providerDebugBodyCharacterLimit = 6000
 
 private func providerHTTPFailureMessage(
   statusCode: Int,
@@ -740,7 +740,7 @@ private func markdownBlockStructureScore(_ text: String) -> Int {
 }
 
 private func nonEmptyLineCount(_ text: String) -> Int {
-  text.components(separatedBy: .newlines).filter { !$0.trimmedForQuery.isEmpty }.count
+  text.components(separatedBy: .newlines).count(where: { !$0.trimmedForQuery.isEmpty })
 }
 
 private func countMatches(in text: String, pattern: String) -> Int {

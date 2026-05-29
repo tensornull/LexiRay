@@ -194,7 +194,9 @@ enum OpenAIReasoningEffort: String, Codable, CaseIterable, Identifiable {
   case high
   case xhigh
 
-  var id: String { rawValue }
+  var id: String {
+    rawValue
+  }
 
   var displayName: String {
     switch self {
@@ -219,7 +221,9 @@ enum OpenAIReasoningSummary: String, Codable, CaseIterable, Identifiable {
   case concise
   case detailed
 
-  var id: String { rawValue }
+  var id: String {
+    rawValue
+  }
 
   var displayName: String {
     switch self {
@@ -238,7 +242,9 @@ enum OpenAITextVerbosity: String, Codable, CaseIterable, Identifiable {
   case medium
   case high
 
-  var id: String { rawValue }
+  var id: String {
+    rawValue
+  }
 
   var displayName: String {
     switch self {

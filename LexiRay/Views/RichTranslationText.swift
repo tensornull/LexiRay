@@ -100,12 +100,12 @@ private struct RichInlineFlowTextView: View {
   let font: Font
 
   private var tokens: [RichInlineToken] {
-    content.segments.flatMap { segment in
+    content.segments.flatMap { segment -> [RichInlineToken] in
       switch segment {
       case let .text(attributed):
-        return textTokens(from: attributed).map(RichInlineToken.text)
+        textTokens(from: attributed).map { RichInlineToken.text($0) }
       case let .code(text):
-        return [.code(text)]
+        [.code(text)]
       }
     }
   }
@@ -193,7 +193,7 @@ private struct InlineFlowLayout: Layout {
   func sizeThatFits(
     proposal: ProposedViewSize,
     subviews: Subviews,
-    cache: inout ()
+    cache _: inout ()
   ) -> CGSize {
     let maxWidth = proposal.width ?? .greatestFiniteMagnitude
     var lineWidth: CGFloat = 0
@@ -224,9 +224,9 @@ private struct InlineFlowLayout: Layout {
 
   func placeSubviews(
     in bounds: CGRect,
-    proposal: ProposedViewSize,
+    proposal _: ProposedViewSize,
     subviews: Subviews,
-    cache: inout ()
+    cache _: inout ()
   ) {
     let maxWidth = bounds.width
     var x = bounds.minX

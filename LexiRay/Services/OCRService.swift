@@ -281,8 +281,8 @@ final class OCRService: OCRRecognizing {
     if minDimension < 480 {
       scale = min(3, 480 / minDimension)
     }
-    if maxDimension * scale > 3_200 {
-      scale = max(1, 3_200 / maxDimension)
+    if maxDimension * scale > 3200 {
+      scale = max(1, 3200 / maxDimension)
     }
     return max(1, scale)
   }
@@ -334,7 +334,8 @@ final class OCRService: OCRRecognizing {
            after: previous.text,
            before: candidate.text,
            horizontalGap: candidate.boundingBox.minX - previous.boundingBox.maxX
-         ) {
+         )
+      {
         line += " "
       }
       line += candidate.text
@@ -363,7 +364,8 @@ final class OCRService: OCRRecognizing {
        let next = nextText.first,
        isCJK(previous),
        isCJK(next),
-       horizontalGap < 0.02 {
+       horizontalGap < 0.02
+    {
       return false
     }
 
@@ -382,9 +384,9 @@ final class OCRService: OCRRecognizing {
 
   private nonisolated static func isCJK(_ character: Character) -> Bool {
     character.unicodeScalars.contains { scalar in
-      (0x4E00...0x9FFF).contains(scalar.value)
-        || (0x3400...0x4DBF).contains(scalar.value)
-        || (0xF900...0xFAFF).contains(scalar.value)
+      (0x4E00 ... 0x9FFF).contains(scalar.value)
+        || (0x3400 ... 0x4DBF).contains(scalar.value)
+        || (0xF900 ... 0xFAFF).contains(scalar.value)
     }
   }
 }

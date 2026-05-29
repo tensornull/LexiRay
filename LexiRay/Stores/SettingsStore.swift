@@ -307,7 +307,7 @@ final class SettingsStore: ObservableObject {
   }
 
   nonisolated static func normalizedTranslationHistoryLimit(_ value: Int) -> Int {
-    return min(max(value, translationHistoryLimitRange.lowerBound), translationHistoryLimitRange.upperBound)
+    min(max(value, translationHistoryLimitRange.lowerBound), translationHistoryLimitRange.upperBound)
   }
 
   private func persistProviderSettingsFile() {

@@ -2,7 +2,7 @@
 import XCTest
 
 final class TranslationHistoryStoreTests: XCTestCase {
-  func testAppendLoadAndPruneKeepsNewestEntries() throws {
+  func testAppendLoadAndPruneKeepsNewestEntries() {
     let store = makeStore()
     let first = makeHistoryItem(text: "one")
     let second = makeHistoryItem(text: "two")

@@ -171,9 +171,9 @@ enum TranslationHistoryEntryStatus: Codable, Equatable {
     case .disabled:
       self = .disabled
     case .success:
-      self = .success(try container.decode(TranslationHistoryResult.self, forKey: .result))
+      self = try .success(container.decode(TranslationHistoryResult.self, forKey: .result))
     case .failure:
-      self = .failure(try container.decode(String.self, forKey: .message))
+      self = try .failure(container.decode(String.self, forKey: .message))
     }
   }
 
@@ -199,9 +199,9 @@ enum TranslationHistoryEntryStatus: Codable, Equatable {
   ) -> ProviderTranslationStatus {
     switch self {
     case .disabled:
-      return .disabled
+      .disabled
     case let .success(result):
-      return .success(
+      .success(
         TranslationResult(
           request: request,
           providerConfigurationID: providerConfigurationID,
@@ -213,7 +213,7 @@ enum TranslationHistoryEntryStatus: Codable, Equatable {
         )
       )
     case let .failure(message):
-      return .failure(message)
+      .failure(message)
     }
   }
 }

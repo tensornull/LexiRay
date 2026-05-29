@@ -21,82 +21,59 @@ jobs:
           xcodebuild -version
 
       - name: Install tools
-        run: brew install xcodegen
-
-      - name: Import Developer ID certificate
-        env:
-          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
-          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-        run: |
-          test -n "$MACOS_CERTIFICATE_P12"
-          test -n "$MACOS_CERTIFICATE_PASSWORD"
-          test -n "$KEYCHAIN_PASSWORD"
-
-          CERTIFICATE_PATH="$RUNNER_TEMP/developer_id.p12"
-          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
-
-          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$CERTIFICATE_PATH"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security import "$CERTIFICATE_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+        run: brew install xcodegen swiftformat
 
       - name: Generate project
         run: xcodegen generate
 
-      - name: Archive
-        env:
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: SwiftFormat lint
+        run: swiftformat LexiRay LexiRayTests Package.swift --lint
+
+      - name: Test
         run: |
-          test -n "$APPLE_TEAM_ID"
-          xcodebuild archive \
+          xcodebuild test \
+            -project LexiRay.xcodeproj \
+            -scheme LexiRay \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Build unsigned app
+        run: |
+          xcodebuild build \
             -project LexiRay.xcodeproj \
             -scheme LexiRay \
             -configuration Release \
-            -archivePath build/LexiRay.xcarchive \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Developer ID Application" \
-            OTHER_CODE_SIGN_FLAGS="--timestamp"
-
-      - name: Notarize
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APP_SPECIFIC_PASSWORD: ${{ secrets.APP_SPECIFIC_PASSWORD }}
-        run: |
-          test -n "$APPLE_ID"
-          test -n "$APPLE_TEAM_ID"
-          test -n "$APP_SPECIFIC_PASSWORD"
-
-          APP_PATH="build/LexiRay.xcarchive/Products/Applications/LexiRay.app"
-          ZIP_PATH="build/LexiRay.zip"
-
-          ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
-          xcrun notarytool submit "$ZIP_PATH" \
-            --apple-id "$APPLE_ID" \
-            --team-id "$APPLE_TEAM_ID" \
-            --password "$APP_SPECIFIC_PASSWORD" \
-            --wait
-          xcrun stapler staple "$APP_PATH"
+            -destination 'platform=macOS' \
+            -derivedDataPath build/DerivedData \
+            CONFIGURATION_BUILD_DIR="$PWD/build/release" \
+            CODE_SIGNING_ALLOWED=NO
 
       - name: Build DMG
         run: |
-          APP_PATH="build/LexiRay.xcarchive/Products/Applications/LexiRay.app"
-          DMG_PATH="build/LexiRay.dmg"
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          APP_PATH="build/release/LexiRay.app"
+          DMG_PATH="build/LexiRay-${TAG_VERSION}.dmg"
+          SHA_PATH="build/LexiRay-${TAG_VERSION}.dmg.sha256"
+
+          test -d "$APP_PATH"
+          APP_VERSION="$(plutil -extract CFBundleShortVersionString raw -o - "$APP_PATH/Contents/Info.plist")"
+          test "$APP_VERSION" = "$TAG_VERSION"
+
           hdiutil create -volname "LexiRay" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_PATH"
-          shasum -a 256 "$DMG_PATH" > "build/LexiRay.dmg.sha256"
-          spctl -a -vv "$APP_PATH"
+          hdiutil verify "$DMG_PATH"
+          (cd build && shasum -a 256 "LexiRay-${TAG_VERSION}.dmg" > "LexiRay-${TAG_VERSION}.dmg.sha256")
+          test -s "$SHA_PATH"
 
       - name: Upload GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          printf 'LexiRay %s.\n\nThis is an unsigned DMG. macOS Gatekeeper may show a trust warning when opening it.\n' "$TAG_VERSION" > build/release-notes.md
+
           gh release create "$GITHUB_REF_NAME" \
-            build/LexiRay.dmg \
-            build/LexiRay.dmg.sha256 \
-            --title "LexiRay $GITHUB_REF_NAME" \
-            --notes "LexiRay release $GITHUB_REF_NAME"
+            "build/LexiRay-${TAG_VERSION}.dmg" \
+            "build/LexiRay-${TAG_VERSION}.dmg.sha256" \
+            --title "LexiRay ${TAG_VERSION}" \
+            --notes-file build/release-notes.md

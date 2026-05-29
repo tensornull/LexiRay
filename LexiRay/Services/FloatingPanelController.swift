@@ -406,7 +406,7 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   }
 
   private nonisolated static func isSubmitShortcut(keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> Bool {
-    return (keyCode == 36 || keyCode == 76)
+    (keyCode == 36 || keyCode == 76)
       && modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command)
   }
 
@@ -426,17 +426,16 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
 
     if let direction = Self.historyNavigationDirection(keyCode: keyCode, modifierFlags: modifierFlags),
        Self.shouldRoutePanelKeyEvent(
-        eventWindowNumber: eventWindowNumber,
-        panelWindowNumber: panelWindowNumber,
-        panelIsVisible: panelIsVisible
+         eventWindowNumber: eventWindowNumber,
+         panelWindowNumber: panelWindowNumber,
+         panelIsVisible: panelIsVisible
        )
     {
-      let handled: Bool?
-      switch direction {
+      let handled: Bool? = switch direction {
       case .previous:
-        handled = controller?.showPreviousHistory()
+        controller?.showPreviousHistory()
       case .next:
-        handled = controller?.showNextHistory()
+        controller?.showNextHistory()
       }
 
       if handled == true {

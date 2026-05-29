@@ -14,6 +14,7 @@ final class LexiRayController: ObservableObject {
       updateHistoryNavigationForSourceChange()
     }
   }
+
   @Published var lastSelectionSource: SelectionSource = .unavailable
   @Published var lastOCRText = ""
   @Published var selectedMainSection: MainSection = .dashboard
@@ -322,13 +323,12 @@ final class LexiRayController: ObservableObject {
       return false
     }
 
-    let index: Int
-    if let historyNavigationIndex {
-      index = max(0, historyNavigationIndex - 1)
+    let index: Int = if let historyNavigationIndex {
+      max(0, historyNavigationIndex - 1)
     } else if let currentHistoryIndex = currentPresentedHistoryIndex {
-      index = max(0, currentHistoryIndex - 1)
+      max(0, currentHistoryIndex - 1)
     } else {
-      index = translationHistory.count - 1
+      translationHistory.count - 1
     }
 
     restoreHistory(at: index)
@@ -611,8 +611,8 @@ final class LexiRayController: ObservableObject {
 
   private func recordHistoryIfNeeded(for batch: TranslationBatch) {
     guard !recordedHistoryBatchIDs.contains(batch.id),
-          batch.entries.allSatisfy({ $0.status.isTerminalHistoryStatus }),
-          batch.entries.contains(where: { $0.status.isRecordedHistoryStatus }),
+          batch.entries.allSatisfy(\.status.isTerminalHistoryStatus),
+          batch.entries.contains(where: \.status.isRecordedHistoryStatus),
           let item = TranslationHistoryItem(batch: batch)
     else {
       return

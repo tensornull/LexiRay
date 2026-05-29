@@ -295,17 +295,17 @@ struct FloatingPanelView: View {
   private var directionLabel: String {
     switch controller.panelState {
     case let .batch(batch):
-      return LanguageDetector.directionLabel(
+      LanguageDetector.directionLabel(
         sourceLanguage: batch.request.sourceLanguage,
         targetLanguage: batch.request.targetLanguage
       )
     case let .result(result):
-      return LanguageDetector.directionLabel(
+      LanguageDetector.directionLabel(
         sourceLanguage: result.request.sourceLanguage,
         targetLanguage: result.request.targetLanguage
       )
     case .idle, .loading, .error:
-      return controller.settings.previewLanguageDirectionLabel(for: controller.panelSourceText)
+      controller.settings.previewLanguageDirectionLabel(for: controller.panelSourceText)
     }
   }
 

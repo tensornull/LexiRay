@@ -88,7 +88,8 @@ enum LanguageDetector {
   private static func shortASCIILatinToken(from text: String) -> String? {
     var candidate = text.trimmedForQuery
     while let lastScalar = candidate.unicodeScalars.last,
-          shortTextTrailingPunctuation.contains(lastScalar) {
+          shortTextTrailingPunctuation.contains(lastScalar)
+    {
       candidate.removeLast()
     }
 

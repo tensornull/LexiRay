@@ -143,24 +143,25 @@ private struct SourceTextView: NSViewRepresentable {
       parent.text = textView.string
     }
 
-    func textDidBeginEditing(_ notification: Notification) {
+    func textDidBeginEditing(_: Notification) {
       DispatchQueue.main.async { [weak self] in
         self?.parent.isFocused = true
       }
     }
 
-    func textDidEndEditing(_ notification: Notification) {
+    func textDidEndEditing(_: Notification) {
       DispatchQueue.main.async { [weak self] in
         self?.parent.isFocused = false
       }
     }
 
+    @MainActor
     func handleHistoryNavigation(_ direction: SourceTextHistoryDirection) -> Bool {
       switch direction {
       case .previous:
-        return parent.onMoveUp?() ?? false
+        parent.onMoveUp?() ?? false
       case .next:
-        return parent.onMoveDown?() ?? false
+        parent.onMoveDown?() ?? false
       }
     }
   }
