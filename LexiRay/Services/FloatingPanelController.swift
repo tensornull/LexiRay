@@ -23,9 +23,15 @@ extension FloatingPanelPresenting {
 
 @MainActor
 final class FloatingPanelController: NSObject, FloatingPanelPresenting {
-  static let panelStyleMask: NSWindow.StyleMask = [.borderless, .nonactivatingPanel, .resizable]
+  static var panelStyleMask: NSWindow.StyleMask {
+    [.borderless, .nonactivatingPanel, .resizable]
+  }
+
   static let defaultContentWidth: CGFloat = 660
-  static let minimumContentSize = NSSize(width: 560, height: 330)
+
+  static var minimumContentSize: NSSize {
+    NSSize(width: 560, height: 330)
+  }
 
   private weak var controller: LexiRayController?
   private var panel: NSPanel?

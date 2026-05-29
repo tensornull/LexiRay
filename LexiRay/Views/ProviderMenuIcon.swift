@@ -6,7 +6,9 @@ enum ProviderMenuIconSource: Equatable {
 }
 
 extension ProviderID {
-  static let menuIconSize = NSSize(width: 16, height: 16)
+  static var menuIconSize: NSSize {
+    NSSize(width: 16, height: 16)
+  }
 
   var menuIconSource: ProviderMenuIconSource {
     switch iconKind {

@@ -645,23 +645,29 @@ final class SettingsStore: ObservableObject {
     return ProviderID.productDefault
   }
 
-  private static let legacyDockToggleTranslateHotKey = HotKeyConfiguration(
-    keyCode: UInt32(kVK_ANSI_D),
-    modifiers: UInt32(cmdKey) | UInt32(optionKey),
-    keyEquivalent: "D"
-  )
+  private static var legacyDockToggleTranslateHotKey: HotKeyConfiguration {
+    HotKeyConfiguration(
+      keyCode: UInt32(kVK_ANSI_D),
+      modifiers: UInt32(cmdKey) | UInt32(optionKey),
+      keyEquivalent: "D"
+    )
+  }
 
-  private static let legacyDefaultTranslateHotKey = HotKeyConfiguration(
-    keyCode: UInt32(kVK_ANSI_T),
-    modifiers: UInt32(cmdKey) | UInt32(optionKey) | UInt32(shiftKey),
-    keyEquivalent: "T"
-  )
+  private static var legacyDefaultTranslateHotKey: HotKeyConfiguration {
+    HotKeyConfiguration(
+      keyCode: UInt32(kVK_ANSI_T),
+      modifiers: UInt32(cmdKey) | UInt32(optionKey) | UInt32(shiftKey),
+      keyEquivalent: "T"
+    )
+  }
 
-  private static let legacyDefaultOCRHotKey = HotKeyConfiguration(
-    keyCode: UInt32(kVK_ANSI_O),
-    modifiers: UInt32(cmdKey) | UInt32(optionKey),
-    keyEquivalent: "O"
-  )
+  private static var legacyDefaultOCRHotKey: HotKeyConfiguration {
+    HotKeyConfiguration(
+      keyCode: UInt32(kVK_ANSI_O),
+      modifiers: UInt32(cmdKey) | UInt32(optionKey),
+      keyEquivalent: "O"
+    )
+  }
 
   private struct StoredProviderConfiguration: Codable {
     let displayName: String

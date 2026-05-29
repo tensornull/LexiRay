@@ -2,7 +2,10 @@ import AppKit
 import SwiftUI
 
 struct SourceTextEditor: View {
-  static let textInset = CGSize(width: 11, height: 9)
+  static var textInset: CGSize {
+    CGSize(width: 11, height: 9)
+  }
+
   static let lineFragmentPadding: CGFloat = 0
 
   @Binding var text: String
