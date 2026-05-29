@@ -323,12 +323,13 @@ final class LexiRayController: ObservableObject {
       return false
     }
 
-    let index: Int = if let historyNavigationIndex {
-      max(0, historyNavigationIndex - 1)
+    let index: Int
+    if let historyNavigationIndex {
+      index = max(0, historyNavigationIndex - 1)
     } else if let currentHistoryIndex = currentPresentedHistoryIndex {
-      max(0, currentHistoryIndex - 1)
+      index = max(0, currentHistoryIndex - 1)
     } else {
-      translationHistory.count - 1
+      index = translationHistory.count - 1
     }
 
     restoreHistory(at: index)

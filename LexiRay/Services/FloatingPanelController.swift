@@ -431,11 +431,12 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
          panelIsVisible: panelIsVisible
        )
     {
-      let handled: Bool? = switch direction {
+      let handled: Bool?
+      switch direction {
       case .previous:
-        controller?.showPreviousHistory()
+        handled = controller?.showPreviousHistory()
       case .next:
-        controller?.showNextHistory()
+        handled = controller?.showNextHistory()
       }
 
       if handled == true {
