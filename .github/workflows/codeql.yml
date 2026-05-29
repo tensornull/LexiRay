@@ -47,7 +47,8 @@ jobs:
             -scheme LexiRay \
             -configuration Debug \
             -destination 'platform=macOS' \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            SWIFT_COMPILATION_MODE=wholemodule
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
