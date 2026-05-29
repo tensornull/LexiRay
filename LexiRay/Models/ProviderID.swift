@@ -92,4 +92,14 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable {
 
     return ProviderID(rawValue: rawValue)
   }
+
+  func isDefaultDisplayNameEquivalent(_ displayName: String) -> Bool {
+    Self.displayNameKey(displayName) == Self.displayNameKey(self.displayName)
+  }
+
+  private static func displayNameKey(_ displayName: String) -> String {
+    displayName
+      .filter { !$0.isWhitespace }
+      .lowercased()
+  }
 }

@@ -17,23 +17,29 @@ final class TextSelectionService: TextSelectionReading {
     let accessibilityTrusted = PermissionService.isAccessibilityTrusted
 
     if let text = accessibilityReader.readSelectedText() {
-      AppLog.selection.info("Read selection through Accessibility")
+      logSelectionRead(source: .accessibility, text: text)
       return SelectionReadResult(text: text, source: .accessibility)
     }
 
     if let text = browserReader.readSelectedTextFromFrontmostBrowser() {
-      AppLog.selection.info("Read selection through browser AppleScript")
+      logSelectionRead(source: .browserAppleScript, text: text)
       return SelectionReadResult(text: text, source: .browserAppleScript)
     }
 
     if let text = await clipboardReader.copyCurrentSelection() {
-      AppLog.selection.info("Read selection through simulated copy")
+      logSelectionRead(source: .simulatedCopy, text: text)
       return SelectionReadResult(text: text, source: .simulatedCopy)
     }
 
     AppLog.selection.warning("No selected text could be read")
     let reason: SelectionFailureReason = accessibilityTrusted ? .copyFailed : .accessibilityPermissionMissing
     return SelectionReadResult(text: nil, source: .unavailable, failureReason: reason)
+  }
+
+  private func logSelectionRead(source: SelectionSource, text: String) {
+    AppLog.selection.info(
+      "Read selection through \(source.displayName, privacy: .public), characters: \(text.count)"
+    )
   }
 }
 
@@ -52,13 +58,17 @@ private final class AccessibilitySelectionReader {
       &focusedValue
     )
 
-    guard focusedResult == .success, let focusedElement = focusedValue else {
+    guard focusedResult == .success,
+          let focusedElementValue = focusedValue,
+          CFGetTypeID(focusedElementValue) == AXUIElementGetTypeID()
+    else {
       return nil
     }
+    let focusedElement = unsafeDowncast(focusedElementValue, to: AXUIElement.self)
 
     var selectedValue: CFTypeRef?
     let selectedResult = AXUIElementCopyAttributeValue(
-      focusedElement as! AXUIElement,
+      focusedElement,
       kAXSelectedTextAttribute as CFString,
       &selectedValue
     )
@@ -115,24 +125,49 @@ private final class BrowserSelectionReader {
 }
 
 @MainActor
-private final class ClipboardSelectionReader {
+final class ClipboardSelectionReader {
+  private let pasteboard: NSPasteboard
+  private let frontmostBundleIdentifier: @MainActor () -> String?
+  private let copyAction: @MainActor () -> Void
+  private let waitAfterCopy: @MainActor (UInt64) async -> Void
+
+  init(
+    pasteboard: NSPasteboard = .general,
+    frontmostBundleIdentifier: @escaping @MainActor () -> String? = {
+      NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    },
+    copyAction: (@MainActor () -> Void)? = nil,
+    waitAfterCopy: @escaping @MainActor (UInt64) async -> Void = { nanoseconds in
+      try? await Task.sleep(nanoseconds: nanoseconds)
+    }
+  ) {
+    self.pasteboard = pasteboard
+    self.frontmostBundleIdentifier = frontmostBundleIdentifier
+    self.waitAfterCopy = waitAfterCopy
+    self.copyAction = copyAction ?? Self.sendCommandC
+  }
+
   func copyCurrentSelection() async -> String? {
-    let pasteboard = NSPasteboard.general
+    if frontmostBundleIdentifier() == AppConstants.bundleID {
+      AppLog.selection.info("Skipped simulated copy because LexiRay is frontmost")
+      return nil
+    }
+
     let previousItems = pasteboard.pasteboardItems?.map(Self.copyPasteboardItem)
-    let previousChangeCount = pasteboard.changeCount
 
     pasteboard.clearContents()
-    sendCommandC()
+    let baselineChangeCount = pasteboard.changeCount
+    copyAction()
 
-    try? await Task.sleep(nanoseconds: 320_000_000)
+    await waitAfterCopy(320_000_000)
 
-    let copiedText = pasteboard.string(forType: .string)?.nonEmptyTrimmed
+    let copiedText = pasteboard.changeCount == baselineChangeCount
+      ? nil
+      : pasteboard.string(forType: .string)?.nonEmptyTrimmed
 
-    if pasteboard.changeCount != previousChangeCount {
-      pasteboard.clearContents()
-      if let previousItems, !previousItems.isEmpty {
-        pasteboard.writeObjects(previousItems)
-      }
+    pasteboard.clearContents()
+    if let previousItems, !previousItems.isEmpty {
+      pasteboard.writeObjects(previousItems)
     }
 
     return copiedText
@@ -148,7 +183,7 @@ private final class ClipboardSelectionReader {
     return copy
   }
 
-  private func sendCommandC() {
+  private static func sendCommandC() {
     let source = CGEventSource(stateID: .hidSystemState)
     let keyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: true)
     let keyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: false)

@@ -27,7 +27,13 @@ final class ControllerInteractionTests: XCTestCase {
     let panel = MockFloatingPanelPresenter()
     let permissions = MockPermissionChecker(isAccessibilityTrusted: false)
     let controller = makeController(
-      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      selectionReader: ImmediateSelectionReader(
+        result: SelectionReadResult(
+          text: nil,
+          source: .unavailable,
+          failureReason: .accessibilityPermissionMissing
+        )
+      ),
       panel: panel,
       permissions: permissions
     )
@@ -43,6 +49,106 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertTrue(message.contains("Grant Accessibility permission"))
     XCTAssertEqual(permissions.promptRequests, [true])
     XCTAssertEqual(panel.events.first, .show(activating: false, repositioning: false))
+  }
+
+  func testUnavailableSelectionWithoutPermissionReasonShowsBlankComposer() async {
+    let selectionReader = BlockingSelectionReader()
+    let panel = MockFloatingPanelPresenter()
+    let permissions = MockPermissionChecker(isAccessibilityTrusted: true)
+    let controller = makeController(
+      selectionReader: selectionReader,
+      panel: panel,
+      permissions: permissions
+    )
+
+    controller.translateCurrentSelection()
+    await waitUntil { selectionReader.didStart }
+    selectionReader.resume(with: SelectionReadResult(text: nil, source: .unavailable, failureReason: .copyFailed))
+    await Task.yield()
+    await Task.yield()
+
+    XCTAssertEqual(controller.panelState, .idle)
+    XCTAssertEqual(controller.panelSourceText, "")
+    XCTAssertEqual(controller.lastSelectionSource, .unavailable)
+    XCTAssertEqual(panel.events.first, .show(activating: true, repositioning: false))
+    XCTAssertTrue(permissions.promptRequests.isEmpty)
+  }
+
+  func testOCRSelectionRecognizesAndTranslatesRegion() async {
+    let panel = MockFloatingPanelPresenter()
+    let ocrService = MockOCRService(result: .success("screen text"))
+    let overlay = MockOCRSelectionOverlay()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      ocrService: ocrService,
+      ocrSelectionOverlay: overlay
+    )
+    let rect = CGRect(x: 10, y: 20, width: 120, height: 40)
+
+    controller.translateOCRRegion()
+    XCTAssertTrue(panel.events.isEmpty)
+    overlay.complete(with: rect)
+    XCTAssertTrue(panel.events.isEmpty)
+
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      return batch.request.text == "screen text" && batch.request.selectionSource == .ocr
+    }
+
+    XCTAssertEqual(panel.hideCount, 1)
+    XCTAssertEqual(overlay.beginCount, 1)
+    XCTAssertEqual(ocrService.capturedRects, [rect])
+    XCTAssertEqual(controller.lastSelectionSource, .ocr)
+    XCTAssertEqual(controller.panelSourceText, "screen text")
+    XCTAssertEqual(panel.events.last, .show(activating: false, repositioning: false))
+  }
+
+  func testOCRSelectionCancelHidesPanel() {
+    let panel = MockFloatingPanelPresenter()
+    let overlay = MockOCRSelectionOverlay()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      ocrSelectionOverlay: overlay
+    )
+
+    controller.translateOCRRegion()
+    overlay.complete(with: nil)
+
+    XCTAssertEqual(controller.panelState, .idle)
+    XCTAssertEqual(panel.hideCount, 1)
+    XCTAssertEqual(panel.hideIfNeededCount, 1)
+    XCTAssertTrue(panel.events.isEmpty)
+  }
+
+  func testOCRFailureShowsError() async {
+    let panel = MockFloatingPanelPresenter()
+    let ocrService = MockOCRService(result: .failure(TranslationError.ocrUnavailable("No text was recognized")))
+    let overlay = MockOCRSelectionOverlay()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      ocrService: ocrService,
+      ocrSelectionOverlay: overlay
+    )
+
+    controller.translateOCRRegion()
+    XCTAssertTrue(panel.events.isEmpty)
+    overlay.complete(with: CGRect(x: 10, y: 20, width: 120, height: 40))
+    XCTAssertTrue(panel.events.isEmpty)
+
+    await waitUntil {
+      guard case let .error(message) = controller.panelState else {
+        return false
+      }
+      return message.contains("No text was recognized")
+    }
+
+    XCTAssertEqual(panel.hideCount, 1)
+    XCTAssertEqual(panel.events.last, .show(activating: false, repositioning: false))
   }
 
   func testPinnedAndCloseActionsReachPanelPresenter() {
@@ -77,6 +183,24 @@ final class ControllerInteractionTests: XCTestCase {
 
     XCTAssertEqual(size.width, 660)
     XCTAssertLessThanOrEqual(size.height, 410)
+  }
+
+  func testSavedFloatingPanelSizeOverridesAutomaticSize() {
+    let panel = MockFloatingPanelPresenter()
+    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
+
+    controller.settings.recordFloatingPanelSize(width: 760, height: 520)
+
+    XCTAssertEqual(FloatingPanelController.contentSize(for: controller), NSSize(width: 760, height: 520))
+  }
+
+  func testSavedFloatingPanelSizeIsClampedToSupportedRange() {
+    let panel = MockFloatingPanelPresenter()
+    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
+
+    controller.settings.recordFloatingPanelSize(width: 120, height: 120)
+
+    XCTAssertEqual(FloatingPanelController.contentSize(for: controller), FloatingPanelController.minimumContentSize)
   }
 
   func testLongResultUsesTallerFloatingPanelHeight() {
@@ -129,6 +253,16 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(controller.panelState, .idle)
   }
 
+  func testBlankManualTranslationDoesNotStartTranslation() {
+    let panel = MockFloatingPanelPresenter()
+    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
+
+    controller.translateManualText("   ")
+
+    XCTAssertTrue(panel.events.isEmpty)
+    XCTAssertEqual(controller.panelState, .idle)
+  }
+
   func testSubmitPanelSourceTextRetranslatesEditedTextAsManual() async {
     let panel = MockFloatingPanelPresenter()
     let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
@@ -176,6 +310,168 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(controller.panelSourceText, "hello")
   }
 
+  func testHistoryNavigationRestoresSavedBatchWithoutProviderCall() async throws {
+    let panel = MockFloatingPanelPresenter()
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let settings = SettingsStore(
+      defaults: defaults,
+      providerFileStore: makeProviderFileStore(),
+      allowsMockProvider: true
+    )
+    enableOnly([.mock], in: settings)
+    let counter = ControllerProviderCallCounter()
+    let pipeline = TranslationPipeline(settings: settings, providerFactory: { _ in
+      ControllerCountingTranslationProvider(counter: counter)
+    })
+    let historyStore = makeHistoryStore()
+    let controller = LexiRayController(
+      settings: settings,
+      selectionService: ImmediateSelectionReader(result: .unavailable),
+      permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
+      floatingPanelFactory: { _ in panel },
+      pipeline: pipeline,
+      historyStore: historyStore
+    )
+
+    controller.translateManualText("hello")
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      return batch.successfulResults.first?.translatedText == "call 1"
+    }
+
+    XCTAssertEqual(historyStore.load(limit: 100).map(\.request.text), ["hello"])
+    XCTAssertTrue(controller.canNavigateTranslationHistory)
+    XCTAssertTrue(controller.showPreviousHistory())
+    XCTAssertEqual(controller.panelSourceText, "hello")
+    controller.panelSourceText = "draft"
+    XCTAssertFalse(controller.canNavigateTranslationHistory)
+    XCTAssertFalse(controller.showPreviousHistory())
+
+    controller.clearPanelSourceText()
+    XCTAssertTrue(controller.showPreviousHistory())
+
+    guard case let .batch(historyBatch) = controller.panelState else {
+      return XCTFail("Expected restored history batch")
+    }
+
+    XCTAssertEqual(historyBatch.request.text, "hello")
+    XCTAssertEqual(historyBatch.successfulResults.first?.translatedText, "call 1")
+    XCTAssertEqual(controller.panelSourceText, "hello")
+    XCTAssertEqual(counter.callCount, 1)
+
+    XCTAssertTrue(controller.showNextHistory())
+    XCTAssertEqual(controller.panelState, .idle)
+    XCTAssertEqual(controller.panelSourceText, "")
+  }
+
+  func testHistoryNavigationFromCurrentSavedResultMovesToPreviousEntry() async throws {
+    let panel = MockFloatingPanelPresenter()
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let settings = SettingsStore(
+      defaults: defaults,
+      providerFileStore: makeProviderFileStore(),
+      allowsMockProvider: true
+    )
+    enableOnly([.mock], in: settings)
+    let counter = ControllerProviderCallCounter()
+    let pipeline = TranslationPipeline(settings: settings, providerFactory: { _ in
+      ControllerCountingTranslationProvider(counter: counter)
+    })
+    let controller = LexiRayController(
+      settings: settings,
+      selectionService: ImmediateSelectionReader(result: .unavailable),
+      permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
+      floatingPanelFactory: { _ in panel },
+      pipeline: pipeline,
+      historyStore: makeHistoryStore()
+    )
+
+    controller.translateManualText("hi")
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      return batch.request.text == "hi" && batch.successfulResults.first?.translatedText == "call 1"
+    }
+
+    controller.translateManualText("ok")
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      return batch.request.text == "ok" && batch.successfulResults.first?.translatedText == "call 2"
+    }
+
+    XCTAssertEqual(controller.panelSourceText, "ok")
+    XCTAssertTrue(controller.canNavigateTranslationHistory)
+    XCTAssertTrue(controller.showPreviousHistory())
+    XCTAssertEqual(controller.panelSourceText, "hi")
+
+    guard case let .batch(historyBatch) = controller.panelState else {
+      return XCTFail("Expected restored history batch")
+    }
+    XCTAssertEqual(historyBatch.request.text, "hi")
+    XCTAssertEqual(historyBatch.successfulResults.first?.translatedText, "call 1")
+    XCTAssertEqual(counter.callCount, 2)
+
+    XCTAssertTrue(controller.showNextHistory())
+    XCTAssertEqual(controller.panelSourceText, "ok")
+    XCTAssertTrue(controller.showNextHistory())
+    XCTAssertEqual(controller.panelState, .idle)
+    XCTAssertEqual(controller.panelSourceText, "")
+  }
+
+  func testHistoryLimitReductionPrunesPersistedHistory() async throws {
+    let panel = MockFloatingPanelPresenter()
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let settings = SettingsStore(
+      defaults: defaults,
+      providerFileStore: makeProviderFileStore(),
+      allowsMockProvider: true
+    )
+    enableOnly([.mock], in: settings)
+    let counter = ControllerProviderCallCounter()
+    let pipeline = TranslationPipeline(settings: settings, providerFactory: { _ in
+      ControllerCountingTranslationProvider(counter: counter)
+    })
+    let historyStore = makeHistoryStore()
+    let controller = LexiRayController(
+      settings: settings,
+      selectionService: ImmediateSelectionReader(result: .unavailable),
+      permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
+      floatingPanelFactory: { _ in panel },
+      pipeline: pipeline,
+      historyStore: historyStore
+    )
+
+    controller.startForTesting()
+    controller.translateManualText("one")
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      return batch.successfulResults.first?.translatedText == "call 1"
+    }
+
+    controller.translateManualText("two")
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      return batch.successfulResults.first?.translatedText == "call 2"
+    }
+
+    XCTAssertEqual(historyStore.load(limit: 100).map(\.request.text), ["one", "two"])
+
+    settings.translationHistoryLimit = 1
+
+    await waitUntil {
+      historyStore.load(limit: 100).map(\.request.text) == ["two"]
+    }
+  }
+
   func testManualRetranslateBypassesCacheForSameText() async throws {
     let panel = MockFloatingPanelPresenter()
     let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
@@ -194,7 +490,8 @@ final class ControllerInteractionTests: XCTestCase {
       selectionService: ImmediateSelectionReader(result: .unavailable),
       permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
       floatingPanelFactory: { _ in panel },
-      pipeline: pipeline
+      pipeline: pipeline,
+      historyStore: makeHistoryStore()
     )
 
     controller.translateManualText("hello")
@@ -235,7 +532,8 @@ final class ControllerInteractionTests: XCTestCase {
       selectionService: ImmediateSelectionReader(result: SelectionReadResult(text: "hello", source: .simulatedCopy)),
       permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
       floatingPanelFactory: { _ in panel },
-      pipeline: pipeline
+      pipeline: pipeline,
+      historyStore: makeHistoryStore()
     )
 
     controller.translateCurrentSelection()
@@ -275,7 +573,8 @@ final class ControllerInteractionTests: XCTestCase {
       selectionService: ImmediateSelectionReader(result: .unavailable),
       permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
       floatingPanelFactory: { _ in panel },
-      pipeline: pipeline
+      pipeline: pipeline,
+      historyStore: makeHistoryStore()
     )
 
     controller.translateManualText("hello")
@@ -454,7 +753,8 @@ final class ControllerInteractionTests: XCTestCase {
       selectionService: ImmediateSelectionReader(result: .unavailable),
       permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
       floatingPanelFactory: { _ in panel },
-      pipeline: pipeline
+      pipeline: pipeline,
+      historyStore: makeHistoryStore()
     )
 
     controller.translateManualText("hello")
@@ -496,7 +796,8 @@ final class ControllerInteractionTests: XCTestCase {
       selectionService: ImmediateSelectionReader(result: .unavailable),
       permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
       floatingPanelFactory: { _ in panel },
-      pipeline: pipeline
+      pipeline: pipeline,
+      historyStore: makeHistoryStore()
     )
 
     controller.translateManualText("hello")
@@ -532,7 +833,8 @@ final class ControllerInteractionTests: XCTestCase {
       settings: settings,
       selectionService: ImmediateSelectionReader(result: .unavailable),
       permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
-      floatingPanelFactory: { _ in panel }
+      floatingPanelFactory: { _ in panel },
+      historyStore: makeHistoryStore()
     )
 
     controller.translateManualText("hello")
@@ -560,6 +862,7 @@ final class ControllerInteractionTests: XCTestCase {
     let style = FloatingPanelController.panelStyleMask
 
     XCTAssertTrue(style.contains(.nonactivatingPanel))
+    XCTAssertTrue(style.contains(.resizable))
     XCTAssertFalse(style.contains(.titled))
     XCTAssertFalse(style.contains(.fullSizeContentView))
   }
@@ -567,6 +870,37 @@ final class ControllerInteractionTests: XCTestCase {
   func testFloatingPanelLevelOnlyFloatsWhenPinned() {
     XCTAssertEqual(FloatingPanelController.panelLevel(isPinned: false), .normal)
     XCTAssertEqual(FloatingPanelController.panelLevel(isPinned: true), .floating)
+  }
+
+  func testFloatingPanelRoutesHistoryKeysWhenVisibleWithoutEventWindow() {
+    XCTAssertTrue(
+      FloatingPanelController.shouldRoutePanelKeyEvent(
+        eventWindowNumber: nil,
+        panelWindowNumber: 42,
+        panelIsVisible: true
+      )
+    )
+    XCTAssertTrue(
+      FloatingPanelController.shouldRoutePanelKeyEvent(
+        eventWindowNumber: 42,
+        panelWindowNumber: 42,
+        panelIsVisible: false
+      )
+    )
+    XCTAssertFalse(
+      FloatingPanelController.shouldRoutePanelKeyEvent(
+        eventWindowNumber: nil,
+        panelWindowNumber: 42,
+        panelIsVisible: false
+      )
+    )
+    XCTAssertFalse(
+      FloatingPanelController.shouldRoutePanelKeyEvent(
+        eventWindowNumber: 7,
+        panelWindowNumber: 42,
+        panelIsVisible: true
+      )
+    )
   }
 
   func testSourceTextEditorUsesSharedTextInsets() {
@@ -733,6 +1067,9 @@ final class ControllerInteractionTests: XCTestCase {
     permissions: PermissionChecking = MockPermissionChecker(isAccessibilityTrusted: true),
     hotKeyService: HotKeyRegistering = MockHotKeyService(),
     pipeline: TranslationPipeline? = nil,
+    ocrService: OCRRecognizing? = nil,
+    ocrSelectionOverlay: OCRRegionSelecting? = nil,
+    historyStore: TranslationHistoryStore? = nil,
     speechService: SpeechControlling? = nil
   ) -> LexiRayController {
     let defaults = UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)")!
@@ -750,6 +1087,9 @@ final class ControllerInteractionTests: XCTestCase {
       hotKeyService: hotKeyService,
       floatingPanelFactory: { _ in panel },
       pipeline: pipeline,
+      ocrService: ocrService,
+      ocrSelectionOverlay: ocrSelectionOverlay,
+      historyStore: historyStore ?? makeHistoryStore(),
       speechService: speechService
     )
   }
@@ -759,6 +1099,13 @@ final class ControllerInteractionTests: XCTestCase {
       .appendingPathComponent("LexiRayControllerTests-\(UUID().uuidString)", isDirectory: true)
       .appendingPathComponent("providers.json", isDirectory: false)
     return ProviderSettingsFileStore(fileURL: fileURL)
+  }
+
+  private func makeHistoryStore() -> TranslationHistoryStore {
+    let fileURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("LexiRayControllerTests-\(UUID().uuidString)", isDirectory: true)
+      .appendingPathComponent("history.json", isDirectory: false)
+    return TranslationHistoryStore(fileURL: fileURL)
   }
 
   private func makeTranslationResult(text: String) -> TranslationResult {
@@ -906,6 +1253,42 @@ private final class MockPermissionChecker: PermissionChecking {
   func requestAccessibilityIfNeeded(prompt: Bool) -> Bool {
     promptRequests.append(prompt)
     return isAccessibilityTrusted
+  }
+}
+
+@MainActor
+private final class MockOCRService: OCRRecognizing {
+  private let result: Result<String, Error>
+  private(set) var capturedRects: [CGRect] = []
+
+  init(result: Result<String, Error>) {
+    self.result = result
+  }
+
+  func captureAndRecognizeText(in rect: CGRect) async throws -> String {
+    capturedRects.append(rect)
+    return try result.get()
+  }
+}
+
+@MainActor
+private final class MockOCRSelectionOverlay: OCRRegionSelecting {
+  private(set) var beginCount = 0
+  private(set) var closeCount = 0
+  private var completion: ((CGRect?) -> Void)?
+
+  func beginSelection(onComplete: @escaping (CGRect?) -> Void) {
+    beginCount += 1
+    completion = onComplete
+  }
+
+  func close() {
+    closeCount += 1
+  }
+
+  func complete(with rect: CGRect?) {
+    completion?(rect)
+    completion = nil
   }
 }
 

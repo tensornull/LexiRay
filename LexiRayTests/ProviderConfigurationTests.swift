@@ -1,3 +1,4 @@
+import AppKit
 @testable import LexiRay
 import XCTest
 
@@ -22,6 +23,35 @@ final class ProviderConfigurationTests: XCTestCase {
       ProviderConfiguration.normalizeBaseURL(" https://api.example.test/v1/// "),
       "https://api.example.test/v1"
     )
+  }
+
+  func testBuiltInDefaultEquivalentDisplayNameIsNotCustom() {
+    let configuration = ProviderConfiguration(
+      providerID: .openAIChatCompletions,
+      displayName: "OpenAIChatCompletions",
+      baseURL: "https://example.test/v1",
+      model: "chat-test",
+      isEnabled: true
+    )
+
+    XCTAssertEqual(configuration.effectiveDisplayName, ProviderID.openAIChatCompletions.displayName)
+    XCTAssertFalse(configuration.hasCustomDisplayName)
+    XCTAssertEqual(configuration.normalizedForStorage().displayName, "")
+  }
+
+  func testCustomProviderDisplayNameIsPreserved() {
+    let configuration = ProviderConfiguration(
+      id: "openAIChatCompletions-custom",
+      providerID: .openAIChatCompletions,
+      displayName: "OpenAIChatCompletions",
+      baseURL: "https://example.test/v1",
+      model: "chat-test",
+      isEnabled: true
+    )
+
+    XCTAssertEqual(configuration.effectiveDisplayName, "OpenAIChatCompletions")
+    XCTAssertTrue(configuration.hasCustomDisplayName)
+    XCTAssertEqual(configuration.normalizedForStorage().displayName, "OpenAIChatCompletions")
   }
 
   func testOpenAIEndpointPreservesBasePath() throws {
@@ -58,5 +88,42 @@ final class ProviderConfigurationTests: XCTestCase {
   func testNonLLMProvidersFallbackToSystemIcons() {
     XCTAssertEqual(ProviderID.systemDictionary.iconKind, .system("book"))
     XCTAssertEqual(ProviderID.mock.iconKind, .system("hammer"))
+  }
+
+  func testAddProviderMenuUsesOfficialAssetIconsAtFixedSize() {
+    let expectedSize = ProviderID.menuIconSize
+
+    let officialIcons: [(ProviderID, ProviderMenuIconSource)] = [
+      (.openAIResponses, .asset(name: "OpenAIProviderIcon", isTemplate: true)),
+      (.openAIChatCompletions, .asset(name: "OpenAIProviderIcon", isTemplate: true)),
+      (.anthropicMessages, .asset(name: "AnthropicProviderIcon", isTemplate: true)),
+      (.geminiGenerateContent, .asset(name: "GeminiProviderIcon", isTemplate: false))
+    ]
+
+    for (providerID, source) in officialIcons {
+      XCTAssertEqual(providerID.menuIconSource, source)
+
+      let image = providerID.menuIconImage()
+      XCTAssertNotNil(image, "\(providerID.displayName) should load its official menu icon asset")
+      XCTAssertEqual(image?.size.width, expectedSize.width)
+      XCTAssertEqual(image?.size.height, expectedSize.height)
+
+      if case let .asset(_, isTemplate) = source {
+        XCTAssertEqual(image?.isTemplate, isTemplate)
+      }
+    }
+  }
+
+  func testAddProviderMenuItemCarriesProviderIdentityAndIcon() {
+    let item = ProviderAddMenuItemFactory.makeProviderItem(
+      providerID: .openAIResponses,
+      target: nil,
+      action: nil
+    )
+
+    XCTAssertEqual(item.title, ProviderID.openAIResponses.displayName)
+    XCTAssertEqual(item.representedObject as? String, ProviderID.openAIResponses.rawValue)
+    XCTAssertEqual(item.image?.size.width, ProviderID.menuIconSize.width)
+    XCTAssertEqual(item.image?.size.height, ProviderID.menuIconSize.height)
   }
 }

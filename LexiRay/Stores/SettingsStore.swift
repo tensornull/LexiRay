@@ -4,6 +4,9 @@ import Foundation
 
 @MainActor
 final class SettingsStore: ObservableObject {
+  nonisolated static let defaultTranslationHistoryLimit = 100
+  nonisolated static let translationHistoryLimitRange = 1 ... 100
+
   @Published var preferredProvider: ProviderID {
     didSet {
       let normalizedProvider = Self.normalizedProvider(
@@ -80,8 +83,23 @@ final class SettingsStore: ObservableObject {
     didSet { persistFloatingPanelLastOrigin() }
   }
 
+  @Published private(set) var floatingPanelLastSize: FloatingPanelSavedSize? {
+    didSet { persistFloatingPanelLastSize() }
+  }
+
   @Published var defaultCopyFormat: CopyFormat {
     didSet { defaults.set(defaultCopyFormat.rawValue, forKey: Keys.defaultCopyFormat) }
+  }
+
+  @Published var translationHistoryLimit: Int {
+    didSet {
+      let normalized = Self.normalizedTranslationHistoryLimit(translationHistoryLimit)
+      if normalized != translationHistoryLimit {
+        translationHistoryLimit = normalized
+        return
+      }
+      defaults.set(translationHistoryLimit, forKey: Keys.translationHistoryLimit)
+    }
   }
 
   @Published var providerConfigurations: [ProviderConfiguration] {
@@ -138,8 +156,12 @@ final class SettingsStore: ObservableObject {
     floatingPanelPlacement = FloatingPanelPlacement(rawValue: defaults.string(forKey: Keys.floatingPanelPlacement) ?? "")
       ?? .screenCenter
     floatingPanelLastOrigin = Self.loadFloatingPanelLastOrigin(defaults: defaults)
+    floatingPanelLastSize = Self.loadFloatingPanelLastSize(defaults: defaults)
     defaultCopyFormat = CopyFormat(rawValue: defaults.string(forKey: Keys.defaultCopyFormat) ?? "") ?? .originalText
-    providerConfigurations = providerState.configurations
+    translationHistoryLimit = Self.normalizedTranslationHistoryLimit(
+      defaults.object(forKey: Keys.translationHistoryLimit) as? Int ?? Self.defaultTranslationHistoryLimit
+    )
+    providerConfigurations = providerState.configurations.map { $0.normalizedForStorage() }
     providerAPIKeys = providerState.apiKeys
     migrateLanguageSettingsIfNeeded()
     if fileSettings == nil {
@@ -169,6 +191,13 @@ final class SettingsStore: ObservableObject {
     floatingPanelLastOrigin = FloatingPanelSavedOrigin(x: x, y: y)
   }
 
+  func recordFloatingPanelSize(width: Double, height: Double) {
+    guard width.isFinite, height.isFinite, width > 0, height > 0 else {
+      return
+    }
+    floatingPanelLastSize = FloatingPanelSavedSize(width: width, height: height)
+  }
+
   func configuration(for providerID: ProviderID) -> ProviderConfiguration {
     providerConfigurations.first(where: { $0.id == providerID.rawValue })
       ?? ProviderConfiguration.defaults(for: providerID)
@@ -194,10 +223,11 @@ final class SettingsStore: ObservableObject {
   }
 
   func updateConfiguration(_ configuration: ProviderConfiguration) {
-    if let index = providerConfigurations.firstIndex(where: { $0.id == configuration.id }) {
-      providerConfigurations[index] = configuration
+    let normalizedConfiguration = configuration.normalizedForStorage()
+    if let index = providerConfigurations.firstIndex(where: { $0.id == normalizedConfiguration.id }) {
+      providerConfigurations[index] = normalizedConfiguration
     } else {
-      providerConfigurations.append(configuration)
+      providerConfigurations.append(normalizedConfiguration)
     }
   }
 
@@ -260,6 +290,24 @@ final class SettingsStore: ObservableObject {
 
   func languageDirectionLabel(sourceLanguage: String?, targetLanguage: String) -> String {
     LanguageDetector.directionLabel(sourceLanguage: sourceLanguage, targetLanguage: targetLanguage)
+  }
+
+  func previewLanguageDirectionLabel(for text: String?) -> String {
+    let sourceLanguage = text?.nonEmptyTrimmed.flatMap {
+      LanguageDetector.sourceLanguageCode(
+        for: $0,
+        language1: language1,
+        language2: language2
+      )
+    }
+    return languageDirectionLabel(
+      sourceLanguage: sourceLanguage,
+      targetLanguage: resolvedTargetLanguage(for: sourceLanguage)
+    )
+  }
+
+  nonisolated static func normalizedTranslationHistoryLimit(_ value: Int) -> Int {
+    return min(max(value, translationHistoryLimitRange.lowerBound), translationHistoryLimitRange.upperBound)
   }
 
   private func persistProviderSettingsFile() {
@@ -357,6 +405,10 @@ final class SettingsStore: ObservableObject {
     if defaults.object(forKey: Keys.defaultCopyFormat) == nil {
       defaults.set(defaultCopyFormat.rawValue, forKey: Keys.defaultCopyFormat)
     }
+
+    if defaults.object(forKey: Keys.translationHistoryLimit) == nil {
+      defaults.set(translationHistoryLimit, forKey: Keys.translationHistoryLimit)
+    }
   }
 
   private func persistHotKey(_ hotKey: HotKeyConfiguration, forKey key: String) {
@@ -378,6 +430,18 @@ final class SettingsStore: ObservableObject {
     defaults.set(data, forKey: Keys.floatingPanelLastOrigin)
   }
 
+  private func persistFloatingPanelLastSize() {
+    guard let floatingPanelLastSize else {
+      defaults.removeObject(forKey: Keys.floatingPanelLastSize)
+      return
+    }
+
+    guard let data = try? JSONEncoder().encode(floatingPanelLastSize) else {
+      return
+    }
+    defaults.set(data, forKey: Keys.floatingPanelLastSize)
+  }
+
   private static func loadHotKey(
     defaults: UserDefaults,
     key: String,
@@ -390,14 +454,32 @@ final class SettingsStore: ObservableObject {
       return fallback
     }
 
-    if key == Keys.translateHotKey, hotKey == legacyDockToggleTranslateHotKey {
-      if let data = try? JSONEncoder().encode(fallback) {
+    if let migratedHotKey = migratedHotKey(hotKey, key: key, fallback: fallback) {
+      if let data = try? JSONEncoder().encode(migratedHotKey) {
         defaults.set(data, forKey: key)
       }
-      return fallback
+      return migratedHotKey
     }
 
     return hotKey
+  }
+
+  private static func migratedHotKey(
+    _ hotKey: HotKeyConfiguration,
+    key: String,
+    fallback: HotKeyConfiguration
+  ) -> HotKeyConfiguration? {
+    if key == Keys.translateHotKey,
+       hotKey == legacyDockToggleTranslateHotKey || hotKey == legacyDefaultTranslateHotKey
+    {
+      return fallback
+    }
+
+    if key == Keys.ocrHotKey, hotKey == legacyDefaultOCRHotKey {
+      return fallback
+    }
+
+    return nil
   }
 
   private static func loadFloatingPanelLastOrigin(defaults: UserDefaults) -> FloatingPanelSavedOrigin? {
@@ -405,6 +487,19 @@ final class SettingsStore: ObservableObject {
       return nil
     }
     return try? JSONDecoder().decode(FloatingPanelSavedOrigin.self, from: data)
+  }
+
+  private static func loadFloatingPanelLastSize(defaults: UserDefaults) -> FloatingPanelSavedSize? {
+    guard let data = defaults.data(forKey: Keys.floatingPanelLastSize),
+          let size = try? JSONDecoder().decode(FloatingPanelSavedSize.self, from: data),
+          size.width.isFinite,
+          size.height.isFinite,
+          size.width > 0,
+          size.height > 0
+    else {
+      return nil
+    }
+    return size
   }
 
   private static func loadProviderConfigurations(from defaults: UserDefaults) -> [ProviderConfiguration] {
@@ -556,6 +651,18 @@ final class SettingsStore: ObservableObject {
     keyEquivalent: "D"
   )
 
+  private static let legacyDefaultTranslateHotKey = HotKeyConfiguration(
+    keyCode: UInt32(kVK_ANSI_T),
+    modifiers: UInt32(cmdKey) | UInt32(optionKey) | UInt32(shiftKey),
+    keyEquivalent: "T"
+  )
+
+  private static let legacyDefaultOCRHotKey = HotKeyConfiguration(
+    keyCode: UInt32(kVK_ANSI_O),
+    modifiers: UInt32(cmdKey) | UInt32(optionKey),
+    keyEquivalent: "O"
+  )
+
   private struct StoredProviderConfiguration: Codable {
     let displayName: String
     let baseURL: String
@@ -590,7 +697,9 @@ final class SettingsStore: ObservableObject {
     static let ocrHotKey = "ocrHotKey"
     static let floatingPanelPlacement = "floatingPanelPlacement"
     static let floatingPanelLastOrigin = "floatingPanelLastOrigin"
+    static let floatingPanelLastSize = "floatingPanelLastSize"
     static let defaultCopyFormat = "defaultCopyFormat"
+    static let translationHistoryLimit = "translationHistoryLimit"
     static let providerConfigurations = "providerConfigurations"
     static let openAIBaseURL = "openAIBaseURL"
     static let openAIModel = "openAIModel"

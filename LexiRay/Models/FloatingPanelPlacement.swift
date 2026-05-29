@@ -37,3 +37,8 @@ struct FloatingPanelSavedOrigin: Codable, Equatable {
   var x: Double
   var y: Double
 }
+
+struct FloatingPanelSavedSize: Codable, Equatable {
+  var width: Double
+  var height: Double
+}

@@ -21,7 +21,7 @@ struct FloatingPanelView: View {
           .zIndex(2)
       }
     }
-    .frame(width: panelSize.width, height: panelSize.height, alignment: .topLeading)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
     .overlay {
       RoundedRectangle(cornerRadius: 12)
@@ -87,6 +87,9 @@ struct FloatingPanelView: View {
           .foregroundStyle(.secondary)
 
         PanelPill(title: directionLabel, systemName: "arrow.left.arrow.right", color: .secondary)
+        if controller.lastSelectionSource != .unavailable {
+          PanelPill(title: controller.lastSelectionSource.displayName, systemName: sourceIcon, color: sourceColor)
+        }
 
         Spacer()
 
@@ -113,7 +116,9 @@ struct FloatingPanelView: View {
         text: $controller.panelSourceText,
         placeholder: "Type or edit source text",
         minHeight: controller.isExpanded ? 150 : 116,
-        accessibilityIdentifier: "FloatingPanelSourceEditor"
+        accessibilityIdentifier: "FloatingPanelSourceEditor",
+        onMoveUp: controller.showPreviousHistory,
+        onMoveDown: controller.showNextHistory
       )
     }
     .padding(10)
@@ -300,18 +305,29 @@ struct FloatingPanelView: View {
         targetLanguage: result.request.targetLanguage
       )
     case .idle, .loading, .error:
-      let sourceLanguage = controller.panelSourceText.nonEmptyTrimmed.flatMap {
-        LanguageDetector.sourceLanguageCode(
-          for: $0,
-          language1: controller.settings.language1,
-          language2: controller.settings.language2
-        )
-      }
-      return LanguageDetector.directionLabel(
-        sourceLanguage: sourceLanguage,
-        targetLanguage: controller.settings.resolvedTargetLanguage(for: sourceLanguage)
-      )
+      return controller.settings.previewLanguageDirectionLabel(for: controller.panelSourceText)
     }
+  }
+
+  private var sourceIcon: String {
+    switch controller.lastSelectionSource {
+    case .accessibility:
+      "accessibility"
+    case .browserAppleScript:
+      "safari"
+    case .simulatedCopy:
+      "doc.on.clipboard"
+    case .manual:
+      "keyboard"
+    case .ocr:
+      "text.viewfinder"
+    case .unavailable:
+      "questionmark.circle"
+    }
+  }
+
+  private var sourceColor: Color {
+    controller.lastSelectionSource == .unavailable ? .secondary : .accentColor
   }
 
   private var translateButtonTitle: String {
@@ -321,10 +337,6 @@ struct FloatingPanelView: View {
     case .loading, .batch, .result:
       "Retranslate"
     }
-  }
-
-  private var panelSize: CGSize {
-    FloatingPanelController.contentSize(for: controller)
   }
 
   private func hasInFlightEntry(in batch: TranslationBatch) -> Bool {

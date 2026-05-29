@@ -191,7 +191,7 @@ struct AnthropicMessagesProvider: TranslationProvider {
       model: configuration.model,
       maxTokens: 2048,
       system: TranslationPrompt.instructions(targetLanguage: request.targetLanguage),
-      messages: [.init(role: "user", content: text)]
+      messages: [.init(role: "user", content: AnthropicTranslationPrompt.userContent(text: text, targetLanguage: request.targetLanguage))]
     )
 
     var urlRequest = try jsonRequest(endpoint: endpoint, body: body)
@@ -222,7 +222,7 @@ struct AnthropicMessagesProvider: TranslationProvider {
       model: configuration.model,
       maxTokens: 2048,
       system: TranslationPrompt.instructions(targetLanguage: request.targetLanguage),
-      messages: [.init(role: "user", content: text)],
+      messages: [.init(role: "user", content: AnthropicTranslationPrompt.userContent(text: text, targetLanguage: request.targetLanguage))],
       stream: true
     )
 
@@ -336,6 +336,17 @@ enum TranslationPrompt {
     If the input contains fenced code blocks, keep the fences and language tags. Inside code blocks, translate only natural-language prose, comments, or string values when that is clearly intended; do not change JSON keys, code syntax, indentation, or punctuation.
     Never convert a fenced code block into a bullet list, paragraph, quote, or inline text.
     Do not merge separate paragraphs. Do not add explanations.
+    """
+  }
+}
+
+private enum AnthropicTranslationPrompt {
+  static func userContent(text: String, targetLanguage: String) -> String {
+    """
+    Translate the following source text into \(targetLanguage). Return only the translation.
+
+    Source text:
+    \(text)
     """
   }
 }

@@ -6,40 +6,19 @@ struct ProviderConfigurationList: View {
   var compact = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      HStack {
-        Spacer()
-        Menu {
-          ForEach(ProviderID.addableCases) { providerID in
-            Button {
-              settings.addProvider(providerID: providerID)
-            } label: {
-              HStack(spacing: 8) {
-                ProviderIconView(providerID: providerID)
-                  .frame(width: 16)
-                Text(providerID.displayName)
-              }
-            }
-          }
-        } label: {
-          Label("Add Provider", systemImage: "plus")
-        }
-        .menuStyle(.borderedButton)
-      }
-
-      LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
-        ForEach(settings.visibleProviderConfigurations()) { configuration in
-          ProviderConfigurationCard(settings: settings, configurationID: configuration.id, compact: compact)
-        }
+    LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+      ForEach(settings.visibleProviderConfigurations()) { configuration in
+        ProviderConfigurationCard(settings: settings, configurationID: configuration.id, compact: compact)
       }
     }
+    .accessibilityIdentifier("ProviderConfigurationGrid")
   }
 
   private var columns: [GridItem] {
     if compact {
-      [GridItem(.adaptive(minimum: 260), spacing: 12)]
+      [GridItem(.adaptive(minimum: 260), spacing: 12, alignment: .top)]
     } else {
-      [GridItem(.adaptive(minimum: 320), spacing: 12)]
+      [GridItem(.adaptive(minimum: 320), spacing: 12, alignment: .top)]
     }
   }
 }
@@ -96,7 +75,7 @@ private struct ProviderConfigurationCard: View {
         .font(.headline)
         .lineLimit(1)
 
-      if configuration.effectiveDisplayName != configuration.providerID.displayName {
+      if configuration.hasCustomDisplayName {
         Text(configuration.providerID.displayName)
           .font(.caption.weight(.medium))
           .foregroundStyle(.secondary)

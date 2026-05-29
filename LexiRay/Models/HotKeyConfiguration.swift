@@ -7,15 +7,15 @@ struct HotKeyConfiguration: Codable, Equatable {
   var keyEquivalent: String
 
   static let defaultTranslate = HotKeyConfiguration(
-    keyCode: UInt32(kVK_ANSI_T),
-    modifiers: UInt32(cmdKey) | UInt32(optionKey) | UInt32(shiftKey),
-    keyEquivalent: "T"
+    keyCode: UInt32(kVK_ANSI_A),
+    modifiers: UInt32(controlKey) | UInt32(optionKey),
+    keyEquivalent: "A"
   )
 
   static let defaultOCR = HotKeyConfiguration(
-    keyCode: UInt32(kVK_ANSI_O),
-    modifiers: UInt32(cmdKey) | UInt32(optionKey),
-    keyEquivalent: "O"
+    keyCode: UInt32(kVK_ANSI_S),
+    modifiers: UInt32(controlKey) | UInt32(optionKey),
+    keyEquivalent: "S"
   )
 
   var isValidGlobalShortcut: Bool {

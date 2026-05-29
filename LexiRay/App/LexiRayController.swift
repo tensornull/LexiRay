@@ -9,7 +9,11 @@ final class LexiRayController: ObservableObject {
   @Published var panelState: PanelState = .idle
   @Published var isPanelPinned = false
   @Published var isExpanded = false
-  @Published var panelSourceText = ""
+  @Published var panelSourceText = "" {
+    didSet {
+      updateHistoryNavigationForSourceChange()
+    }
+  }
   @Published var lastSelectionSource: SelectionSource = .unavailable
   @Published var lastOCRText = ""
   @Published var selectedMainSection: MainSection = .dashboard
@@ -22,14 +26,19 @@ final class LexiRayController: ObservableObject {
   private let permissionChecker: PermissionChecking
   private let pipeline: TranslationPipeline
   private let hotKeyService: HotKeyRegistering
-  private let ocrService = OCRService()
-  private let ocrSelectionOverlay = OCRSelectionOverlayController()
+  private let ocrService: OCRRecognizing
+  private let ocrSelectionOverlay: OCRRegionSelecting
   private let speechService: SpeechControlling
+  private let historyStore: TranslationHistoryStore
   private var floatingPanel: FloatingPanelPresenting!
   private var translationTask: Task<Void, Never>?
   private var providerTranslationTasks: [String: Task<Void, Never>] = [:]
   private var copyToastTask: Task<Void, Never>?
   private var activeBatchID: UUID?
+  private var recordedHistoryBatchIDs: Set<UUID> = []
+  private var translationHistory: [TranslationHistoryItem]
+  private var historyNavigationIndex: Int?
+  private var isRestoringHistorySource = false
   private var settingsCancellables: Set<AnyCancellable> = []
 
   init(
@@ -39,6 +48,9 @@ final class LexiRayController: ObservableObject {
     hotKeyService: HotKeyRegistering = GlobalHotKeyService(),
     floatingPanelFactory: ((LexiRayController) -> FloatingPanelPresenting)? = nil,
     pipeline: TranslationPipeline? = nil,
+    ocrService: OCRRecognizing? = nil,
+    ocrSelectionOverlay: OCRRegionSelecting? = nil,
+    historyStore: TranslationHistoryStore = TranslationHistoryStore(),
     speechService: SpeechControlling? = nil
   ) {
     self.settings = settings
@@ -46,7 +58,11 @@ final class LexiRayController: ObservableObject {
     self.permissionChecker = permissionChecker
     self.hotKeyService = hotKeyService
     self.pipeline = pipeline ?? TranslationPipeline(settings: settings)
+    self.ocrService = ocrService ?? OCRService()
+    self.ocrSelectionOverlay = ocrSelectionOverlay ?? OCRSelectionOverlayController()
     self.speechService = speechService ?? SpeechService()
+    self.historyStore = historyStore
+    translationHistory = historyStore.load(limit: settings.translationHistoryLimit)
     floatingPanel = floatingPanelFactory?(self) ?? FloatingPanelController(controller: self)
     self.speechService.onStateChange = { [weak self] isSpeaking in
       if !isSpeaking {
@@ -85,10 +101,8 @@ final class LexiRayController: ObservableObject {
   }
 
   func translateCurrentSelection() {
-    cancelTranslationWork()
-    isExpanded = false
-    panelSourceText = ""
-    panelState = .loading(PanelLoadingState(title: "Reading selection...", preview: nil))
+    translationTask?.cancel()
+    translationTask = nil
 
     translationTask = Task { @MainActor [weak self] in
       guard let self else {
@@ -103,11 +117,14 @@ final class LexiRayController: ObservableObject {
       lastSelectionSource = selection.source
 
       guard let text = selection.text?.nonEmptyTrimmed else {
-        panelState = .error(selectionUnavailableMessage(for: selection.failureReason))
-        floatingPanel.show(activating: false, repositioning: false)
+        translationTask = nil
+        showSelectionFallback(for: selection.failureReason)
         return
       }
 
+      cancelTranslationWork(cancelSelectionTask: false)
+      translationTask = nil
+      isExpanded = false
       panelSourceText = text
       panelState = .loading(PanelLoadingState(title: "Translating...", preview: text))
       floatingPanel.show(activating: false, repositioning: false)
@@ -126,10 +143,12 @@ final class LexiRayController: ObservableObject {
       return
     }
 
+    historyNavigationIndex = nil
     translate(text: text, source: .manual)
   }
 
   func clearPanelSourceText() {
+    historyNavigationIndex = nil
     panelSourceText = ""
   }
 
@@ -139,7 +158,7 @@ final class LexiRayController: ObservableObject {
     panelSourceText = ""
     panelState = .loading(PanelLoadingState(title: "Drag to select an OCR region...", preview: nil))
     lastSelectionSource = .ocr
-    floatingPanel.show(activating: false, repositioning: false)
+    floatingPanel.hide()
 
     ocrSelectionOverlay.beginSelection { [weak self] rect in
       guard let self else {
@@ -165,7 +184,6 @@ final class LexiRayController: ObservableObject {
     isExpanded = false
     panelSourceText = ""
     panelState = .loading(PanelLoadingState(title: "Recognizing text...", preview: nil))
-    floatingPanel.show(activating: false, repositioning: false)
 
     translationTask = Task { @MainActor [weak self] in
       guard let self else {
@@ -173,6 +191,11 @@ final class LexiRayController: ObservableObject {
       }
 
       do {
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        guard !Task.isCancelled else {
+          return
+        }
+
         let text = try await ocrService.captureAndRecognizeText(in: rect)
         guard !Task.isCancelled else {
           return
@@ -199,9 +222,13 @@ final class LexiRayController: ObservableObject {
   }
 
   private func translate(text: String, source: SelectionSource) {
+    guard let text = text.nonEmptyTrimmed else {
+      return
+    }
+
     cancelTranslationWork()
     isExpanded = false
-    panelSourceText = text.nonEmptyTrimmed ?? text
+    panelSourceText = text
     panelState = .loading(PanelLoadingState(title: "Translating...", preview: text))
     lastSelectionSource = source
     floatingPanel.show(activating: false, repositioning: false)
@@ -290,8 +317,74 @@ final class LexiRayController: ObservableObject {
     floatingPanel.hide()
   }
 
+  func showPreviousHistory() -> Bool {
+    guard canNavigateTranslationHistory else {
+      return false
+    }
+
+    let index: Int
+    if let historyNavigationIndex {
+      index = max(0, historyNavigationIndex - 1)
+    } else if let currentHistoryIndex = currentPresentedHistoryIndex {
+      index = max(0, currentHistoryIndex - 1)
+    } else {
+      index = translationHistory.count - 1
+    }
+
+    restoreHistory(at: index)
+    return true
+  }
+
+  func showNextHistory() -> Bool {
+    guard let historyNavigationIndex = historyNavigationIndex ?? currentPresentedHistoryIndex else {
+      return false
+    }
+
+    if historyNavigationIndex < translationHistory.count - 1 {
+      restoreHistory(at: historyNavigationIndex + 1)
+    } else {
+      restoreBlankComposerAfterHistory()
+    }
+
+    return true
+  }
+
+  var canNavigateTranslationHistory: Bool {
+    !translationHistory.isEmpty && (panelSourceText.isEmpty || historyNavigationIndex != nil || currentPresentedHistoryIndex != nil)
+  }
+
+  private func showSelectionFallback(for reason: SelectionFailureReason?) {
+    if reason == .accessibilityPermissionMissing {
+      showSelectionPermissionError()
+      return
+    }
+
+    showBlankComposer()
+  }
+
+  private func showSelectionPermissionError() {
+    cancelTranslationWork(cancelSelectionTask: false)
+    isExpanded = false
+    panelSourceText = ""
+    lastSelectionSource = .unavailable
+    panelState = .error(selectionUnavailableMessage(for: .accessibilityPermissionMissing))
+    floatingPanel.show(activating: false, repositioning: false)
+  }
+
+  private func showBlankComposer() {
+    cancelTranslationWork(cancelSelectionTask: false)
+    isExpanded = false
+    historyNavigationIndex = nil
+    isRestoringHistorySource = true
+    panelSourceText = ""
+    isRestoringHistorySource = false
+    lastSelectionSource = .unavailable
+    panelState = .idle
+    floatingPanel.show(activating: true, repositioning: false)
+  }
+
   private func selectionUnavailableMessage(for reason: SelectionFailureReason?) -> String {
-    if reason == .accessibilityPermissionMissing || !permissionChecker.isAccessibilityTrusted {
+    if reason == .accessibilityPermissionMissing {
       permissionChecker.requestAccessibilityIfNeeded(prompt: true)
       return "Grant Accessibility permission to LexiRay, then select text and press \(settings.translateHotKey.displayString) again."
     }
@@ -339,6 +432,13 @@ final class LexiRayController: ObservableObject {
         AppWindowPresenter.refreshDockVisibilitySoon(showsMenuBarIcon: showsMenuBarIcon)
       }
       .store(in: &settingsCancellables)
+
+    settings.$translationHistoryLimit
+      .dropFirst()
+      .sink { [weak self] limit in
+        self?.pruneTranslationHistory(limit: limit)
+      }
+      .store(in: &settingsCancellables)
   }
 
   private func startBatchTranslation(text: String, source: SelectionSource, bypassCache: Bool) {
@@ -353,6 +453,7 @@ final class LexiRayController: ObservableObject {
 
       let batchID = batch.id
       let request = batch.request
+      recordHistoryIfNeeded(for: batch)
       for entry in batch.entries where entry.isTranslatable {
         startProviderTranslation(entry, batchID: batchID, request: request, bypassCache: bypassCache)
       }
@@ -479,6 +580,7 @@ final class LexiRayController: ObservableObject {
 
     batch.update(entry)
     panelState = .batch(batch)
+    recordHistoryIfNeeded(for: batch)
   }
 
   private var currentResults: [TranslationResult] {
@@ -492,10 +594,12 @@ final class LexiRayController: ObservableObject {
     }
   }
 
-  private func cancelTranslationWork() {
+  private func cancelTranslationWork(cancelSelectionTask: Bool = true) {
     stopSpeaking()
-    translationTask?.cancel()
-    translationTask = nil
+    if cancelSelectionTask {
+      translationTask?.cancel()
+      translationTask = nil
+    }
     cancelProviderTranslationTasks()
     activeBatchID = nil
   }
@@ -503,6 +607,95 @@ final class LexiRayController: ObservableObject {
   private func cancelProviderTranslationTasks() {
     providerTranslationTasks.values.forEach { $0.cancel() }
     providerTranslationTasks = [:]
+  }
+
+  private func recordHistoryIfNeeded(for batch: TranslationBatch) {
+    guard !recordedHistoryBatchIDs.contains(batch.id),
+          batch.entries.allSatisfy({ $0.status.isTerminalHistoryStatus }),
+          batch.entries.contains(where: { $0.status.isRecordedHistoryStatus }),
+          let item = TranslationHistoryItem(batch: batch)
+    else {
+      return
+    }
+
+    recordedHistoryBatchIDs.insert(batch.id)
+    translationHistory = historyStore.append(item, to: translationHistory, limit: settings.translationHistoryLimit)
+    historyNavigationIndex = nil
+  }
+
+  private func restoreHistory(at index: Int) {
+    guard translationHistory.indices.contains(index) else {
+      return
+    }
+
+    cancelTranslationWork()
+    historyNavigationIndex = index
+    let item = translationHistory[index]
+    isRestoringHistorySource = true
+    panelSourceText = item.request.text
+    isRestoringHistorySource = false
+    lastSelectionSource = item.request.selectionSource
+    panelState = .batch(item.restoredBatch())
+    floatingPanel.refreshContentLayout()
+  }
+
+  private func restoreBlankComposerAfterHistory() {
+    cancelTranslationWork()
+    historyNavigationIndex = nil
+    isRestoringHistorySource = true
+    panelSourceText = ""
+    isRestoringHistorySource = false
+    lastSelectionSource = .unavailable
+    panelState = .idle
+    floatingPanel.refreshContentLayout()
+  }
+
+  private var currentPresentedHistoryIndex: Int? {
+    guard let presentedRequestText,
+          presentedRequestText == panelSourceText
+    else {
+      return nil
+    }
+
+    return translationHistory.lastIndex { item in
+      item.request.text == presentedRequestText
+    }
+  }
+
+  private var presentedRequestText: String? {
+    switch panelState {
+    case let .batch(batch):
+      batch.request.text
+    case let .result(result):
+      result.request.text
+    case .idle, .loading, .error:
+      nil
+    }
+  }
+
+  private func pruneTranslationHistory(limit: Int) {
+    translationHistory = historyStore.prune(translationHistory, limit: limit)
+    guard let historyNavigationIndex else {
+      return
+    }
+
+    if translationHistory.indices.contains(historyNavigationIndex) {
+      return
+    }
+
+    self.historyNavigationIndex = translationHistory.isEmpty ? nil : translationHistory.count - 1
+  }
+
+  private func updateHistoryNavigationForSourceChange() {
+    guard !isRestoringHistorySource,
+          let historyNavigationIndex,
+          translationHistory.indices.contains(historyNavigationIndex),
+          panelSourceText != translationHistory[historyNavigationIndex].request.text
+    else {
+      return
+    }
+
+    self.historyNavigationIndex = nil
   }
 
   private func showCopyToast() {

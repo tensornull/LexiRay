@@ -72,6 +72,23 @@ final class SettingsStoreTests: XCTestCase {
     XCTAssertEqual(reloaded.defaultCopyFormat, .html)
   }
 
+  func testTranslationHistoryLimitDefaultsPersistsAndClamps() throws {
+    let defaults = try makeDefaults()
+    let providerFileStore = makeProviderFileStore()
+    let store = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+
+    XCTAssertEqual(store.translationHistoryLimit, 100)
+
+    store.translationHistoryLimit = 12
+    XCTAssertEqual(SettingsStore(defaults: defaults, providerFileStore: providerFileStore).translationHistoryLimit, 12)
+
+    store.translationHistoryLimit = 0
+    XCTAssertEqual(store.translationHistoryLimit, 1)
+
+    store.translationHistoryLimit = 999
+    XCTAssertEqual(store.translationHistoryLimit, 100)
+  }
+
   func testHotKeysDefaultAndPersist() throws {
     let defaults = try makeDefaults()
     let providerFileStore = makeProviderFileStore()
@@ -98,7 +115,7 @@ final class SettingsStoreTests: XCTestCase {
     XCTAssertEqual(reloaded.ocrHotKey, customOCR)
   }
 
-  func testDefaultTranslateHotKeyAvoidsMacOSDockShortcut() {
+  func testDefaultHotKeysUseCurrentShortcuts() {
     let dockToggleHotKey = HotKeyConfiguration(
       keyCode: UInt32(kVK_ANSI_D),
       modifiers: UInt32(cmdKey) | UInt32(optionKey),
@@ -106,19 +123,22 @@ final class SettingsStoreTests: XCTestCase {
     )
 
     XCTAssertNotEqual(HotKeyConfiguration.defaultTranslate, dockToggleHotKey)
-    XCTAssertEqual(HotKeyConfiguration.defaultTranslate.keyCode, UInt32(kVK_ANSI_T))
+    XCTAssertEqual(HotKeyConfiguration.defaultTranslate.keyCode, UInt32(kVK_ANSI_A))
     XCTAssertEqual(
       HotKeyConfiguration.defaultTranslate.modifiers,
-      UInt32(cmdKey) | UInt32(optionKey) | UInt32(shiftKey)
+      UInt32(controlKey) | UInt32(optionKey)
     )
-    XCTAssertEqual(HotKeyConfiguration.defaultTranslate.keyEquivalent, "T")
+    XCTAssertEqual(HotKeyConfiguration.defaultTranslate.keyEquivalent, "A")
+    XCTAssertEqual(HotKeyConfiguration.defaultOCR.keyCode, UInt32(kVK_ANSI_S))
+    XCTAssertEqual(HotKeyConfiguration.defaultOCR.modifiers, UInt32(controlKey) | UInt32(optionKey))
+    XCTAssertEqual(HotKeyConfiguration.defaultOCR.keyEquivalent, "S")
   }
 
   func testHotKeyConvertsToMenuKeyboardShortcut() {
     let shortcut = HotKeyConfiguration.defaultTranslate.menuKeyboardShortcut
 
     XCTAssertNotNil(shortcut)
-    XCTAssertEqual(shortcut?.modifiers, SwiftUI.EventModifiers([.command, .option, .shift]))
+    XCTAssertEqual(shortcut?.modifiers, SwiftUI.EventModifiers([.control, .option]))
   }
 
   func testResetHotKeysRestoresDefaults() throws {
@@ -160,6 +180,32 @@ final class SettingsStoreTests: XCTestCase {
     XCTAssertEqual(persistedHotKey, .defaultTranslate)
   }
 
+  func testLegacyDefaultHotKeysMigrateToCurrentDefaults() throws {
+    let defaults = try makeDefaults()
+    let providerFileStore = makeProviderFileStore()
+    let legacyTranslate = HotKeyConfiguration(
+      keyCode: UInt32(kVK_ANSI_T),
+      modifiers: UInt32(cmdKey) | UInt32(optionKey) | UInt32(shiftKey),
+      keyEquivalent: "T"
+    )
+    let legacyOCR = HotKeyConfiguration(
+      keyCode: UInt32(kVK_ANSI_O),
+      modifiers: UInt32(cmdKey) | UInt32(optionKey),
+      keyEquivalent: "O"
+    )
+    try defaults.set(JSONEncoder().encode(legacyTranslate), forKey: "translateHotKey")
+    try defaults.set(JSONEncoder().encode(legacyOCR), forKey: "ocrHotKey")
+
+    let store = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+
+    XCTAssertEqual(store.translateHotKey, .defaultTranslate)
+    XCTAssertEqual(store.ocrHotKey, .defaultOCR)
+    let persistedTranslateData = try XCTUnwrap(defaults.data(forKey: "translateHotKey"))
+    let persistedOCRData = try XCTUnwrap(defaults.data(forKey: "ocrHotKey"))
+    XCTAssertEqual(try JSONDecoder().decode(HotKeyConfiguration.self, from: persistedTranslateData), .defaultTranslate)
+    XCTAssertEqual(try JSONDecoder().decode(HotKeyConfiguration.self, from: persistedOCRData), .defaultOCR)
+  }
+
   func testBareLetterHotKeyIsInvalid() {
     let bareLetter = HotKeyConfiguration(
       keyCode: UInt32(kVK_ANSI_D),
@@ -183,6 +229,19 @@ final class SettingsStoreTests: XCTestCase {
     let reloaded = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
     XCTAssertEqual(reloaded.floatingPanelPlacement, .topRight)
     XCTAssertEqual(reloaded.floatingPanelLastOrigin, FloatingPanelSavedOrigin(x: 120, y: 340))
+  }
+
+  func testFloatingPanelLastSizePersists() throws {
+    let defaults = try makeDefaults()
+    let providerFileStore = makeProviderFileStore()
+    let store = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+
+    XCTAssertNil(store.floatingPanelLastSize)
+
+    store.recordFloatingPanelSize(width: 760, height: 520)
+
+    let reloaded = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+    XCTAssertEqual(reloaded.floatingPanelLastSize, FloatingPanelSavedSize(width: 760, height: 520))
   }
 
   func testBlankLanguageSettingsFallbackToDefaultsAndPersist() throws {
@@ -353,6 +412,49 @@ final class SettingsStoreTests: XCTestCase {
     XCTAssertEqual(store.configuration(for: .openAIResponses).effectiveDisplayName, ProviderID.openAIResponses.displayName)
     XCTAssertTrue(store.configuration(for: .openAIResponses).advancedParameters.isEmpty)
     XCTAssertEqual(store.apiKey(for: .openAIResponses), "secret")
+  }
+
+  func testBuiltInOpenAIChatDisplayNameVariantsNormalizeToDefault() throws {
+    let defaults = try makeDefaults()
+    let providerFileStore = makeProviderFileStore()
+    let customID = "\(ProviderID.openAIChatCompletions.rawValue)-custom"
+    providerFileStore.save(
+      ProviderSettingsFile(
+        version: 2,
+        preferredProvider: ProviderID.openAIResponses.rawValue,
+        providerOrder: [ProviderID.openAIChatCompletions.rawValue, customID],
+        providers: [
+          ProviderID.openAIChatCompletions.rawValue: StoredProviderSettings(
+            providerID: .openAIChatCompletions,
+            displayName: "OpenAIChatCompletions",
+            baseURL: "https://example.test/v1",
+            model: "chat-test",
+            isEnabled: true,
+            apiKey: "secret"
+          ),
+          customID: StoredProviderSettings(
+            providerID: .openAIChatCompletions,
+            displayName: "OpenAI ChatCompletions",
+            baseURL: "https://backup.example.test/v1",
+            model: "chat-backup",
+            isEnabled: false,
+            apiKey: ""
+          )
+        ]
+      )
+    )
+
+    let store = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+    let file = try readProviderFile(from: providerFileStore)
+
+    XCTAssertEqual(store.configuration(for: .openAIChatCompletions).displayName, "")
+    XCTAssertEqual(store.configuration(for: .openAIChatCompletions).effectiveDisplayName, ProviderID.openAIChatCompletions.displayName)
+    XCTAssertFalse(store.configuration(for: .openAIChatCompletions).hasCustomDisplayName)
+    XCTAssertEqual(store.configuration(for: customID)?.displayName, "OpenAI ChatCompletions")
+    XCTAssertEqual(store.configuration(for: customID)?.effectiveDisplayName, "OpenAI ChatCompletions")
+    XCTAssertTrue(store.configuration(for: customID)?.hasCustomDisplayName == true)
+    XCTAssertEqual(file.providers[ProviderID.openAIChatCompletions.rawValue]?.displayName, "")
+    XCTAssertEqual(file.providers[customID]?.displayName, "OpenAI ChatCompletions")
   }
 
   func testMigratesLegacyOpenAICompatibleProvider() throws {

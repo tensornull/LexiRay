@@ -11,6 +11,7 @@ struct MainView: View {
         ForEach(MainSection.allCases) { section in
           Label(section.title, systemImage: section.systemImage)
             .tag(section)
+            .accessibilityIdentifier("Sidebar\(section.title)")
         }
       }
       .listStyle(.sidebar)
@@ -65,7 +66,7 @@ struct MainView: View {
       Spacer()
 
       HStack(spacing: 8) {
-        DashboardPill(title: controller.settings.languageDirectionLabel(sourceLanguage: nil, targetLanguage: controller.settings.language2), systemName: "arrow.left.arrow.right")
+        DashboardPill(title: controller.settings.previewLanguageDirectionLabel(for: manualText), systemName: "arrow.left.arrow.right")
         DashboardPill(title: controller.settings.translateHotKey.displayString, systemName: "keyboard")
         DashboardPill(title: controller.settings.ocrHotKey.displayString, systemName: "viewfinder")
       }
@@ -174,11 +175,16 @@ struct MainView: View {
       HStack(alignment: .center, spacing: 10) {
         Label("Providers", systemImage: "server.rack")
           .font(.title2.weight(.semibold))
+          .accessibilityElement(children: .combine)
+          .accessibilityIdentifier("ProviderHeaderTitle")
 
         Spacer()
 
         DashboardPill(title: activeProviderSummary, systemName: "bolt.horizontal")
-        DashboardPill(title: "\(controller.settings.language1) <-> \(controller.settings.language2)", systemName: "globe")
+        ProviderAddMenuButton(providerIDs: ProviderID.addableCases) { providerID in
+          controller.settings.addProvider(providerID: providerID)
+        }
+        .fixedSize()
       }
 
       ProviderConfigurationList(settings: controller.settings)

@@ -23,7 +23,9 @@ extension FloatingPanelPresenting {
 
 @MainActor
 final class FloatingPanelController: NSObject, FloatingPanelPresenting {
-  static let panelStyleMask: NSWindow.StyleMask = [.borderless, .nonactivatingPanel]
+  static let panelStyleMask: NSWindow.StyleMask = [.borderless, .nonactivatingPanel, .resizable]
+  static let defaultContentWidth: CGFloat = 660
+  static let minimumContentSize = NSSize(width: 560, height: 330)
 
   private weak var controller: LexiRayController?
   private var panel: NSPanel?
@@ -31,6 +33,7 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   private var localMouseMonitor: Any?
   private var localKeyMonitor: Any?
   private var isMovingProgrammatically = false
+  private var isSizingProgrammatically = false
 
   init(controller: LexiRayController) {
     self.controller = controller
@@ -56,6 +59,11 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     startDismissMonitors()
     if activating {
       NSApp.activate()
+      panel.makeKeyAndOrderFront(nil)
+      panel.makeKey()
+      panel.makeMain()
+      focusSourceEditor(in: panel)
+      scheduleSourceFocusRetries(in: panel)
     }
     AppLog.panel.info("Floating panel shown")
   }
@@ -97,8 +105,9 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   }
 
   private func makePanel(controller: LexiRayController) -> NSPanel {
+    let contentSize = Self.contentSize(for: controller)
     let panel = LexiRayFloatingPanel(
-      contentRect: NSRect(x: 0, y: 0, width: 660, height: 360),
+      contentRect: NSRect(origin: .zero, size: contentSize),
       styleMask: Self.panelStyleMask,
       backing: .buffered,
       defer: false
@@ -113,8 +122,52 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     panel.backgroundColor = .clear
     panel.delegate = self
     panel.contentView = NSHostingView(rootView: FloatingPanelView(controller: controller))
+    applySizeLimits(panel, for: controller)
 
     return panel
+  }
+
+  private func focusSourceEditor(in panel: NSPanel) {
+    guard let textView = findTextView(identifier: "FloatingPanelSourceEditor", in: panel.contentView) else {
+      return
+    }
+
+    panel.makeKeyAndOrderFront(nil)
+    panel.makeKey()
+    panel.makeMain()
+    panel.makeFirstResponder(textView)
+    textView.window?.makeFirstResponder(textView)
+  }
+
+  private func scheduleSourceFocusRetries(in panel: NSPanel) {
+    for delay in [0.0, 0.05, 0.15, 0.3] {
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak panel] in
+        guard let panel, panel.isVisible else {
+          return
+        }
+        self?.focusSourceEditor(in: panel)
+      }
+    }
+  }
+
+  private func findTextView(identifier: String, in view: NSView?) -> NSTextView? {
+    guard let view else {
+      return nil
+    }
+
+    if let textView = view as? NSTextView,
+       textView.identifier?.rawValue == identifier
+    {
+      return textView
+    }
+
+    for subview in view.subviews {
+      if let textView = findTextView(identifier: identifier, in: subview) {
+        return textView
+      }
+    }
+
+    return nil
   }
 
   private func startDismissMonitors() {
@@ -143,20 +196,23 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
 
     let panelWindowNumber = panel?.windowNumber
     localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-      if Self.isSubmitShortcut(event), event.window?.windowNumber == panelWindowNumber {
-        Task { @MainActor in
-          self?.controller?.submitPanelSourceText()
-        }
-        return nil
-      }
-
-      if event.keyCode != 53 {
+      guard let self else {
         return event
       }
-      Task { @MainActor in
-        self?.hideIfNeeded()
+
+      let keyCode = event.keyCode
+      let modifierFlagsRawValue = event.modifierFlags.rawValue
+      let eventWindowNumber = event.window?.windowNumber
+      let shouldSwallowEvent = MainActor.assumeIsolated {
+        self.shouldSwallowLocalKeyEvent(
+          keyCode: keyCode,
+          modifierFlags: NSEvent.ModifierFlags(rawValue: modifierFlagsRawValue),
+          eventWindowNumber: eventWindowNumber,
+          panelWindowNumber: panelWindowNumber,
+          panelIsVisible: panel?.isVisible == true
+        )
       }
-      return nil
+      return shouldSwallowEvent ? nil : event
     }
   }
 
@@ -226,11 +282,23 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
 
   private func resize(_ panel: NSPanel, for controller: LexiRayController, preservingTopLeft: Bool) {
     let topLeft = NSPoint(x: panel.frame.minX, y: panel.frame.maxY)
-    panel.setContentSize(Self.contentSize(for: controller))
+    applySizeLimits(panel, for: controller)
+    setContentSize(Self.contentSize(for: controller), for: panel)
 
     if preservingTopLeft {
       setFrameOrigin(NSPoint(x: topLeft.x, y: topLeft.y - panel.frame.height), for: panel)
     }
+  }
+
+  private func applySizeLimits(_ panel: NSPanel, for controller: LexiRayController) {
+    panel.contentMinSize = Self.minimumContentSize
+    panel.contentMaxSize = Self.maximumContentSize(for: controller)
+  }
+
+  private func setContentSize(_ size: NSSize, for panel: NSPanel) {
+    isSizingProgrammatically = true
+    panel.setContentSize(size)
+    isSizingProgrammatically = false
   }
 
   private func setFrameOrigin(_ origin: NSPoint, for panel: NSPanel) {
@@ -240,7 +308,14 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   }
 
   static func contentSize(for controller: LexiRayController) -> NSSize {
-    NSSize(width: 660, height: contentHeight(for: controller))
+    guard let savedSize = controller.settings.floatingPanelLastSize else {
+      return automaticContentSize(for: controller)
+    }
+
+    return clampedContentSize(
+      NSSize(width: CGFloat(savedSize.width), height: CGFloat(savedSize.height)),
+      maximum: maximumContentSize(for: controller)
+    )
   }
 
   static func panelLevel(isPinned: Bool) -> NSWindow.Level {
@@ -273,6 +348,24 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
       let estimatedHeight = 278 + estimatedTextHeight(result.translatedText, charsPerLine: 48)
       return clampedContentHeight(estimatedHeight, minimum: 390, maximum: maximumHeight)
     }
+  }
+
+  private static func automaticContentSize(for controller: LexiRayController) -> NSSize {
+    clampedContentSize(
+      NSSize(width: defaultContentWidth, height: contentHeight(for: controller)),
+      maximum: maximumContentSize(for: controller)
+    )
+  }
+
+  private static func maximumContentSize(for controller: LexiRayController) -> NSSize {
+    NSSize(width: 980, height: maximumContentHeight(isExpanded: controller.isExpanded))
+  }
+
+  private static func clampedContentSize(_ size: NSSize, maximum: NSSize) -> NSSize {
+    NSSize(
+      width: min(maximum.width, max(minimumContentSize.width, size.width)),
+      height: min(maximum.height, max(minimumContentSize.height, size.height))
+    )
   }
 
   static func maximumContentHeight(isExpanded: Bool) -> CGFloat {
@@ -312,14 +405,104 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     }
   }
 
-  private nonisolated static func isSubmitShortcut(_ event: NSEvent) -> Bool {
-    let keyCode = event.keyCode
+  private nonisolated static func isSubmitShortcut(keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> Bool {
     return (keyCode == 36 || keyCode == 76)
-      && event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command)
+      && modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command)
+  }
+
+  private func shouldSwallowLocalKeyEvent(
+    keyCode: UInt16,
+    modifierFlags: NSEvent.ModifierFlags,
+    eventWindowNumber: Int?,
+    panelWindowNumber: Int?,
+    panelIsVisible: Bool
+  ) -> Bool {
+    if Self.isSubmitShortcut(keyCode: keyCode, modifierFlags: modifierFlags),
+       eventWindowNumber == panelWindowNumber
+    {
+      controller?.submitPanelSourceText()
+      return true
+    }
+
+    if let direction = Self.historyNavigationDirection(keyCode: keyCode, modifierFlags: modifierFlags),
+       Self.shouldRoutePanelKeyEvent(
+        eventWindowNumber: eventWindowNumber,
+        panelWindowNumber: panelWindowNumber,
+        panelIsVisible: panelIsVisible
+       )
+    {
+      let handled: Bool?
+      switch direction {
+      case .previous:
+        handled = controller?.showPreviousHistory()
+      case .next:
+        handled = controller?.showNextHistory()
+      }
+
+      if handled == true {
+        return true
+      }
+    }
+
+    if keyCode != 53 {
+      return false
+    }
+
+    hideIfNeeded()
+    return true
+  }
+
+  nonisolated static func shouldRoutePanelKeyEvent(
+    eventWindowNumber: Int?,
+    panelWindowNumber: Int?,
+    panelIsVisible: Bool
+  ) -> Bool {
+    eventWindowNumber == panelWindowNumber || (eventWindowNumber == nil && panelIsVisible)
+  }
+
+  private nonisolated static func historyNavigationDirection(
+    keyCode: UInt16,
+    modifierFlags: NSEvent.ModifierFlags
+  ) -> HistoryNavigationDirection? {
+    let modifierFlags = modifierFlags
+      .intersection(.deviceIndependentFlagsMask)
+      .subtracting([.numericPad, .function])
+    guard modifierFlags.isEmpty else {
+      return nil
+    }
+
+    switch keyCode {
+    case 126:
+      return .previous
+    case 125:
+      return .next
+    default:
+      return nil
+    }
   }
 }
 
+private enum HistoryNavigationDirection {
+  case previous
+  case next
+}
+
 extension FloatingPanelController: NSWindowDelegate {
+  func windowDidResize(_ notification: Notification) {
+    guard !isSizingProgrammatically,
+          let panel = notification.object as? NSPanel,
+          let currentPanel = self.panel,
+          panel === currentPanel
+    else {
+      return
+    }
+
+    controller?.settings.recordFloatingPanelSize(
+      width: panel.frame.width,
+      height: panel.frame.height
+    )
+  }
+
   func windowDidMove(_ notification: Notification) {
     guard !isMovingProgrammatically,
           let panel = notification.object as? NSPanel,
@@ -338,6 +521,10 @@ extension FloatingPanelController: NSWindowDelegate {
 
 private final class LexiRayFloatingPanel: NSPanel {
   override var canBecomeKey: Bool {
+    true
+  }
+
+  override var canBecomeMain: Bool {
     true
   }
 }

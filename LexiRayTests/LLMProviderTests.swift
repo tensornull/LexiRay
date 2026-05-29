@@ -206,6 +206,10 @@ final class LLMProviderTests: XCTestCase {
     XCTAssertEqual(client.request?.value(forHTTPHeaderField: "x-api-key"), "test-key")
     XCTAssertEqual(client.request?.value(forHTTPHeaderField: "anthropic-version"), "2023-06-01")
     XCTAssertEqual(try client.stringBodyValue("model"), "test-model")
+    let messages = try XCTUnwrap(try client.jsonBody()["messages"] as? [[String: Any]])
+    let userContent = try XCTUnwrap(messages.first?["content"] as? String)
+    XCTAssertTrue(userContent.contains("Translate the following source text into zh-Hans."))
+    XCTAssertTrue(userContent.contains("Source text:\nhello"))
   }
 
   func testAnthropicMessagesStreamsTextDeltas() async throws {
@@ -236,6 +240,9 @@ final class LLMProviderTests: XCTestCase {
     XCTAssertEqual(partials, ["你", "你好"])
     XCTAssertEqual(result?.translatedText, "你好")
     XCTAssertEqual(try client.boolBodyValue("stream"), true)
+    let messages = try XCTUnwrap(try client.jsonBody()["messages"] as? [[String: Any]])
+    let userContent = try XCTUnwrap(messages.first?["content"] as? String)
+    XCTAssertTrue(userContent.contains("Source text:\nhello"))
   }
 
   func testGeminiGenerateContentRequestAndResponse() async throws {

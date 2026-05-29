@@ -9,6 +9,8 @@ struct SourceTextEditor: View {
   let placeholder: String
   var minHeight: CGFloat = 116
   var accessibilityIdentifier = "SourceTextEditor"
+  var onMoveUp: (() -> Bool)?
+  var onMoveDown: (() -> Bool)?
 
   @State private var isFocused = false
 
@@ -19,7 +21,9 @@ struct SourceTextEditor: View {
         isFocused: $isFocused,
         textInset: Self.textInset,
         lineFragmentPadding: Self.lineFragmentPadding,
-        accessibilityIdentifier: accessibilityIdentifier
+        accessibilityIdentifier: accessibilityIdentifier,
+        onMoveUp: onMoveUp,
+        onMoveDown: onMoveDown
       )
 
       if text.isEmpty {
@@ -49,6 +53,8 @@ private struct SourceTextView: NSViewRepresentable {
   let textInset: CGSize
   let lineFragmentPadding: CGFloat
   let accessibilityIdentifier: String
+  let onMoveUp: (() -> Bool)?
+  let onMoveDown: (() -> Bool)?
 
   func makeCoordinator() -> Coordinator {
     Coordinator(self)
@@ -62,7 +68,10 @@ private struct SourceTextView: NSViewRepresentable {
     scrollView.autohidesScrollers = true
     scrollView.identifier = NSUserInterfaceItemIdentifier(accessibilityIdentifier)
 
-    let textView = NSTextView()
+    let textView = SourceTextNSTextView()
+    textView.historyNavigationHandler = { [coordinator = context.coordinator] direction in
+      coordinator.handleHistoryNavigation(direction)
+    }
     configure(textView)
     textView.delegate = context.coordinator
     textView.string = text
@@ -81,7 +90,9 @@ private struct SourceTextView: NSViewRepresentable {
 
     configure(textView)
     if textView.string != text {
+      context.coordinator.isProgrammaticUpdate = true
       textView.string = text
+      context.coordinator.isProgrammaticUpdate = false
     }
   }
 
@@ -115,12 +126,17 @@ private struct SourceTextView: NSViewRepresentable {
 
   final class Coordinator: NSObject, NSTextViewDelegate {
     var parent: SourceTextView
+    var isProgrammaticUpdate = false
 
     init(_ parent: SourceTextView) {
       self.parent = parent
     }
 
     func textDidChange(_ notification: Notification) {
+      guard !isProgrammaticUpdate else {
+        return
+      }
+
       guard let textView = notification.object as? NSTextView else {
         return
       }
@@ -128,11 +144,61 @@ private struct SourceTextView: NSViewRepresentable {
     }
 
     func textDidBeginEditing(_ notification: Notification) {
-      parent.isFocused = true
+      DispatchQueue.main.async { [weak self] in
+        self?.parent.isFocused = true
+      }
     }
 
     func textDidEndEditing(_ notification: Notification) {
-      parent.isFocused = false
+      DispatchQueue.main.async { [weak self] in
+        self?.parent.isFocused = false
+      }
+    }
+
+    func handleHistoryNavigation(_ direction: SourceTextHistoryDirection) -> Bool {
+      switch direction {
+      case .previous:
+        return parent.onMoveUp?() ?? false
+      case .next:
+        return parent.onMoveDown?() ?? false
+      }
+    }
+  }
+}
+
+private final class SourceTextNSTextView: NSTextView {
+  var historyNavigationHandler: ((SourceTextHistoryDirection) -> Bool)?
+
+  override func keyDown(with event: NSEvent) {
+    if let direction = SourceTextHistoryDirection(event: event),
+       historyNavigationHandler?(direction) == true
+    {
+      return
+    }
+
+    super.keyDown(with: event)
+  }
+}
+
+private enum SourceTextHistoryDirection {
+  case previous
+  case next
+
+  init?(event: NSEvent) {
+    let modifierFlags = event.modifierFlags
+      .intersection(.deviceIndependentFlagsMask)
+      .subtracting([.numericPad, .function])
+    guard modifierFlags.isEmpty else {
+      return nil
+    }
+
+    switch event.keyCode {
+    case 126:
+      self = .previous
+    case 125:
+      self = .next
+    default:
+      return nil
     }
   }
 }

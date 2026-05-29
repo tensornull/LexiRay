@@ -69,6 +69,13 @@ struct DashboardSettingsView: View {
           LabeledContent("Last position", value: "\(Int(origin.x)), \(Int(origin.y))")
             .foregroundStyle(.secondary)
         }
+
+        Stepper(
+          value: translationHistoryLimit,
+          in: SettingsStore.translationHistoryLimitRange
+        ) {
+          LabeledContent("History limit", value: "\(settings.translationHistoryLimit)")
+        }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -144,6 +151,13 @@ struct DashboardSettingsView: View {
     Binding(
       get: { settings.floatingPanelPlacement },
       set: { settings.floatingPanelPlacement = $0 }
+    )
+  }
+
+  private var translationHistoryLimit: Binding<Int> {
+    Binding(
+      get: { settings.translationHistoryLimit },
+      set: { settings.translationHistoryLimit = $0 }
     )
   }
 

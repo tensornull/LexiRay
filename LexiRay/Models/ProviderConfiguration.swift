@@ -24,7 +24,23 @@ struct ProviderConfiguration: Codable, Equatable, Identifiable {
   }
 
   var effectiveDisplayName: String {
-    displayName.nonEmptyTrimmed ?? providerID.displayName
+    guard let displayName = displayName.nonEmptyTrimmed else {
+      return providerID.displayName
+    }
+
+    if isBuiltIn, providerID.isDefaultDisplayNameEquivalent(displayName) {
+      return providerID.displayName
+    }
+
+    return displayName
+  }
+
+  var hasCustomDisplayName: Bool {
+    guard let displayName = displayName.nonEmptyTrimmed else {
+      return false
+    }
+
+    return !isBuiltIn || !providerID.isDefaultDisplayNameEquivalent(displayName)
   }
 
   var normalizedBaseURL: String {
@@ -124,6 +140,19 @@ struct ProviderConfiguration: Codable, Equatable, Identifiable {
     configuration.displayName = ""
     configuration.isEnabled = false
     return configuration
+  }
+
+  func normalizedForStorage() -> ProviderConfiguration {
+    guard isBuiltIn,
+          let displayName = displayName.nonEmptyTrimmed,
+          providerID.isDefaultDisplayNameEquivalent(displayName)
+    else {
+      return self
+    }
+
+    var normalized = self
+    normalized.displayName = ""
+    return normalized
   }
 }
 

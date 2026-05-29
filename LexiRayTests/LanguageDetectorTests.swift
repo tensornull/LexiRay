@@ -7,7 +7,7 @@ final class LanguageDetectorTests: XCTestCase {
   }
 
   func testShortEnglishSourceLanguageUsesConfiguredEnglish() {
-    for text in ["hi", "Hi", "hi!", "ok"] {
+    for text in ["hi", "Hi", "hi!", "ok", "hi2"] {
       XCTAssertEqual(
         LanguageDetector.sourceLanguageCode(for: text, language1: "en", language2: "zh-Hans"),
         "en"
@@ -33,10 +33,10 @@ final class LanguageDetectorTests: XCTestCase {
     )
   }
 
-  func testShortTextEnglishOverrideIgnoresCodeLikeText() {
+  func testShortTextEnglishOverrideIgnoresNumericOnlyText() {
     XCTAssertEqual(
-      LanguageDetector.sourceLanguageCode(for: "hi1", language1: "en", language2: "zh-Hans"),
-      LanguageDetector.dominantLanguageCode(for: "hi1")
+      LanguageDetector.sourceLanguageCode(for: "123", language1: "en", language2: "zh-Hans"),
+      LanguageDetector.dominantLanguageCode(for: "123")
     )
   }
 

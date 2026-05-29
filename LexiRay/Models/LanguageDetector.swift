@@ -76,8 +76,8 @@ enum LanguageDetector {
 
   private static func shortEnglishSourceLanguage(for text: String, language1: String) -> String? {
     guard languageBase(language1) == "en",
-          let word = shortASCIIWord(from: text),
-          (1 ... 3).contains(word.count)
+          let token = shortASCIILatinToken(from: text),
+          (1 ... 6).contains(token.count)
     else {
       return nil
     }
@@ -85,7 +85,7 @@ enum LanguageDetector {
     return language1
   }
 
-  private static func shortASCIIWord(from text: String) -> String? {
+  private static func shortASCIILatinToken(from text: String) -> String? {
     var candidate = text.trimmedForQuery
     while let lastScalar = candidate.unicodeScalars.last,
           shortTextTrailingPunctuation.contains(lastScalar) {
@@ -93,7 +93,8 @@ enum LanguageDetector {
     }
 
     guard !candidate.isEmpty,
-          candidate.unicodeScalars.allSatisfy(isASCIIAlphabetic)
+          candidate.unicodeScalars.allSatisfy(isASCIIAlphanumeric),
+          candidate.unicodeScalars.contains(where: isASCIIAlphabetic)
     else {
       return nil
     }
@@ -107,6 +108,10 @@ enum LanguageDetector {
 
   private static func isASCIIAlphabetic(_ scalar: UnicodeScalar) -> Bool {
     (65 ... 90).contains(Int(scalar.value)) || (97 ... 122).contains(Int(scalar.value))
+  }
+
+  private static func isASCIIAlphanumeric(_ scalar: UnicodeScalar) -> Bool {
+    isASCIIAlphabetic(scalar) || (48 ... 57).contains(Int(scalar.value))
   }
 
   private static func languageMatches(_ sourceLanguage: String?, configuredLanguage: String) -> Bool {

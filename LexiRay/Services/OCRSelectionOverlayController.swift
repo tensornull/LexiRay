@@ -1,8 +1,15 @@
 import AppKit
 
 @MainActor
-final class OCRSelectionOverlayController {
+protocol OCRRegionSelecting: AnyObject {
+  func beginSelection(onComplete: @escaping (CGRect?) -> Void)
+  func close()
+}
+
+@MainActor
+final class OCRSelectionOverlayController: OCRRegionSelecting {
   private var panel: OCRSelectionPanel?
+  private var escapeMonitor: Any?
 
   func beginSelection(onComplete: @escaping (CGRect?) -> Void) {
     close()
@@ -15,7 +22,7 @@ final class OCRSelectionOverlayController {
 
     let panel = OCRSelectionPanel(
       contentRect: screenFrame,
-      styleMask: [.borderless],
+      styleMask: [.borderless, .nonactivatingPanel],
       backing: .buffered,
       defer: false
     )
@@ -30,18 +37,33 @@ final class OCRSelectionOverlayController {
     panel.backgroundColor = .clear
     panel.isOpaque = false
     panel.hasShadow = false
+    panel.hidesOnDeactivate = false
     panel.level = .screenSaver
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     panel.ignoresMouseEvents = false
-    panel.makeKeyAndOrderFront(nil)
+    panel.orderFrontRegardless()
+    panel.makeKey()
     NSCursor.crosshair.set()
+
+    escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak selectionView] event in
+      if event.keyCode == 53 {
+        selectionView?.cancelSelection()
+        return nil
+      }
+      return event
+    }
 
     self.panel = panel
   }
 
   func close() {
+    if let escapeMonitor {
+      NSEvent.removeMonitor(escapeMonitor)
+      self.escapeMonitor = nil
+    }
     panel?.orderOut(nil)
     panel = nil
+    NSCursor.arrow.set()
   }
 }
 
@@ -57,6 +79,7 @@ private final class OCRSelectionView: NSView {
   private let screenFrame: NSRect
   private var startPoint: CGPoint?
   private var currentPoint: CGPoint?
+  private var didComplete = false
 
   init(frame frameRect: NSRect, screenFrame: NSRect) {
     self.screenFrame = screenFrame
@@ -113,20 +136,28 @@ private final class OCRSelectionView: NSView {
 
   override func mouseUp(with event: NSEvent) {
     currentPoint = screenPoint(from: event)
-    guard let rect = selectedScreenRect, rect.width >= 8, rect.height >= 8 else {
-      onComplete?(nil)
+    guard let rect = selectedScreenRect else {
+      complete(nil)
+      return
+    }
+    guard rect.width >= 2 || rect.height >= 2 else {
+      complete(nil)
       return
     }
 
-    onComplete?(rect)
+    complete(rect)
   }
 
   override func keyDown(with event: NSEvent) {
     if event.keyCode == 53 {
-      onComplete?(nil)
+      cancelSelection()
     } else {
       super.keyDown(with: event)
     }
+  }
+
+  func cancelSelection() {
+    complete(nil)
   }
 
   private var selectedScreenRect: CGRect? {
@@ -148,6 +179,17 @@ private final class OCRSelectionView: NSView {
 
   private func screenPoint(from event: NSEvent) -> CGPoint {
     window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow
+  }
+
+  private func complete(_ rect: CGRect?) {
+    guard !didComplete else {
+      return
+    }
+
+    didComplete = true
+    let completion = onComplete
+    onComplete = nil
+    completion?(rect)
   }
 
   private func drawPrompt() {
