@@ -112,7 +112,7 @@ checks, or real UI acceptance when the changed behavior is visible.
 ./script/request_ai_review.sh <PR_NUMBER>
 ```
 
-- The script requests GitHub Copilot with `gh pr edit --add-reviewer @copilot`
+- The script requests GitHub Copilot with `gh pr edit --add-reviewer copilot`
   and triggers Codex with the exact PR comment `@codex review`.
 - If Codex does not react or post a review, confirm Code review is enabled for
   this repository in Codex settings and that the exact `@codex review` trigger
