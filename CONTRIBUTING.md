@@ -33,6 +33,15 @@ also verify the real workspace-built app:
 
 - Target `main` from `dev`.
 - Include a concise summary and the exact checks you ran.
+- After local CI passes and the PR is open, request the manual dual-agent review:
+
+```bash
+./script/request_ai_review.sh <PR_NUMBER>
+```
+
+- Address actionable GitHub Copilot and Codex findings before merge. If a fix
+  changes code or release behavior, rerun the relevant local gate before asking
+  for another review.
 - If a GitHub Actions check fails, inspect the failed logs before changing code:
 
 ```bash

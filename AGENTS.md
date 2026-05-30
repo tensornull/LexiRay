@@ -84,6 +84,46 @@ paths are under this repo's `build/` directory or Xcode's `DerivedData/LexiRay-*
 - The current recurrence-prevention rule is: local `./script/ci_local.sh` first,
   PR checks second, main checks third, release tag last.
 
+## Review Guidelines
+
+Codex review should focus on P0/P1 risks rather than style churn. Prioritize:
+
+- Broken CI, release, signing, packaging, or XcodeGen assumptions.
+- SwiftUI state, identity, observation, lifecycle, or main-actor mistakes that
+  can make the app show stale data or behave inconsistently.
+- Accessibility, Screen Recording, TCC, launch-at-login, hotkey, and app
+  identity regressions.
+- Translation concurrency, cancellation, provider ordering, copy behavior, and
+  settings persistence bugs.
+- Clean-room violations, non-Swift code, generated-project edits, committed
+  `.codex/`, build artifacts, DerivedData, xcresults, or release outputs.
+
+Do not treat AI review as a substitute for `./script/ci_local.sh`, GitHub
+checks, or real UI acceptance when the changed behavior is visible.
+
+## Dual Agent PR Review
+
+- Manual dual review is the default. Do not enable automatic Codex or Copilot
+  reviews unless the user explicitly asks.
+- After `./script/ci_local.sh` passes and the PR is open, request both AI
+  reviews:
+
+```bash
+./script/request_ai_review.sh <PR_NUMBER>
+```
+
+- The script requests GitHub Copilot with `gh pr edit --add-reviewer @copilot`
+  and triggers Codex with the exact PR comment `@codex review`.
+- If Codex does not react or post a review, confirm Code review is enabled for
+  this repository in Codex settings and that the exact `@codex review` trigger
+  was posted.
+- If Copilot cannot be added as reviewer, confirm the repository and account
+  have access to GitHub Copilot Code Review.
+- Address actionable AI findings with the same discipline as human review:
+  make the smallest fix, rerun the relevant local gate, and request a re-review
+  only when needed. Use `./script/request_ai_review.sh <PR_NUMBER> --force-codex`
+  to force a new Codex review comment.
+
 ## Branch and Release Discipline
 
 - Work on `dev` by default. Do not switch to, commit on, or merge `main` unless
