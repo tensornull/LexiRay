@@ -6,7 +6,7 @@ usage() {
 Usage: ./script/request_ai_review.sh [PR_NUMBER] [--force-codex]
 
 Requests the manual dual-agent PR review flow:
-  1. GitHub Copilot review via gh pr edit --add-reviewer copilot
+  1. GitHub Copilot review via gh pr edit --add-reviewer @copilot
   2. Codex review via an @codex review PR comment
 
 If PR_NUMBER is omitted, the script resolves the PR for the current branch.
@@ -58,7 +58,7 @@ fi
 gh pr view "$pr_number" --json number,title,url --jq '"PR #\(.number): \(.title)\n\(.url)"'
 
 echo "Requesting GitHub Copilot review..."
-if ! gh pr edit "$pr_number" --add-reviewer copilot; then
+if ! gh pr edit "$pr_number" --add-reviewer @copilot; then
   cat >&2 <<'EOF'
 Failed to request GitHub Copilot review.
 Confirm the repository and account have access to GitHub Copilot Code Review.
