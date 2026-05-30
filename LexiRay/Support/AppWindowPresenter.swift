@@ -7,9 +7,7 @@ enum AppWindowPresenter {
   private weak static var mainWindow: NSWindow?
   private static var mainWindowObservers: [NSObjectProtocol] = []
   private static var closingMainWindowIDs = Set<ObjectIdentifier>()
-  private static var pendingMainWindowPresentation = false
-  private static var pendingPresentationRetryScheduled = false
-  private static var pendingPresentationRetryDeadline: Date?
+  private static var pendingMainWindowPresentation: PresentationRequest?
 
   static func bringMainWindowToFrontSoon() {
     requestMainWindowPresentation()
@@ -79,24 +77,21 @@ enum AppWindowPresenter {
 
   static func requestMainWindowPresentation() {
     startPresentationCancellationObservation()
-    pendingMainWindowPresentation = true
-    pendingPresentationRetryDeadline = Date().addingTimeInterval(5)
+    pendingMainWindowPresentation = PresentationRequest(deadline: Date().addingTimeInterval(5))
     showDockAndActivate()
   }
 
   static var isMainWindowPresentationPending: Bool {
-    pendingMainWindowPresentation
+    pendingMainWindowPresentation != nil
   }
 
   static func cancelPendingMainWindowPresentation() {
-    pendingMainWindowPresentation = false
-    pendingPresentationRetryScheduled = false
-    pendingPresentationRetryDeadline = nil
+    pendingMainWindowPresentation = nil
   }
 
   @discardableResult
   static func presentMainWindowIfAvailable() -> Bool {
-    guard pendingMainWindowPresentation else {
+    guard pendingMainWindowPresentation != nil else {
       return false
     }
 
@@ -111,9 +106,7 @@ enum AppWindowPresenter {
       return false
     }
 
-    pendingMainWindowPresentation = false
-    pendingPresentationRetryScheduled = false
-    pendingPresentationRetryDeadline = nil
+    pendingMainWindowPresentation = nil
     return true
   }
 
@@ -238,19 +231,20 @@ enum AppWindowPresenter {
   }
 
   private static func schedulePendingPresentationRetry() {
-    guard pendingMainWindowPresentation, !pendingPresentationRetryScheduled else {
+    guard var request = pendingMainWindowPresentation, !request.retryScheduled else {
       return
     }
 
-    guard pendingPresentationRetryDeadline.map({ Date() < $0 }) ?? true else {
+    guard Date() < request.deadline else {
       cancelPendingMainWindowPresentation()
       return
     }
 
-    pendingPresentationRetryScheduled = true
+    request.retryScheduled = true
+    pendingMainWindowPresentation = request
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
       Task { @MainActor in
-        pendingPresentationRetryScheduled = false
+        pendingMainWindowPresentation?.retryScheduled = false
         presentMainWindowIfAvailable()
       }
     }
@@ -375,5 +369,10 @@ enum AppWindowPresenter {
 
   enum WindowKind: Hashable {
     case main
+  }
+
+  private struct PresentationRequest {
+    var deadline: Date
+    var retryScheduled = false
   }
 }

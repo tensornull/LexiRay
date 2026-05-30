@@ -69,9 +69,15 @@ struct FloatingPanelIconMenuLabel: View {
   }
 }
 
+enum CopyToastSurface: Equatable {
+  case mainWindow
+  case floatingPanel
+}
+
 struct CopyToast: Equatable, Identifiable {
   let id = UUID()
   let message: String
+  let surface: CopyToastSurface
 }
 
 struct CopyToastView: View {

@@ -6,6 +6,7 @@ struct TranslationBatchResultsView: View {
   var showsSourcePreview = true
   var resultLineLimit: Int?
   var compact = false
+  var copyToastSurface: CopyToastSurface = .floatingPanel
 
   var body: some View {
     VStack(alignment: .leading, spacing: compact ? 10 : 12) {
@@ -20,7 +21,8 @@ struct TranslationBatchResultsView: View {
             settings: controller.settings,
             entry: entry,
             resultLineLimit: resultLineLimit,
-            compact: compact
+            compact: compact,
+            copyToastSurface: copyToastSurface
           )
 
           if entry.id != batch.entries.last?.id {
@@ -62,6 +64,7 @@ private struct ProviderTranslationResultRow: View {
   let entry: ProviderTranslationEntry
   var resultLineLimit: Int?
   var compact: Bool
+  var copyToastSurface: CopyToastSurface
 
   var body: some View {
     VStack(alignment: .leading, spacing: compact ? 7 : 8) {
@@ -119,7 +122,7 @@ private struct ProviderTranslationResultRow: View {
     case let .success(result):
       HStack(spacing: 6) {
         iconButton(systemName: "doc.on.doc", help: "Copy") {
-          controller.copyResultToClipboard(result)
+          controller.copyResultToClipboard(result, surface: copyToastSurface)
         }
 
         copyFormatMenu(result)
@@ -181,7 +184,7 @@ private struct ProviderTranslationResultRow: View {
     Menu {
       ForEach(CopyFormat.allCases) { format in
         Button {
-          controller.copyResultToClipboard(result, format: format)
+          controller.copyResultToClipboard(result, format: format, surface: copyToastSurface)
         } label: {
           HStack {
             Text(format.displayName)
@@ -208,6 +211,7 @@ private struct ProviderTranslationResultRow: View {
       Image(systemName: systemName)
     }
     .buttonStyle(FloatingPanelIconButtonStyle(isActive: isActive))
+    .accessibilityLabel(help)
     .help(help)
   }
 }
@@ -226,7 +230,7 @@ private struct ProviderFailureDetailView: View {
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
 
-      ForEach(Array(parts.details.enumerated()), id: \.offset) { _, detail in
+      ForEach(parts.details) { detail in
         TranslationCodeBlockView(language: detail.title, code: detail.body)
       }
     }
@@ -234,9 +238,15 @@ private struct ProviderFailureDetailView: View {
   }
 }
 
+private struct ProviderFailureDetail: Equatable, Identifiable {
+  let id: String
+  let title: String
+  let body: String
+}
+
 private struct ProviderFailureMessageParts {
   let summary: String
-  let details: [(title: String, body: String)]
+  let details: [ProviderFailureDetail]
 
   init(_ message: String) {
     let markers = ["Response body:", "Stream event:"]
@@ -267,8 +277,8 @@ private struct ProviderFailureMessageParts {
   private static func extractDetails(
     from text: String,
     markers: [String]
-  ) -> [(title: String, body: String)] {
-    var details: [(title: String, body: String)] = []
+  ) -> [ProviderFailureDetail] {
+    var details: [ProviderFailureDetail] = []
     var remaining = text
 
     while let marker = markers.compactMap({ marker -> (String, Range<String.Index>)? in
@@ -290,7 +300,14 @@ private struct ProviderFailureMessageParts {
       }
 
       if !body.isEmpty {
-        details.append((title: marker.0.replacingOccurrences(of: ":", with: ""), body: body))
+        let title = marker.0.replacingOccurrences(of: ":", with: "")
+        details.append(
+          ProviderFailureDetail(
+            id: stableProviderFailureID(for: "\(title):\(body)", occurrence: details.count),
+            title: title,
+            body: body
+          )
+        )
       }
 
       if remaining.isEmpty {
@@ -300,6 +317,15 @@ private struct ProviderFailureMessageParts {
 
     return details
   }
+}
+
+private func stableProviderFailureID(for key: String, occurrence: Int) -> String {
+  var hash: UInt64 = 14_695_981_039_346_656_037
+  for byte in key.utf8 {
+    hash ^= UInt64(byte)
+    hash &*= 1_099_511_628_211
+  }
+  return "\(String(hash, radix: 16))-\(occurrence)"
 }
 
 private struct StatusPill: View {

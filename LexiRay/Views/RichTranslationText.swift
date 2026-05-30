@@ -17,17 +17,25 @@ struct RichTranslationContentView: View {
   var font: Font
   var lineLimit: Int?
 
-  private var blocks: [RichTranslationBlock] {
-    RichTranslationRenderer.blocks(for: text)
+  @State private var renderedBlocks: [RichRenderedBlock]
+
+  init(text: String, font: Font, lineLimit: Int?) {
+    self.text = text
+    self.font = font
+    self.lineLimit = lineLimit
+    _renderedBlocks = State(initialValue: RichTranslationRenderer.renderedBlocks(for: text))
   }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-        blockView(block)
+      ForEach(renderedBlocks) { renderedBlock in
+        blockView(renderedBlock.block)
       }
     }
     .frame(maxWidth: .infinity, alignment: .topLeading)
+    .onChange(of: text) { _, newText in
+      renderedBlocks = RichTranslationRenderer.renderedBlocks(for: newText)
+    }
   }
 
   @ViewBuilder
@@ -99,21 +107,10 @@ private struct RichInlineFlowTextView: View {
   let content: RichInlineContent
   let font: Font
 
-  private var tokens: [RichInlineToken] {
-    content.segments.flatMap { segment -> [RichInlineToken] in
-      switch segment {
-      case let .text(attributed):
-        textTokens(from: attributed).map { RichInlineToken.text($0) }
-      case let .code(text):
-        [.code(text)]
-      }
-    }
-  }
-
   var body: some View {
     InlineFlowLayout(verticalSpacing: 5) {
-      ForEach(Array(tokens.enumerated()), id: \.offset) { _, token in
-        switch token {
+      ForEach(content.tokens) { token in
+        switch token.value {
         case let .text(attributed):
           Text(attributed)
             .font(font)
@@ -124,8 +121,41 @@ private struct RichInlineFlowTextView: View {
     }
     .frame(maxWidth: .infinity, alignment: .topLeading)
   }
+}
 
-  private func textTokens(from attributed: AttributedString) -> [AttributedString] {
+struct RichInlineToken: Equatable, Identifiable {
+  let id: String
+  let value: Value
+
+  enum Value: Equatable {
+    case text(AttributedString)
+    case code(String)
+  }
+
+  static func tokens(from segments: [RichInlineSegment]) -> [RichInlineToken] {
+    identified(
+      segments.flatMap { segment -> [Value] in
+        switch segment {
+        case let .text(attributed):
+          textTokenValues(from: attributed)
+        case let .code(text):
+          [.code(text)]
+        }
+      }
+    )
+  }
+
+  private static func identified(_ values: [Value]) -> [RichInlineToken] {
+    var occurrences: [String: Int] = [:]
+    return values.map { value in
+      let key = identityKey(for: value)
+      let occurrence = occurrences[key, default: 0]
+      occurrences[key] = occurrence + 1
+      return RichInlineToken(id: stableRichID(for: key, occurrence: occurrence), value: value)
+    }
+  }
+
+  private static func textTokenValues(from attributed: AttributedString) -> [Value] {
     guard !attributed.characters.isEmpty else {
       return []
     }
@@ -150,13 +180,17 @@ private struct RichInlineFlowTextView: View {
     }
 
     tokens.append(AttributedString(attributed[tokenStart ..< attributed.endIndex]))
-    return tokens.filter { !$0.characters.isEmpty }
+    return tokens.filter { !$0.characters.isEmpty }.map { .text($0) }
   }
-}
 
-private enum RichInlineToken {
-  case text(AttributedString)
-  case code(String)
+  private static func identityKey(for value: Value) -> String {
+    switch value {
+    case let .text(attributed):
+      "text:\(String(attributed.characters))"
+    case let .code(text):
+      "code:\(text)"
+    }
+  }
 }
 
 private struct InlineCodeChip: View {
@@ -315,9 +349,21 @@ enum RichTranslationBlock: Equatable {
   case code(language: String?, code: String)
 }
 
+struct RichRenderedBlock: Equatable, Identifiable {
+  let id: String
+  let block: RichTranslationBlock
+}
+
 struct RichInlineContent: Equatable {
   let attributed: AttributedString
   let segments: [RichInlineSegment]
+  let tokens: [RichInlineToken]
+
+  init(attributed: AttributedString, segments: [RichInlineSegment]) {
+    self.attributed = attributed
+    self.segments = segments
+    tokens = RichInlineToken.tokens(from: segments)
+  }
 
   var characters: AttributedString.CharacterView {
     attributed.characters
@@ -350,6 +396,10 @@ enum RichInlineSegment: Equatable {
 }
 
 enum RichTranslationRenderer {
+  static func renderedBlocks(for text: String) -> [RichRenderedBlock] {
+    identifiedBlocks(blocks(for: text))
+  }
+
   static func blocks(for text: String) -> [RichTranslationBlock] {
     if looksLikeHTML(text), let html = htmlAttributedString(for: text) {
       return [.text(RichInlineContent(attributed: html, segments: [.text(html)]))]
@@ -370,6 +420,16 @@ enum RichTranslationRenderer {
 
     let attributed = AttributedString(text)
     return [.text(RichInlineContent(attributed: attributed, segments: [.text(attributed)]))]
+  }
+
+  private static func identifiedBlocks(_ blocks: [RichTranslationBlock]) -> [RichRenderedBlock] {
+    var occurrences: [String: Int] = [:]
+    return blocks.map { block in
+      let key = identityKey(for: block)
+      let occurrence = occurrences[key, default: 0]
+      occurrences[key] = occurrence + 1
+      return RichRenderedBlock(id: stableRichID(for: key, occurrence: occurrence), block: block)
+    }
   }
 
   static func attributedString(for text: String) -> AttributedString {
@@ -841,6 +901,21 @@ enum RichTranslationRenderer {
     return expression.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: replacement)
   }
 
+  private static func identityKey(for block: RichTranslationBlock) -> String {
+    switch block {
+    case let .text(content):
+      "text:\(content.plainString)"
+    case let .heading(level, content):
+      "heading:\(level):\(content.plainString)"
+    case let .listItem(index, content):
+      "list:\(index.map(String.init) ?? "bullet"):\(content.plainString)"
+    case let .quote(content):
+      "quote:\(content.plainString)"
+    case let .code(language, code):
+      "code:\(language ?? ""):\(code)"
+    }
+  }
+
   private static func countMatches(in text: String, pattern: String) -> Int {
     guard let expression = try? NSRegularExpression(pattern: pattern) else {
       return 0
@@ -867,4 +942,13 @@ enum RichTranslationRenderer {
       .replacingOccurrences(of: "\"", with: "&quot;")
       .replacingOccurrences(of: "'", with: "&#39;")
   }
+}
+
+private func stableRichID(for key: String, occurrence: Int) -> String {
+  var hash: UInt64 = 14_695_981_039_346_656_037
+  for byte in key.utf8 {
+    hash ^= UInt64(byte)
+    hash &*= 1_099_511_628_211
+  }
+  return "\(String(hash, radix: 16))-\(occurrence)"
 }

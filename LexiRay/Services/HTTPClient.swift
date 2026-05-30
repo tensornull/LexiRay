@@ -5,8 +5,7 @@ struct HTTPLineStream {
   let response: URLResponse
 }
 
-@MainActor
-protocol HTTPClient {
+protocol HTTPClient: Sendable {
   func data(for request: URLRequest) async throws -> (Data, URLResponse)
   func lineStream(for request: URLRequest) async throws -> HTTPLineStream
 }

@@ -61,6 +61,26 @@ final class SettingsStoreTests: XCTestCase {
     XCTAssertFalse(reloaded.showsMenuBarIcon)
   }
 
+  func testAutoCopyModeDefaultsToOff() throws {
+    let defaults = try makeDefaults()
+    let providerFileStore = makeProviderFileStore()
+
+    let store = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+
+    XCTAssertEqual(store.autoCopyMode, .off)
+  }
+
+  func testAutoCopyModePersists() throws {
+    let defaults = try makeDefaults()
+    let providerFileStore = makeProviderFileStore()
+    let store = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+
+    store.autoCopyMode = .firstProviderSuccess
+
+    let reloaded = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+    XCTAssertEqual(reloaded.autoCopyMode, .firstProviderSuccess)
+  }
+
   func testDefaultCopyFormatPersists() throws {
     let defaults = try makeDefaults()
     let providerFileStore = makeProviderFileStore()

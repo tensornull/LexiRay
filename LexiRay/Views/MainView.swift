@@ -36,7 +36,7 @@ struct MainView: View {
           .frame(maxWidth: .infinity, alignment: .topLeading)
         }
 
-        if let toast = controller.copyToast {
+        if let toast = controller.copyToast, toast.surface == .mainWindow {
           CopyToastView(toast: toast)
             .padding(.top, 18)
             .transition(.opacity.combined(with: .scale(scale: 0.96)))
@@ -152,7 +152,8 @@ struct MainView: View {
             batch: batch,
             showsSourcePreview: true,
             resultLineLimit: 6,
-            compact: true
+            compact: true,
+            copyToastSurface: .mainWindow
           )
         case let .result(result):
           TranslationBatchResultsView(
@@ -160,7 +161,8 @@ struct MainView: View {
             batch: singleResultBatch(result),
             showsSourcePreview: true,
             resultLineLimit: 6,
-            compact: true
+            compact: true,
+            copyToastSurface: .mainWindow
           )
         case let .error(message):
           ContentUnavailableView("No Translation", systemImage: "exclamationmark.triangle", description: Text(message))

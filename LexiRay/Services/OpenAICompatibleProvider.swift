@@ -432,7 +432,6 @@ private func result(
   )
 }
 
-@MainActor
 private func performJSONRequest<Response: Decodable>(
   endpoint: URL,
   apiKey: String,
@@ -456,7 +455,6 @@ private func jsonRequest(endpoint: URL, body: some Encodable) throws -> URLReque
   return request
 }
 
-@MainActor
 private func decodeResponse<Response: Decodable>(
   from request: URLRequest,
   client: HTTPClient,
@@ -487,7 +485,6 @@ private func decodeResponse<Response: Decodable>(
   }
 }
 
-@MainActor
 private func openLineStream(
   from request: URLRequest,
   client: HTTPClient,
@@ -563,7 +560,6 @@ private func providerStreamFailureMessage(
   return sections.joined(separator: "\n\n")
 }
 
-@MainActor
 private func collectFailureBody(from lines: AsyncThrowingStream<String, Error>) async -> String? {
   var collected: [String] = []
   var characterCount = 0
@@ -633,7 +629,6 @@ private func sanitizedDebugSnippet(_ rawText: String?) -> String? {
   return "\(String(text.prefix(providerDebugBodyCharacterLimit)))\n[truncated \(omittedCount) characters]"
 }
 
-@MainActor
 private func makeStreamingTranslation(
   for request: TranslationRequest,
   providerID: ProviderID,
@@ -642,7 +637,7 @@ private func makeStreamingTranslation(
   decodeEvent: @escaping @Sendable (ServerSentEvent) throws -> ProviderStreamAction
 ) -> AsyncThrowingStream<TranslationStreamUpdate, Error> {
   AsyncThrowingStream { continuation in
-    let task = Task { @MainActor in
+    let task = Task(priority: .userInitiated) {
       var parser = ServerSentEventParser()
       var accumulatedText = ""
       var finalText: String?

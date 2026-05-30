@@ -1,15 +1,14 @@
 import Foundation
 
-@MainActor
-final class TranslationPipeline {
+final class TranslationPipeline: @unchecked Sendable {
   private let settings: SettingsStore
   private let cache: TranslationCache
-  private let providerFactory: ((ProviderConfiguration) throws -> TranslationProvider)?
+  private let providerFactory: (@MainActor (ProviderConfiguration) throws -> TranslationProvider)?
 
   init(
     settings: SettingsStore,
     cache: TranslationCache = TranslationCache(),
-    providerFactory: ((ProviderConfiguration) throws -> TranslationProvider)? = nil
+    providerFactory: (@MainActor (ProviderConfiguration) throws -> TranslationProvider)? = nil
   ) {
     self.settings = settings
     self.cache = cache
@@ -31,6 +30,7 @@ final class TranslationPipeline {
     throw TranslationError.providerUnavailable(message)
   }
 
+  @MainActor
   func makeBatch(text rawText: String, selectionSource: SelectionSource) throws -> TranslationBatch {
     guard let text = rawText.nonEmptyTrimmed else {
       throw TranslationError.emptyInput
@@ -73,18 +73,21 @@ final class TranslationPipeline {
     bypassCache: Bool = false,
     onUpdate: (@MainActor (TranslationBatch) -> Void)? = nil
   ) async throws -> TranslationBatch {
-    var batch = try makeBatch(text: rawText, selectionSource: selectionSource)
+    var batch = try await makeBatch(text: rawText, selectionSource: selectionSource)
     let request = batch.request
-    let tasks = batch.entries.filter(\.isTranslatable).map { entry in
-      Task { @MainActor in
-        await self.translate(entry, request: request, bypassCache: bypassCache)
-      }
-    }
+    let entries = batch.entries.filter(\.isTranslatable)
 
-    for task in tasks {
-      let entry = await task.value
-      batch.update(entry)
-      onUpdate?(batch)
+    await withTaskGroup(of: ProviderTranslationEntry.self) { group in
+      for entry in entries {
+        group.addTask {
+          await self.translate(entry, request: request, bypassCache: bypassCache)
+        }
+      }
+
+      for await entry in group {
+        batch.update(entry)
+        await onUpdate?(batch)
+      }
     }
 
     return batch
@@ -129,7 +132,7 @@ final class TranslationPipeline {
     bypassCache: Bool = false,
     onPartial: (@MainActor (String) -> Void)? = nil
   ) async throws -> TranslationResult {
-    let provider = try makeProvider(forConfigurationID: providerConfigurationID)
+    let provider = try await makeProvider(forConfigurationID: providerConfigurationID)
     let text = request.text
     let cacheKey = TranslationCacheKey(
       providerConfigurationID: providerConfigurationID,
@@ -151,7 +154,7 @@ final class TranslationPipeline {
       switch update {
       case let .partial(partialText):
         if !partialText.isEmpty {
-          onPartial?(partialText)
+          await onPartial?(partialText)
         }
       case let .completed(result):
         finalResult = result.withProviderIdentity(providerConfigurationID: providerConfigurationID, providerName: providerName)
@@ -166,6 +169,7 @@ final class TranslationPipeline {
     return result
   }
 
+  @MainActor
   private func makeProvider(forConfigurationID configurationID: String) throws -> TranslationProvider {
     guard let providerConfiguration = settings.configuration(for: configurationID) else {
       throw TranslationError.providerUnavailable("Provider configuration was removed")
@@ -207,6 +211,7 @@ final class TranslationPipeline {
     }
   }
 
+  @MainActor
   private func makeLLMConfiguration(for configuration: ProviderConfiguration) -> LLMProviderConfiguration {
     LLMProviderConfiguration(
       provider: configuration.providerID,

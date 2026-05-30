@@ -3,32 +3,62 @@ import SwiftUI
 struct DashboardSettingsView: View {
   @Environment(\.scenePhase) private var scenePhase
   @ObservedObject var controller: LexiRayController
+  @ObservedObject private var settings: SettingsStore
   @State private var permissions = PermissionStatus.current
+  @State private var loginItemStatus = LoginItemService.status
 
-  private var settings: SettingsStore {
-    controller.settings
+  init(controller: LexiRayController) {
+    self.controller = controller
+    settings = controller.settings
   }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 18) {
       appPanel
+      translationPanel
       hotKeyPanel
       floatingPanel
       permissionPanel
       advancedPanel
     }
-    .onAppear(perform: refreshPermissions)
+    .onAppear(perform: refreshRuntimeState)
     .onChange(of: scenePhase) { _, newPhase in
       guard newPhase == .active else {
         return
       }
-      refreshPermissions()
+      refreshRuntimeState()
     }
   }
 
   private var appPanel: some View {
     SettingsSection(title: "App", systemName: "app.badge") {
-      Toggle("Show menu bar icon", isOn: showsMenuBarIcon)
+      VStack(alignment: .leading, spacing: 10) {
+        Toggle("Show menu bar icon", isOn: showsMenuBarIcon)
+
+        Toggle("Start at login", isOn: startAtLogin)
+          .disabled(loginItemStatus.isUnavailable)
+
+        if let detail = loginItemStatus.detail {
+          Text(detail)
+            .font(.caption)
+            .foregroundStyle(loginItemDetailColor)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+
+  private var translationPanel: some View {
+    SettingsSection(title: "Translation", systemName: "translate") {
+      VStack(alignment: .leading, spacing: 10) {
+        Picker("Auto copy", selection: autoCopyMode) {
+          ForEach(AutoCopyMode.allCases) { mode in
+            Text(mode.displayName).tag(mode)
+          }
+        }
+        .pickerStyle(.menu)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
 
@@ -133,6 +163,32 @@ struct DashboardSettingsView: View {
     )
   }
 
+  private var startAtLogin: Binding<Bool> {
+    Binding(
+      get: { loginItemStatus.isEnabled },
+      set: { newValue in
+        do {
+          try LoginItemService.setEnabled(newValue)
+          refreshLoginItemStatus()
+        } catch {
+          loginItemStatus = .unavailable(error.localizedDescription)
+          AppLog.settings.error("Failed to update login item: \(error.localizedDescription, privacy: .public)")
+        }
+      }
+    )
+  }
+
+  private var autoCopyMode: Binding<AutoCopyMode> {
+    Binding(
+      get: { settings.autoCopyMode },
+      set: { settings.autoCopyMode = $0 }
+    )
+  }
+
+  private var loginItemDetailColor: Color {
+    loginItemStatus == .requiresApproval ? Color.orange : Color.secondary
+  }
+
   private var translateHotKey: Binding<HotKeyConfiguration> {
     Binding(
       get: { settings.translateHotKey },
@@ -161,8 +217,17 @@ struct DashboardSettingsView: View {
     )
   }
 
+  private func refreshRuntimeState() {
+    refreshPermissions()
+    refreshLoginItemStatus()
+  }
+
   private func refreshPermissions() {
     permissions = .current
+  }
+
+  private func refreshLoginItemStatus() {
+    loginItemStatus = LoginItemService.status
   }
 }
 

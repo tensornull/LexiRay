@@ -14,7 +14,7 @@ struct FloatingPanelView: View {
       .padding(12)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
-      if let toast = controller.copyToast {
+      if let toast = controller.copyToast, toast.surface == .floatingPanel {
         CopyToastView(toast: toast)
           .padding(.top, 18)
           .transition(.opacity.combined(with: .scale(scale: 0.96)))
@@ -198,7 +198,8 @@ struct FloatingPanelView: View {
         controller: controller,
         batch: batch,
         showsSourcePreview: false,
-        resultLineLimit: nil
+        resultLineLimit: nil,
+        copyToastSurface: .floatingPanel
       )
       .padding(.trailing, 12)
       .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -233,6 +234,7 @@ struct FloatingPanelView: View {
       Image(systemName: systemName)
     }
     .buttonStyle(FloatingPanelIconButtonStyle(isActive: isActive))
+    .accessibilityLabel(help)
     .help(help)
   }
 
