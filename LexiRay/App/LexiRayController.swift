@@ -33,10 +33,11 @@ final class LexiRayController: ObservableObject {
   private let historyStore: TranslationHistoryStore
   private var floatingPanel: FloatingPanelPresenting!
   private var translationTask: Task<Void, Never>?
-  private var providerTranslationTasks: [String: Task<Void, Never>] = [:]
+  private let providerTranslationTasks = ProviderTranslationTaskCoordinator()
   private var copyToastTask: Task<Void, Never>?
   private var activeBatchID: UUID?
   private var recordedHistoryBatchIDs: Set<UUID> = []
+  private var autoCopiedBatchIDs: Set<UUID> = []
   private var translationHistory: [TranslationHistoryItem]
   private var historyNavigationIndex: Int?
   private var isRestoringHistorySource = false
@@ -242,17 +243,21 @@ final class LexiRayController: ObservableObject {
       return
     }
 
-    copyResultToClipboard(result)
+    copyResultToClipboard(result, surface: .floatingPanel)
   }
 
-  func copyResultToClipboard(_ result: TranslationResult) {
-    copyResultToClipboard(result, format: settings.defaultCopyFormat)
+  func copyResultToClipboard(_ result: TranslationResult, surface: CopyToastSurface = .floatingPanel) {
+    copyResultToClipboard(result, format: settings.defaultCopyFormat, surface: surface)
   }
 
-  func copyResultToClipboard(_ result: TranslationResult, format: CopyFormat) {
+  func copyResultToClipboard(
+    _ result: TranslationResult,
+    format: CopyFormat,
+    surface: CopyToastSurface = .floatingPanel
+  ) {
     TranslationPasteboardWriter.write(result: result, format: format)
     settings.defaultCopyFormat = format
-    showCopyToast()
+    showCopyToast(surface: surface)
   }
 
   func speakResult() {
@@ -472,8 +477,7 @@ final class LexiRayController: ObservableObject {
     request: TranslationRequest,
     bypassCache: Bool = false
   ) {
-    providerTranslationTasks[entry.providerConfigurationID]?.cancel()
-    providerTranslationTasks[entry.providerConfigurationID] = Task { @MainActor [weak self] in
+    providerTranslationTasks.start(configurationID: entry.providerConfigurationID) { [weak self] in
       guard let self else {
         return
       }
@@ -487,7 +491,6 @@ final class LexiRayController: ObservableObject {
         self.floatingPanel.refreshContentLayout()
       }
 
-      providerTranslationTasks[entry.providerConfigurationID] = nil
       guard !Task.isCancelled, activeBatchID == batchID else {
         return
       }
@@ -513,8 +516,7 @@ final class LexiRayController: ObservableObject {
     }
     configuration.isEnabled = false
     settings.updateConfiguration(configuration)
-    providerTranslationTasks[configurationID]?.cancel()
-    providerTranslationTasks[configurationID] = nil
+    providerTranslationTasks.cancel(configurationID)
 
     guard let activeBatchID,
           case let .batch(batch) = panelState,
@@ -582,6 +584,7 @@ final class LexiRayController: ObservableObject {
     batch.update(entry)
     panelState = .batch(batch)
     recordHistoryIfNeeded(for: batch)
+    autoCopyFirstProviderResultIfNeeded(in: batch)
   }
 
   private var currentResults: [TranslationResult] {
@@ -606,8 +609,7 @@ final class LexiRayController: ObservableObject {
   }
 
   private func cancelProviderTranslationTasks() {
-    providerTranslationTasks.values.forEach { $0.cancel() }
-    providerTranslationTasks = [:]
+    providerTranslationTasks.cancelAll()
   }
 
   private func recordHistoryIfNeeded(for batch: TranslationBatch) {
@@ -622,6 +624,35 @@ final class LexiRayController: ObservableObject {
     recordedHistoryBatchIDs.insert(batch.id)
     translationHistory = historyStore.append(item, to: translationHistory, limit: settings.translationHistoryLimit)
     historyNavigationIndex = nil
+  }
+
+  private func autoCopyFirstProviderResultIfNeeded(in batch: TranslationBatch) {
+    guard settings.autoCopyMode == .firstProviderSuccess,
+          activeBatchID == batch.id,
+          !autoCopiedBatchIDs.contains(batch.id),
+          let result = firstProviderOrderedAutoCopyResult(in: batch)
+    else {
+      return
+    }
+
+    TranslationPasteboardWriter.write(result: result, format: settings.defaultCopyFormat)
+    autoCopiedBatchIDs.insert(batch.id)
+    showCopyToast(surface: .floatingPanel)
+  }
+
+  private func firstProviderOrderedAutoCopyResult(in batch: TranslationBatch) -> TranslationResult? {
+    for entry in batch.entries {
+      switch entry.status {
+      case .disabled, .failure:
+        continue
+      case .translating, .streaming:
+        return nil
+      case let .success(result):
+        return result
+      }
+    }
+
+    return nil
   }
 
   private func restoreHistory(at index: Int) {
@@ -699,9 +730,9 @@ final class LexiRayController: ObservableObject {
     self.historyNavigationIndex = nil
   }
 
-  private func showCopyToast() {
+  private func showCopyToast(surface: CopyToastSurface) {
     copyToastTask?.cancel()
-    copyToast = CopyToast(message: "Copied")
+    copyToast = CopyToast(message: "Copied", surface: surface)
     copyToastTask = Task { @MainActor [weak self] in
       try? await Task.sleep(nanoseconds: 1_300_000_000)
       guard !Task.isCancelled else {

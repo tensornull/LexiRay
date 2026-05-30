@@ -1,7 +1,6 @@
 import Foundation
 
-@MainActor
-protocol TranslationProvider {
+protocol TranslationProvider: Sendable {
   var id: ProviderID { get }
   var name: String { get }
 

@@ -633,10 +633,11 @@ final class ControllerInteractionTests: XCTestCase {
       )
     )
 
-    controller.copyResultToClipboard(second)
+    controller.copyResultToClipboard(second, surface: .mainWindow)
 
     XCTAssertEqual(NSPasteboard.general.string(forType: .string), "two")
     XCTAssertEqual(controller.copyToast?.message, "Copied")
+    XCTAssertEqual(controller.copyToast?.surface, .mainWindow)
   }
 
   func testCopySpecificFormatUpdatesDefaultCopyFormat() {
@@ -654,12 +655,130 @@ final class ControllerInteractionTests: XCTestCase {
       translatedText: "<p>Hello <strong>world</strong></p>"
     )
 
-    controller.copyResultToClipboard(result, format: .html)
+    controller.copyResultToClipboard(result, format: .html, surface: .floatingPanel)
 
     XCTAssertEqual(controller.settings.defaultCopyFormat, .html)
     XCTAssertEqual(controller.copyToast?.message, "Copied")
+    XCTAssertEqual(controller.copyToast?.surface, .floatingPanel)
     XCTAssertTrue(NSPasteboard.general.string(forType: .html)?.contains("Hello") == true)
     XCTAssertTrue(NSPasteboard.general.string(forType: .string)?.contains("Hello world") == true)
+  }
+
+  func testAutoCopyOffDoesNotWriteClipboard() async {
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    pasteboard.setString("sentinel", forType: .string)
+    let panel = MockFloatingPanelPresenter()
+    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
+
+    controller.translateManualText("hello")
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      return !batch.successfulResults.isEmpty
+    }
+
+    XCTAssertEqual(pasteboard.string(forType: .string), "sentinel")
+    XCTAssertNil(controller.copyToast)
+  }
+
+  func testAutoCopyWaitsForFirstProviderInOrder() async throws {
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    pasteboard.setString("sentinel", forType: .string)
+    let panel = MockFloatingPanelPresenter()
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let settings = SettingsStore(
+      defaults: defaults,
+      providerFileStore: makeProviderFileStore(),
+      allowsMockProvider: true
+    )
+    enableOnly([.mock, .systemDictionary], in: settings)
+    settings.autoCopyMode = .firstProviderSuccess
+    let pipeline = TranslationPipeline(settings: settings, providerFactory: { configuration in
+      switch configuration.providerID {
+      case .mock:
+        DelayedAutoCopyProvider(providerID: .mock, delay: 120_000_000, translatedText: "first")
+      case .systemDictionary:
+        DelayedAutoCopyProvider(providerID: .systemDictionary, delay: 0, translatedText: "second")
+      default:
+        DelayedAutoCopyProvider(providerID: configuration.providerID, delay: 0, translatedText: "unused")
+      }
+    })
+    let controller = LexiRayController(
+      settings: settings,
+      selectionService: ImmediateSelectionReader(result: .unavailable),
+      permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
+      floatingPanelFactory: { _ in panel },
+      pipeline: pipeline,
+      historyStore: makeHistoryStore()
+    )
+
+    controller.translateManualText("hello")
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      let secondEntry = batch.entries.first(where: { $0.providerID == .systemDictionary })
+      let firstEntry = batch.entries.first(where: { $0.providerID == .mock })
+      return secondEntry?.result?.translatedText == "second" && firstEntry?.result == nil
+    }
+
+    XCTAssertEqual(pasteboard.string(forType: .string), "sentinel")
+    XCTAssertNil(controller.copyToast)
+
+    await waitUntil {
+      pasteboard.string(forType: .string) == "first"
+    }
+
+    XCTAssertEqual(controller.copyToast?.surface, .floatingPanel)
+  }
+
+  func testAutoCopyDoesNotOverwriteWithLaterProviderSuccess() async throws {
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    let panel = MockFloatingPanelPresenter()
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let settings = SettingsStore(
+      defaults: defaults,
+      providerFileStore: makeProviderFileStore(),
+      allowsMockProvider: true
+    )
+    enableOnly([.mock, .systemDictionary], in: settings)
+    settings.autoCopyMode = .firstProviderSuccess
+    let pipeline = TranslationPipeline(settings: settings, providerFactory: { configuration in
+      switch configuration.providerID {
+      case .mock:
+        DelayedAutoCopyProvider(providerID: .mock, delay: 0, translatedText: "first")
+      case .systemDictionary:
+        DelayedAutoCopyProvider(providerID: .systemDictionary, delay: 120_000_000, translatedText: "second")
+      default:
+        DelayedAutoCopyProvider(providerID: configuration.providerID, delay: 0, translatedText: "unused")
+      }
+    })
+    let controller = LexiRayController(
+      settings: settings,
+      selectionService: ImmediateSelectionReader(result: .unavailable),
+      permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
+      floatingPanelFactory: { _ in panel },
+      pipeline: pipeline,
+      historyStore: makeHistoryStore()
+    )
+
+    controller.translateManualText("hello")
+    await waitUntil {
+      pasteboard.string(forType: .string) == "first"
+    }
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      return batch.successfulResults.count == 2
+    }
+
+    XCTAssertEqual(pasteboard.string(forType: .string), "first")
+    XCTAssertEqual(controller.copyToast?.surface, .floatingPanel)
   }
 
   func testToggleSpeakTracksCurrentResultAndStops() {
@@ -1375,6 +1494,34 @@ private struct ControllerCountingTranslationProvider: TranslationProvider {
       providerID: id,
       providerName: name,
       translatedText: "call \(counter.callCount)",
+      detectedLanguage: request.sourceLanguage
+    )
+  }
+}
+
+private struct DelayedAutoCopyProvider: TranslationProvider {
+  let id: ProviderID
+  let name: String
+  let delay: UInt64
+  let translatedText: String
+
+  init(providerID: ProviderID, delay: UInt64, translatedText: String) {
+    id = providerID
+    name = providerID.displayName
+    self.delay = delay
+    self.translatedText = translatedText
+  }
+
+  func translate(_ request: TranslationRequest) async throws -> TranslationResult {
+    if delay > 0 {
+      try await Task.sleep(nanoseconds: delay)
+    }
+
+    return TranslationResult(
+      request: request,
+      providerID: id,
+      providerName: name,
+      translatedText: translatedText,
       detectedLanguage: request.sourceLanguage
     )
   }

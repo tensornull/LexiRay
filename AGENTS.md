@@ -11,6 +11,8 @@ LexiRay is a clean-room macOS selection translation app. The user wants the most
 - Do not copy EasyDict source code, assets, UI implementation, or Objective-C.
 - Keep changes surgical and minimal.
 - Every meaningful change must build or test before handoff.
+- Do not commit local `.codex/`, build artifacts, DerivedData, generated Xcode
+  projects, xcresults, or release outputs.
 
 ## Architecture Defaults
 
@@ -25,11 +27,26 @@ Use `XcodeGen` to regenerate `LexiRay.xcodeproj`; do not hand-edit the generated
 
 ## Verification
 
-Preferred local loop:
+Build and unit tests are necessary but not sufficient. Do not treat a mock-only
+test, a text-box-only script, or a successful compile as UI acceptance.
+
+Preferred local CI loop:
 
 ```bash
-./script/build_and_run.sh --verify
+./script/ci_local.sh
 ```
+
+`script/ci_local.sh` is the required pre-push and pre-release gate. It performs
+the cleanup, `xcodegen generate`, `swiftformat --lint`, and the CI-equivalent
+`xcodebuild test` command with `SWIFT_COMPILATION_MODE=wholemodule`. Do not
+claim a change is CI-ready until this script passes locally, unless the only
+blocker is a clearly documented local machine/toolchain problem.
+
+For visible UI, floating-panel, window, hotkey, OCR, permission, or streaming
+behavior changes, final acceptance must be driven through Computer Use against
+the real workspace-built `.app`. Capture and inspect multiple screenshots across
+the relevant states before handoff. Scripts and unit tests are supporting
+evidence only; they do not replace direct Computer-driven UI verification.
 
 Development runs must use the workspace build at `build/DerivedData/Build/Products/Debug/LexiRay.app`.
 Every build/run compile must remove stale LexiRay development `.app` bundles first; stale
@@ -51,14 +68,42 @@ release builds during local iteration. Use `./script/clean_dev_apps.sh` to inspe
 development bundles, and only use `./script/clean_dev_apps.sh --apply` when the listed
 paths are under this repo's `build/` directory or Xcode's `DerivedData/LexiRay-*`.
 
-Preferred test loop:
+## CI Failure Discipline
 
-```bash
-./script/clean_dev_apps.sh --apply
-xcodegen generate
-xcodebuild test -project LexiRay.xcodeproj -scheme LexiRay -configuration Debug CODE_SIGNING_ALLOWED=NO
-./script/clean_dev_apps.sh --apply
-```
+- Do not blindly retry GitHub Actions. Inspect the failed run first:
+  `gh run view <run-id> --log-failed`.
+- Separate workflow/toolchain failures from app regressions before changing
+  source. Keep the smallest useful log snippet in the handoff.
+- If CodeQL Swift fails during its manual build step, treat it as a build failure
+  first; CodeQL analysis cannot be trusted until that build succeeds.
+- The May 2026 repeated CI failures were caused by the GitHub `macos-15` runner
+  using Xcode 16.4, where Swift 6.1.2 crashed while emitting the LexiRay module.
+  The root fix was switching CI, CodeQL, and Release to `macos-26` and selecting
+  `/Applications/Xcode.app`. Do not revert that runner/toolchain choice unless a
+  fresh GitHub runner inspection proves a better supported replacement.
+- The current recurrence-prevention rule is: local `./script/ci_local.sh` first,
+  PR checks second, main checks third, release tag last.
+
+## Branch and Release Discipline
+
+- Work on `dev` by default. Do not switch to, commit on, or merge `main` unless
+  the user explicitly asks for a main/release operation.
+- Public releases use PR flow: prepare on `dev`, open PR to `main`, wait for
+  `build-test` and `Analyze Swift`, merge only after checks pass, wait for main
+  checks, then push `v<version>`.
+- Before tagging a release, run `./script/release_check.sh <version>` from a
+  clean worktree.
+- Release artifacts are currently unsigned DMGs. README and release notes must
+  say that macOS Gatekeeper may warn and users should verify the `.sha256` file.
+
+## Open Source Standards
+
+- Keep `README.md`, `CHANGELOG.md`, release notes, and user-visible behavior in
+  sync.
+- Record every public release in `CHANGELOG.md` using SemVer and a dated section.
+- Keep contributor, support, security, code-of-conduct, issue-template, and PR
+  template docs current when process rules change.
+- Preserve the MIT license and clean-room rule in user-facing docs.
 
 ## UI Direction
 

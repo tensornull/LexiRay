@@ -68,6 +68,10 @@ final class SettingsStore: ObservableObject {
     didSet { defaults.set(autoSwitchLanguages, forKey: Keys.autoSwitchLanguages) }
   }
 
+  @Published var autoCopyMode: AutoCopyMode {
+    didSet { defaults.set(autoCopyMode.rawValue, forKey: Keys.autoCopyMode) }
+  }
+
   @Published var showsMenuBarIcon: Bool {
     didSet { defaults.set(showsMenuBarIcon, forKey: Keys.showsMenuBarIcon) }
   }
@@ -147,6 +151,7 @@ final class SettingsStore: ObservableObject {
     language2 = initialLanguage2
     targetLanguage = initialLanguage2
     autoSwitchLanguages = defaults.object(forKey: Keys.autoSwitchLanguages) as? Bool ?? true
+    autoCopyMode = AutoCopyMode(rawValue: defaults.string(forKey: Keys.autoCopyMode) ?? "") ?? .off
     showsMenuBarIcon = defaults.object(forKey: Keys.showsMenuBarIcon) as? Bool ?? true
     translateHotKey = Self.loadHotKey(
       defaults: defaults,
@@ -389,6 +394,10 @@ final class SettingsStore: ObservableObject {
 
     if defaults.object(forKey: Keys.autoSwitchLanguages) == nil {
       defaults.set(autoSwitchLanguages, forKey: Keys.autoSwitchLanguages)
+    }
+
+    if defaults.object(forKey: Keys.autoCopyMode) == nil {
+      defaults.set(autoCopyMode.rawValue, forKey: Keys.autoCopyMode)
     }
 
     if defaults.object(forKey: Keys.showsMenuBarIcon) == nil {
@@ -716,6 +725,10 @@ final class SettingsStore: ObservableObject {
 
     static var autoSwitchLanguages: String {
       "autoSwitchLanguages"
+    }
+
+    static var autoCopyMode: String {
+      "autoCopyMode"
     }
 
     static var showsMenuBarIcon: String {

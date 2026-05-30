@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest a focused LexiRay improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user workflow would this improve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the smallest behavior change that would solve it.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: checkboxes
+    id: clean-room
+    attributes:
+      label: Clean-room boundary
+      options:
+        - label: This request does not require copying another app's source, assets, or UI implementation.
+          required: true

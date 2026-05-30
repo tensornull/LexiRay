@@ -433,8 +433,9 @@ final class LLMProviderTests: XCTestCase {
   }
 }
 
-private final class MockHTTPClient: HTTPClient {
-  private(set) var request: URLRequest?
+private final class MockHTTPClient: HTTPClient, @unchecked Sendable {
+  private let lock = NSLock()
+  private var storedRequest: URLRequest?
   private let data: Data
   private let statusCode: Int
   private let streamLines: [String]
@@ -445,8 +446,16 @@ private final class MockHTTPClient: HTTPClient {
     self.streamLines = streamLines
   }
 
+  var request: URLRequest? {
+    lock.withLock {
+      storedRequest
+    }
+  }
+
   func data(for request: URLRequest) async throws -> (Data, URLResponse) {
-    self.request = request
+    lock.withLock {
+      storedRequest = request
+    }
     let response = try HTTPURLResponse(
       url: XCTUnwrap(request.url),
       statusCode: statusCode,
@@ -457,7 +466,9 @@ private final class MockHTTPClient: HTTPClient {
   }
 
   func lineStream(for request: URLRequest) async throws -> HTTPLineStream {
-    self.request = request
+    lock.withLock {
+      storedRequest = request
+    }
     let response = try HTTPURLResponse(
       url: XCTUnwrap(request.url),
       statusCode: statusCode,
