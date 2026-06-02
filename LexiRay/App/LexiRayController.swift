@@ -720,7 +720,8 @@ final class LexiRayController: ObservableObject {
 
   private var currentPresentedHistoryIndex: Int? {
     guard let presentedRequestText,
-          presentedRequestText == panelSourceText
+          presentedRequestText == panelSourceText,
+          !isActiveBatchInFlight
     else {
       return nil
     }
@@ -728,6 +729,17 @@ final class LexiRayController: ObservableObject {
     return translationHistory.lastIndex { item in
       item.request.text == presentedRequestText
     }
+  }
+
+  private var isActiveBatchInFlight: Bool {
+    guard let activeBatchID,
+          case let .batch(batch) = panelState,
+          batch.id == activeBatchID
+    else {
+      return false
+    }
+
+    return batch.entries.contains { $0.status.isInFlight }
   }
 
   private var presentedRequestText: String? {
@@ -786,6 +798,17 @@ final class LexiRayController: ObservableObject {
         return
       }
       self?.copyToast = nil
+    }
+  }
+}
+
+private extension ProviderTranslationStatus {
+  var isInFlight: Bool {
+    switch self {
+    case .translating, .streaming:
+      true
+    case .disabled, .success, .failure:
+      false
     }
   }
 }

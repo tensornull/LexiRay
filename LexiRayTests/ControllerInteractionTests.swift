@@ -511,6 +511,71 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(controller.activeHistoryPositionText, "Histories 1/\(historyLimit)")
   }
 
+  func testHistoryNavigationDoesNotCancelInFlightBatchAfterFirstProviderSuccess() async throws {
+    let panel = MockFloatingPanelPresenter()
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let settings = SettingsStore(
+      defaults: defaults,
+      providerFileStore: makeProviderFileStore(),
+      allowsMockProvider: true
+    )
+    enableOnly([.mock, .systemDictionary], in: settings)
+    let pipeline = TranslationPipeline(settings: settings, providerFactory: { configuration in
+      switch configuration.providerID {
+      case .mock:
+        DelayedAutoCopyProvider(providerID: .mock, delay: 0, translatedText: "hi from first")
+      case .systemDictionary:
+        DelayedAutoCopyProvider(providerID: .systemDictionary, delay: 500_000_000, translatedText: "hi from second")
+      default:
+        DelayedAutoCopyProvider(providerID: configuration.providerID, delay: 0, translatedText: "unused")
+      }
+    })
+    let historyStore = makeHistoryStore()
+    let controller = LexiRayController(
+      settings: settings,
+      selectionService: ImmediateSelectionReader(result: .unavailable),
+      permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
+      floatingPanelFactory: { _ in panel },
+      pipeline: pipeline,
+      historyStore: historyStore
+    )
+
+    controller.translateManualText("hi")
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      let firstEntry = batch.entries.first(where: { $0.providerID == .mock })
+      let secondEntry = batch.entries.first(where: { $0.providerID == .systemDictionary })
+      return firstEntry?.result?.translatedText == "hi from first" && secondEntry?.result == nil
+    }
+
+    let historyLimit = settings.translationHistoryLimit
+    XCTAssertEqual(historyStore.load(limit: historyLimit).map(\.request.text), ["hi"])
+    XCTAssertFalse(controller.canNavigateTranslationHistory)
+    XCTAssertFalse(controller.showPreviousHistory())
+    XCTAssertEqual(controller.panelSourceText, "hi")
+    XCTAssertNil(controller.activeHistoryPositionText)
+
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      let secondEntry = batch.entries.first(where: { $0.providerID == .systemDictionary })
+      return secondEntry?.result?.translatedText == "hi from second"
+    }
+
+    let savedSecondEntry = historyStore.load(limit: historyLimit).first?.entries.first {
+      $0.providerID == .systemDictionary
+    }
+    if case let .success(result) = savedSecondEntry?.status {
+      XCTAssertEqual(result.translatedText, "hi from second")
+    } else {
+      XCTFail("Expected completed second provider result in history")
+    }
+    XCTAssertTrue(controller.canNavigateTranslationHistory)
+  }
+
   func testHistoryNavigationFromCurrentSavedResultMovesToPreviousEntry() async throws {
     let panel = MockFloatingPanelPresenter()
     let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
