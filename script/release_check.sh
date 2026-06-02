@@ -14,7 +14,7 @@ INFO_PLIST="$ROOT_DIR/LexiRay/Resources/Info.plist"
 cd "$ROOT_DIR"
 
 if [[ "$VERSION" == v* ]]; then
-  echo "Pass the version without a leading v. Example: $0 0.1.1" >&2
+  echo "Pass the version without a leading v. Example: $0 0.1.2" >&2
   exit 2
 fi
 
