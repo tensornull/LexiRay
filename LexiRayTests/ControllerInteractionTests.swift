@@ -446,15 +446,15 @@ final class ControllerInteractionTests: XCTestCase {
     controller.clearPanelSourceText()
     XCTAssertTrue(controller.showPreviousHistory())
     XCTAssertEqual(controller.panelSourceText, "two")
-    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 2/2")
+    XCTAssertEqual(controller.activeHistoryPositionText, "History 2/2")
 
     XCTAssertTrue(controller.showPreviousHistory())
     XCTAssertEqual(controller.panelSourceText, "one")
-    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 1/2")
+    XCTAssertEqual(controller.activeHistoryPositionText, "History 1/2")
 
     XCTAssertTrue(controller.showNextHistory())
     XCTAssertEqual(controller.panelSourceText, "two")
-    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 2/2")
+    XCTAssertEqual(controller.activeHistoryPositionText, "History 2/2")
 
     XCTAssertTrue(controller.showNextHistory())
     XCTAssertEqual(controller.panelState, .idle)
@@ -476,7 +476,7 @@ final class ControllerInteractionTests: XCTestCase {
       case .mock:
         DelayedAutoCopyProvider(providerID: .mock, delay: 0, translatedText: "hi from first")
       case .systemDictionary:
-        DelayedAutoCopyProvider(providerID: .systemDictionary, delay: 500_000_000, translatedText: "hi from second")
+        DelayedAutoCopyProvider(providerID: .systemDictionary, delay: 150_000_000, translatedText: "hi from second")
       default:
         DelayedAutoCopyProvider(providerID: configuration.providerID, delay: 0, translatedText: "unused")
       }
@@ -507,7 +507,7 @@ final class ControllerInteractionTests: XCTestCase {
     controller.clearPanelSourceText()
     XCTAssertTrue(controller.showPreviousHistory())
     XCTAssertEqual(controller.panelSourceText, "hi")
-    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 1/1")
+    XCTAssertEqual(controller.activeHistoryPositionText, "History 1/1")
   }
 
   func testHistoryNavigationDoesNotCancelInFlightBatchAfterFirstProviderSuccess() async throws {
@@ -524,7 +524,7 @@ final class ControllerInteractionTests: XCTestCase {
       case .mock:
         DelayedAutoCopyProvider(providerID: .mock, delay: 0, translatedText: "hi from first")
       case .systemDictionary:
-        DelayedAutoCopyProvider(providerID: .systemDictionary, delay: 500_000_000, translatedText: "hi from second")
+        DelayedAutoCopyProvider(providerID: .systemDictionary, delay: 150_000_000, translatedText: "hi from second")
       default:
         DelayedAutoCopyProvider(providerID: configuration.providerID, delay: 0, translatedText: "unused")
       }
@@ -1234,6 +1234,41 @@ final class ControllerInteractionTests: XCTestCase {
   func testFloatingPanelRecognizesEscapeKey() {
     XCTAssertTrue(FloatingPanelController.isEscapeKey(keyCode: UInt16(kVK_Escape)))
     XCTAssertFalse(FloatingPanelController.isEscapeKey(keyCode: UInt16(kVK_UpArrow)))
+  }
+
+  func testFloatingPanelRoutesEscapeKeyOnlyForPanelEvents() {
+    XCTAssertTrue(
+      FloatingPanelController.shouldRouteEscapeKeyEvent(
+        keyCode: UInt16(kVK_Escape),
+        eventWindowNumber: 42,
+        panelWindowNumber: 42,
+        panelIsVisible: false
+      )
+    )
+    XCTAssertTrue(
+      FloatingPanelController.shouldRouteEscapeKeyEvent(
+        keyCode: UInt16(kVK_Escape),
+        eventWindowNumber: nil,
+        panelWindowNumber: 42,
+        panelIsVisible: true
+      )
+    )
+    XCTAssertFalse(
+      FloatingPanelController.shouldRouteEscapeKeyEvent(
+        keyCode: UInt16(kVK_Escape),
+        eventWindowNumber: 7,
+        panelWindowNumber: 42,
+        panelIsVisible: true
+      )
+    )
+    XCTAssertFalse(
+      FloatingPanelController.shouldRouteEscapeKeyEvent(
+        keyCode: UInt16(kVK_UpArrow),
+        eventWindowNumber: 42,
+        panelWindowNumber: 42,
+        panelIsVisible: true
+      )
+    )
   }
 
   func testFloatingPanelCloseActionHidesPinnedPanelDirectly() {
