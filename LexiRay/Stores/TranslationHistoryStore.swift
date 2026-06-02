@@ -62,6 +62,20 @@ final class TranslationHistoryStore {
   }
 
   @discardableResult
+  func upsert(_ item: TranslationHistoryItem, to entries: [TranslationHistoryItem], limit: Int) -> [TranslationHistoryItem] {
+    var updatedEntries = entries
+    if let index = updatedEntries.firstIndex(where: { $0.id == item.id }) {
+      updatedEntries[index] = item
+    } else {
+      updatedEntries.append(item)
+    }
+
+    updatedEntries = pruned(updatedEntries, limit: limit)
+    save(updatedEntries, limit: limit)
+    return updatedEntries
+  }
+
+  @discardableResult
   func prune(_ entries: [TranslationHistoryItem], limit: Int) -> [TranslationHistoryItem] {
     let updatedEntries = pruned(entries, limit: limit)
     if updatedEntries.count != entries.count {

@@ -25,6 +25,22 @@ struct TranslationHistoryItem: Codable, Equatable, Identifiable {
     self.entries = entries
   }
 
+  init?(
+    recordableBatch batch: TranslationBatch,
+    id: UUID = UUID(),
+    createdAt: Date = Date()
+  ) {
+    let entries = batch.entries.compactMap { TranslationHistoryEntry(entry: $0) }
+    guard entries.contains(where: \.status.isRecordedHistoryStatus) else {
+      return nil
+    }
+
+    self.id = id
+    self.createdAt = createdAt
+    request = TranslationHistoryRequest(request: batch.request)
+    self.entries = entries
+  }
+
   init(
     id: UUID = UUID(),
     createdAt: Date = Date(),
@@ -218,6 +234,17 @@ enum TranslationHistoryEntryStatus: Codable, Equatable {
   }
 }
 
+extension TranslationHistoryEntryStatus {
+  var isRecordedHistoryStatus: Bool {
+    switch self {
+    case .success, .failure:
+      true
+    case .disabled:
+      false
+    }
+  }
+}
+
 struct TranslationHistoryResult: Codable, Equatable {
   let translatedText: String
   let detectedLanguage: String?
@@ -237,25 +264,5 @@ struct TranslationHistoryResult: Codable, Equatable {
     self.translatedText = translatedText
     self.detectedLanguage = detectedLanguage
     self.createdAt = createdAt
-  }
-}
-
-extension ProviderTranslationStatus {
-  var isTerminalHistoryStatus: Bool {
-    switch self {
-    case .disabled, .success, .failure:
-      true
-    case .translating, .streaming:
-      false
-    }
-  }
-
-  var isRecordedHistoryStatus: Bool {
-    switch self {
-    case .success, .failure:
-      true
-    case .disabled, .translating, .streaming:
-      false
-    }
   }
 }

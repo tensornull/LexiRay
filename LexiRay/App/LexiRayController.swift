@@ -20,6 +20,8 @@ final class LexiRayController: ObservableObject {
   @Published var selectedMainSection: MainSection = .dashboard
   @Published private(set) var copyToast: CopyToast?
   @Published private(set) var speakingResultID: UUID?
+  @Published private(set) var activeHistoryPositionText: String?
+  @Published private(set) var hasTranslationHistory = false
 
   let settings: SettingsStore
 
@@ -36,12 +38,28 @@ final class LexiRayController: ObservableObject {
   private let providerTranslationTasks = ProviderTranslationTaskCoordinator()
   private var copyToastTask: Task<Void, Never>?
   private var activeBatchID: UUID?
-  private var recordedHistoryBatchIDs: Set<UUID> = []
+  private var recordedHistoryMetadataByBatchID: [UUID: RecordedHistoryMetadata] = [:]
   private var autoCopiedBatchIDs: Set<UUID> = []
-  private var translationHistory: [TranslationHistoryItem]
-  private var historyNavigationIndex: Int?
+  private var translationHistory: [TranslationHistoryItem] {
+    didSet {
+      hasTranslationHistory = !translationHistory.isEmpty
+      updateActiveHistoryPositionText()
+    }
+  }
+
+  private var historyNavigationIndex: Int? {
+    didSet {
+      updateActiveHistoryPositionText()
+    }
+  }
+
   private var isRestoringHistorySource = false
   private var settingsCancellables: Set<AnyCancellable> = []
+
+  private struct RecordedHistoryMetadata {
+    let itemID: UUID
+    let createdAt: Date
+  }
 
   init(
     settings: SettingsStore = SettingsStore(),
@@ -66,6 +84,8 @@ final class LexiRayController: ObservableObject {
     self.historyStore = historyStore
     translationHistory = historyStore.load(limit: settings.translationHistoryLimit)
     floatingPanel = floatingPanelFactory?(self) ?? FloatingPanelController(controller: self)
+    hasTranslationHistory = !translationHistory.isEmpty
+    updateActiveHistoryPositionText()
     self.speechService.onStateChange = { [weak self] isSpeaking in
       if !isSpeaking {
         self?.speakingResultID = nil
@@ -613,16 +633,25 @@ final class LexiRayController: ObservableObject {
   }
 
   private func recordHistoryIfNeeded(for batch: TranslationBatch) {
-    guard !recordedHistoryBatchIDs.contains(batch.id),
-          batch.entries.allSatisfy(\.status.isTerminalHistoryStatus),
-          batch.entries.contains(where: \.status.isRecordedHistoryStatus),
-          let item = TranslationHistoryItem(batch: batch)
+    let metadata = recordedHistoryMetadataByBatchID[batch.id] ?? RecordedHistoryMetadata(
+      itemID: UUID(),
+      createdAt: Date()
+    )
+    guard let item = TranslationHistoryItem(
+      recordableBatch: batch,
+      id: metadata.itemID,
+      createdAt: metadata.createdAt
+    )
     else {
       return
     }
 
-    recordedHistoryBatchIDs.insert(batch.id)
-    translationHistory = historyStore.append(item, to: translationHistory, limit: settings.translationHistoryLimit)
+    if recordedHistoryMetadataByBatchID[batch.id] == nil {
+      translationHistory = historyStore.append(item, to: translationHistory, limit: settings.translationHistoryLimit)
+    } else {
+      translationHistory = historyStore.upsert(item, to: translationHistory, limit: settings.translationHistoryLimit)
+    }
+    recordedHistoryMetadataByBatchID[batch.id] = metadata
     historyNavigationIndex = nil
   }
 
@@ -728,6 +757,17 @@ final class LexiRayController: ObservableObject {
     }
 
     self.historyNavigationIndex = nil
+  }
+
+  private func updateActiveHistoryPositionText() {
+    guard let historyNavigationIndex,
+          translationHistory.indices.contains(historyNavigationIndex)
+    else {
+      activeHistoryPositionText = nil
+      return
+    }
+
+    activeHistoryPositionText = "Histories \(historyNavigationIndex + 1)/\(settings.translationHistoryLimit)"
   }
 
   private func showCopyToast(surface: CopyToastSurface) {

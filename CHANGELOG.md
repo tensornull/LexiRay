@@ -5,6 +5,20 @@ All notable changes to LexiRay are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-06-02
+
+### Changed
+
+- Improved translation history browsing feedback in the floating panel with a
+  visible history position while moving through saved items.
+- Moved translation history limit settings into a dedicated History section.
+
+### Fixed
+
+- Fixed history persistence so in-progress provider batches can become
+  browsable as soon as the first provider result finishes.
+- Fixed pinned floating panels so Escape closes the panel directly.
+
 ## [0.1.1] - 2026-05-30
 
 ### Added

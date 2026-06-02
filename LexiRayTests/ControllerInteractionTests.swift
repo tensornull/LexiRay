@@ -366,6 +366,149 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(controller.panelSourceText, "")
   }
 
+  func testHistoryPositionTextIsOnlyShownWhileBrowsingHistory() async throws {
+    let panel = MockFloatingPanelPresenter()
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let settings = SettingsStore(
+      defaults: defaults,
+      providerFileStore: makeProviderFileStore(),
+      allowsMockProvider: true
+    )
+    enableOnly([.mock], in: settings)
+    let counter = ControllerProviderCallCounter()
+    let pipeline = TranslationPipeline(settings: settings, providerFactory: { _ in
+      ControllerCountingTranslationProvider(counter: counter)
+    })
+    let controller = LexiRayController(
+      settings: settings,
+      selectionService: ImmediateSelectionReader(result: .unavailable),
+      permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
+      floatingPanelFactory: { _ in panel },
+      pipeline: pipeline,
+      historyStore: makeHistoryStore()
+    )
+
+    XCTAssertFalse(controller.hasTranslationHistory)
+    XCTAssertNil(controller.activeHistoryPositionText)
+
+    controller.translateManualText("hello")
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      return batch.successfulResults.first?.translatedText == "call 1"
+    }
+
+    XCTAssertTrue(controller.hasTranslationHistory)
+    XCTAssertNil(controller.activeHistoryPositionText)
+  }
+
+  func testHistoryPositionTextTracksArrowBrowsingFromBlankComposer() async throws {
+    let panel = MockFloatingPanelPresenter()
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let settings = SettingsStore(
+      defaults: defaults,
+      providerFileStore: makeProviderFileStore(),
+      allowsMockProvider: true
+    )
+    enableOnly([.mock], in: settings)
+    let counter = ControllerProviderCallCounter()
+    let pipeline = TranslationPipeline(settings: settings, providerFactory: { _ in
+      ControllerCountingTranslationProvider(counter: counter)
+    })
+    let controller = LexiRayController(
+      settings: settings,
+      selectionService: ImmediateSelectionReader(result: .unavailable),
+      permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
+      floatingPanelFactory: { _ in panel },
+      pipeline: pipeline,
+      historyStore: makeHistoryStore()
+    )
+
+    controller.translateManualText("one")
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      return batch.request.text == "one" && batch.successfulResults.first?.translatedText == "call 1"
+    }
+
+    controller.translateManualText("two")
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      return batch.request.text == "two" && batch.successfulResults.first?.translatedText == "call 2"
+    }
+
+    XCTAssertNil(controller.activeHistoryPositionText)
+
+    controller.clearPanelSourceText()
+    XCTAssertTrue(controller.showPreviousHistory())
+    XCTAssertEqual(controller.panelSourceText, "two")
+    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 2/100")
+
+    XCTAssertTrue(controller.showPreviousHistory())
+    XCTAssertEqual(controller.panelSourceText, "one")
+    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 1/100")
+
+    XCTAssertTrue(controller.showNextHistory())
+    XCTAssertEqual(controller.panelSourceText, "two")
+    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 2/100")
+
+    XCTAssertTrue(controller.showNextHistory())
+    XCTAssertEqual(controller.panelState, .idle)
+    XCTAssertEqual(controller.panelSourceText, "")
+    XCTAssertNil(controller.activeHistoryPositionText)
+  }
+
+  func testLatestHistoryIsBrowsableAfterFirstProviderSuccess() async throws {
+    let panel = MockFloatingPanelPresenter()
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let settings = SettingsStore(
+      defaults: defaults,
+      providerFileStore: makeProviderFileStore(),
+      allowsMockProvider: true
+    )
+    enableOnly([.mock, .systemDictionary], in: settings)
+    let pipeline = TranslationPipeline(settings: settings, providerFactory: { configuration in
+      switch configuration.providerID {
+      case .mock:
+        DelayedAutoCopyProvider(providerID: .mock, delay: 0, translatedText: "hi from first")
+      case .systemDictionary:
+        DelayedAutoCopyProvider(providerID: .systemDictionary, delay: 500_000_000, translatedText: "hi from second")
+      default:
+        DelayedAutoCopyProvider(providerID: configuration.providerID, delay: 0, translatedText: "unused")
+      }
+    })
+    let historyStore = makeHistoryStore()
+    let controller = LexiRayController(
+      settings: settings,
+      selectionService: ImmediateSelectionReader(result: .unavailable),
+      permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
+      floatingPanelFactory: { _ in panel },
+      pipeline: pipeline,
+      historyStore: historyStore
+    )
+
+    controller.translateManualText("hi")
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      let firstEntry = batch.entries.first(where: { $0.providerID == .mock })
+      let secondEntry = batch.entries.first(where: { $0.providerID == .systemDictionary })
+      return firstEntry?.result?.translatedText == "hi from first" && secondEntry?.result == nil
+    }
+
+    XCTAssertEqual(historyStore.load(limit: 100).map(\.request.text), ["hi"])
+
+    controller.clearPanelSourceText()
+    XCTAssertTrue(controller.showPreviousHistory())
+    XCTAssertEqual(controller.panelSourceText, "hi")
+    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 1/100")
+  }
+
   func testHistoryNavigationFromCurrentSavedResultMovesToPreviousEntry() async throws {
     let panel = MockFloatingPanelPresenter()
     let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
@@ -1020,6 +1163,22 @@ final class ControllerInteractionTests: XCTestCase {
         panelIsVisible: true
       )
     )
+  }
+
+  func testFloatingPanelRecognizesEscapeKey() {
+    XCTAssertTrue(FloatingPanelController.isEscapeKey(keyCode: UInt16(kVK_Escape)))
+    XCTAssertFalse(FloatingPanelController.isEscapeKey(keyCode: UInt16(kVK_UpArrow)))
+  }
+
+  func testFloatingPanelCloseActionHidesPinnedPanelDirectly() {
+    let panel = MockFloatingPanelPresenter()
+    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
+    controller.isPanelPinned = true
+
+    controller.hideFloatingPanel()
+
+    XCTAssertEqual(panel.hideCount, 1)
+    XCTAssertEqual(panel.hideIfNeededCount, 0)
   }
 
   func testSourceTextEditorUsesSharedTextInsets() {

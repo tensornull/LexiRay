@@ -450,12 +450,16 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
       }
     }
 
-    if keyCode != 53 {
+    if !Self.isEscapeKey(keyCode: keyCode) {
       return false
     }
 
-    hideIfNeeded()
+    hide()
     return true
+  }
+
+  nonisolated static func isEscapeKey(keyCode: UInt16) -> Bool {
+    keyCode == 53
   }
 
   nonisolated static func shouldRoutePanelKeyEvent(
