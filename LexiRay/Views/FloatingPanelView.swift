@@ -32,7 +32,7 @@ struct FloatingPanelView: View {
 
   private var header: some View {
     HStack(alignment: .center, spacing: 8) {
-      Text("LexiRay")
+      Text(controller.activeHistoryPositionText ?? "LexiRay")
         .font(.headline.weight(.semibold))
         .lineLimit(1)
 
@@ -114,9 +114,10 @@ struct FloatingPanelView: View {
 
       SourceTextEditor(
         text: $controller.panelSourceText,
-        placeholder: "Type or edit source text",
+        placeholder: sourcePlaceholder,
         minHeight: controller.isExpanded ? 150 : 116,
         accessibilityIdentifier: "FloatingPanelSourceEditor",
+        helpText: sourceEditorHelpText,
         onMoveUp: controller.showPreviousHistory,
         onMoveDown: controller.showNextHistory
       )
@@ -330,6 +331,14 @@ struct FloatingPanelView: View {
 
   private var sourceColor: Color {
     controller.lastSelectionSource == .unavailable ? .secondary : .accentColor
+  }
+
+  private var sourcePlaceholder: String {
+    controller.canNavigateTranslationHistory ? "Type or paste text  ↑  ↓  History" : "Type or edit source text"
+  }
+
+  private var sourceEditorHelpText: String? {
+    controller.canNavigateTranslationHistory ? "Press Up or Down to browse translation history." : nil
   }
 
   private var translateButtonTitle: String {

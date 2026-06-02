@@ -18,6 +18,7 @@ struct DashboardSettingsView: View {
       translationPanel
       hotKeyPanel
       floatingPanel
+      historyPanel
       permissionPanel
       advancedPanel
     }
@@ -99,12 +100,19 @@ struct DashboardSettingsView: View {
           LabeledContent("Last position", value: "\(Int(origin.x)), \(Int(origin.y))")
             .foregroundStyle(.secondary)
         }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
 
+  private var historyPanel: some View {
+    SettingsSection(title: "History", systemName: "clock.arrow.circlepath") {
+      VStack(alignment: .leading, spacing: 12) {
         Stepper(
           value: translationHistoryLimit,
           in: SettingsStore.translationHistoryLimitRange
         ) {
-          LabeledContent("History limit", value: "\(settings.translationHistoryLimit)")
+          LabeledContent("Maximum saved items", value: "\(settings.translationHistoryLimit)")
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)

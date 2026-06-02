@@ -16,6 +16,21 @@ final class TranslationHistoryStoreTests: XCTestCase {
     XCTAssertEqual(reloaded.map(\.request.text), ["two", "three"])
   }
 
+  func testUpsertReplacesExistingHistoryItemWithoutChangingOrder() {
+    let store = makeStore()
+    let first = makeHistoryItem(text: "one")
+    let second = makeHistoryItem(text: "two")
+    let updatedFirst = makeHistoryItem(id: first.id, text: "one updated")
+
+    var entries = store.append(first, to: [], limit: 100)
+    entries = store.append(second, to: entries, limit: 100)
+    entries = store.upsert(updatedFirst, to: entries, limit: 100)
+
+    let reloaded = store.load(limit: 100)
+    XCTAssertEqual(reloaded.map(\.request.text), ["one updated", "two"])
+    XCTAssertEqual(reloaded.map(\.id), [first.id, second.id])
+  }
+
   func testCorruptedHistoryFileFallsBackToEmptyHistory() throws {
     let store = makeStore()
     try FileManager.default.createDirectory(
@@ -43,7 +58,7 @@ final class TranslationHistoryStoreTests: XCTestCase {
     return TranslationHistoryStore(fileURL: fileURL)
   }
 
-  private func makeHistoryItem(text: String) -> TranslationHistoryItem {
+  private func makeHistoryItem(id: UUID = UUID(), text: String) -> TranslationHistoryItem {
     let request = TranslationHistoryRequest(
       text: text,
       sourceLanguage: "en",
@@ -51,6 +66,7 @@ final class TranslationHistoryStoreTests: XCTestCase {
       selectionSource: .manual
     )
     return TranslationHistoryItem(
+      id: id,
       request: request,
       entries: [
         TranslationHistoryEntry(

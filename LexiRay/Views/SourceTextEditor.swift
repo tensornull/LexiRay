@@ -12,6 +12,7 @@ struct SourceTextEditor: View {
   let placeholder: String
   var minHeight: CGFloat = 116
   var accessibilityIdentifier = "SourceTextEditor"
+  var helpText: String?
   var onMoveUp: (() -> Bool)?
   var onMoveDown: (() -> Bool)?
 
@@ -47,6 +48,7 @@ struct SourceTextEditor: View {
           lineWidth: isFocused ? 1.25 : 1
         )
     }
+    .help(helpText ?? placeholder)
   }
 }
 

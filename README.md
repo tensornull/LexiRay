@@ -77,19 +77,19 @@ permissions.
 
 ## Release
 
-Release preparation for `0.1.1` and later must start from `dev`:
+Release preparation for `0.1.2` and later must start from `dev`:
 
 ```bash
 ./script/ci_local.sh
-./script/release_check.sh 0.1.1
+./script/release_check.sh 0.1.2
 ```
 
 Open a PR from `dev` to `main`. After the PR checks pass and `main` is updated,
 wait for `main` CI and CodeQL to pass, then tag the release:
 
 ```bash
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
 The tag triggers the unsigned DMG release workflow.
