@@ -646,10 +646,17 @@ final class LexiRayController: ObservableObject {
       return
     }
 
-    if recordedHistoryMetadataByBatchID[batch.id] == nil {
-      translationHistory = historyStore.append(item, to: translationHistory, limit: settings.translationHistoryLimit)
-    } else {
+    let hasRecordedBatch = recordedHistoryMetadataByBatchID[batch.id] != nil
+    if hasRecordedBatch,
+       translationHistory.first(where: { $0.id == item.id }) == item
+    {
+      return
+    }
+
+    if hasRecordedBatch {
       translationHistory = historyStore.upsert(item, to: translationHistory, limit: settings.translationHistoryLimit)
+    } else {
+      translationHistory = historyStore.append(item, to: translationHistory, limit: settings.translationHistoryLimit)
     }
     recordedHistoryMetadataByBatchID[batch.id] = metadata
     historyNavigationIndex = nil

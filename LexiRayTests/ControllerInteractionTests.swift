@@ -443,18 +443,19 @@ final class ControllerInteractionTests: XCTestCase {
 
     XCTAssertNil(controller.activeHistoryPositionText)
 
+    let historyLimit = settings.translationHistoryLimit
     controller.clearPanelSourceText()
     XCTAssertTrue(controller.showPreviousHistory())
     XCTAssertEqual(controller.panelSourceText, "two")
-    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 2/100")
+    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 2/\(historyLimit)")
 
     XCTAssertTrue(controller.showPreviousHistory())
     XCTAssertEqual(controller.panelSourceText, "one")
-    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 1/100")
+    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 1/\(historyLimit)")
 
     XCTAssertTrue(controller.showNextHistory())
     XCTAssertEqual(controller.panelSourceText, "two")
-    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 2/100")
+    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 2/\(historyLimit)")
 
     XCTAssertTrue(controller.showNextHistory())
     XCTAssertEqual(controller.panelState, .idle)
@@ -501,12 +502,13 @@ final class ControllerInteractionTests: XCTestCase {
       return firstEntry?.result?.translatedText == "hi from first" && secondEntry?.result == nil
     }
 
-    XCTAssertEqual(historyStore.load(limit: 100).map(\.request.text), ["hi"])
+    let historyLimit = settings.translationHistoryLimit
+    XCTAssertEqual(historyStore.load(limit: historyLimit).map(\.request.text), ["hi"])
 
     controller.clearPanelSourceText()
     XCTAssertTrue(controller.showPreviousHistory())
     XCTAssertEqual(controller.panelSourceText, "hi")
-    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 1/100")
+    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 1/\(historyLimit)")
   }
 
   func testHistoryNavigationFromCurrentSavedResultMovesToPreviousEntry() async throws {
