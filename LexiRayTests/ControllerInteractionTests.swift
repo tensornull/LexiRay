@@ -443,19 +443,18 @@ final class ControllerInteractionTests: XCTestCase {
 
     XCTAssertNil(controller.activeHistoryPositionText)
 
-    let historyLimit = settings.translationHistoryLimit
     controller.clearPanelSourceText()
     XCTAssertTrue(controller.showPreviousHistory())
     XCTAssertEqual(controller.panelSourceText, "two")
-    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 2/\(historyLimit)")
+    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 2/2")
 
     XCTAssertTrue(controller.showPreviousHistory())
     XCTAssertEqual(controller.panelSourceText, "one")
-    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 1/\(historyLimit)")
+    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 1/2")
 
     XCTAssertTrue(controller.showNextHistory())
     XCTAssertEqual(controller.panelSourceText, "two")
-    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 2/\(historyLimit)")
+    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 2/2")
 
     XCTAssertTrue(controller.showNextHistory())
     XCTAssertEqual(controller.panelState, .idle)
@@ -508,7 +507,7 @@ final class ControllerInteractionTests: XCTestCase {
     controller.clearPanelSourceText()
     XCTAssertTrue(controller.showPreviousHistory())
     XCTAssertEqual(controller.panelSourceText, "hi")
-    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 1/\(historyLimit)")
+    XCTAssertEqual(controller.activeHistoryPositionText, "Histories 1/1")
   }
 
   func testHistoryNavigationDoesNotCancelInFlightBatchAfterFirstProviderSuccess() async throws {

@@ -786,7 +786,7 @@ final class LexiRayController: ObservableObject {
       return
     }
 
-    activeHistoryPositionText = "Histories \(historyNavigationIndex + 1)/\(settings.translationHistoryLimit)"
+    activeHistoryPositionText = "Histories \(historyNavigationIndex + 1)/\(translationHistory.count)"
   }
 
   private func showCopyToast(surface: CopyToastSurface) {
