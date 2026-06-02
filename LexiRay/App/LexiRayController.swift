@@ -469,6 +469,7 @@ final class LexiRayController: ObservableObject {
 
   private func startBatchTranslation(text: String, source: SelectionSource, bypassCache: Bool) {
     cancelProviderTranslationTasks()
+    recordedHistoryMetadataByBatchID.removeAll(keepingCapacity: true)
 
     do {
       let batch = try pipeline.makeBatch(text: text, selectionSource: source)

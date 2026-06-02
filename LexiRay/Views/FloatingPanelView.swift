@@ -334,11 +334,11 @@ struct FloatingPanelView: View {
   }
 
   private var sourcePlaceholder: String {
-    controller.hasTranslationHistory ? "Type or paste text  ↑  ↓  History" : "Type or edit source text"
+    controller.canNavigateTranslationHistory ? "Type or paste text  ↑  ↓  History" : "Type or edit source text"
   }
 
   private var sourceEditorHelpText: String? {
-    controller.hasTranslationHistory ? "Press Up or Down to browse translation history." : nil
+    controller.canNavigateTranslationHistory ? "Press Up or Down to browse translation history." : nil
   }
 
   private var translateButtonTitle: String {
