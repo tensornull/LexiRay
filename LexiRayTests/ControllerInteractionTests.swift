@@ -74,6 +74,29 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertTrue(permissions.promptRequests.isEmpty)
   }
 
+  func testUnstableAppIdentityBlocksSelectionBeforeReadingText() async {
+    let selectionReader = BlockingSelectionReader()
+    let panel = MockFloatingPanelPresenter()
+    let permissions = MockPermissionChecker(isAccessibilityTrusted: true)
+    let controller = makeController(
+      selectionReader: selectionReader,
+      panel: panel,
+      permissions: permissions,
+      appIdentityChecker: MockAppIdentityChecker(snapshot: unstableAppIdentity())
+    )
+
+    controller.translateCurrentSelection()
+    await Task.yield()
+
+    XCTAssertFalse(selectionReader.didStart)
+    XCTAssertTrue(permissions.promptRequests.isEmpty)
+    XCTAssertEqual(panel.events.first, .show(activating: false, repositioning: false))
+    guard case let .error(message) = controller.panelState else {
+      return XCTFail("Expected error state")
+    }
+    XCTAssertTrue(message.contains("unstable app identity"))
+  }
+
   func testOCRSelectionRecognizesAndTranslatesRegion() async {
     let panel = MockFloatingPanelPresenter()
     let ocrService = MockOCRService(result: .success("screen text"))
@@ -149,6 +172,29 @@ final class ControllerInteractionTests: XCTestCase {
 
     XCTAssertEqual(panel.hideCount, 1)
     XCTAssertEqual(panel.events.last, .show(activating: false, repositioning: false))
+  }
+
+  func testDuplicateAppIdentityBlocksOCRBeforeOverlayStarts() {
+    let panel = MockFloatingPanelPresenter()
+    let overlay = MockOCRSelectionOverlay()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      appIdentityChecker: MockAppIdentityChecker(
+        snapshot: .stableForTesting(duplicateExecutablePaths: ["/Applications/LexiRay.app/Contents/MacOS/LexiRay"])
+      ),
+      ocrSelectionOverlay: overlay
+    )
+
+    controller.translateOCRRegion()
+
+    XCTAssertEqual(overlay.beginCount, 0)
+    XCTAssertEqual(panel.hideCount, 0)
+    XCTAssertEqual(panel.events.first, .show(activating: false, repositioning: false))
+    guard case let .error(message) = controller.panelState else {
+      return XCTFail("Expected error state")
+    }
+    XCTAssertTrue(message.contains("Multiple LexiRay copies"))
   }
 
   func testPinnedAndCloseActionsReachPanelPresenter() {
@@ -1339,6 +1385,45 @@ final class ControllerInteractionTests: XCTestCase {
     )
   }
 
+  func testDockHideDecisionPreservesVisibleAppSurfaces() {
+    XCTAssertFalse(
+      AppWindowPresenter.shouldHideApplication(
+        desiredPolicy: .accessory,
+        hasVisibleAppSurface: true
+      )
+    )
+    XCTAssertTrue(
+      AppWindowPresenter.shouldHideApplication(
+        desiredPolicy: .accessory,
+        hasVisibleAppSurface: false
+      )
+    )
+    XCTAssertFalse(
+      AppWindowPresenter.shouldHideApplication(
+        desiredPolicy: .regular,
+        hasVisibleAppSurface: false
+      )
+    )
+  }
+
+  func testVisibleAppSurfaceIncludesFloatingPanelLevelWindows() {
+    let floatingPanel = AppWindowPresenter.WindowSnapshot(
+      isVisible: true,
+      identifier: "",
+      title: "LexiRay",
+      isNormalWindowLevel: false
+    )
+    let closingMainWindow = AppWindowPresenter.WindowSnapshot(
+      isVisible: true,
+      identifier: "main",
+      title: "LexiRay",
+      isClosing: true
+    )
+
+    XCTAssertTrue(AppWindowPresenter.hasVisibleAppSurface(in: [floatingPanel]))
+    XCTAssertFalse(AppWindowPresenter.hasVisibleAppSurface(in: [closingMainWindow]))
+  }
+
   func testPendingMainWindowPresentationCancelsWhenAppResigns() async {
     defer {
       AppWindowPresenter.cancelPendingMainWindowPresentation()
@@ -1445,6 +1530,7 @@ final class ControllerInteractionTests: XCTestCase {
     panel: MockFloatingPanelPresenter,
     permissions: PermissionChecking = MockPermissionChecker(isAccessibilityTrusted: true),
     hotKeyService: HotKeyRegistering = MockHotKeyService(),
+    appIdentityChecker: AppIdentityChecking = StaticAppIdentityChecker(snapshot: .stableForTesting()),
     pipeline: TranslationPipeline? = nil,
     ocrService: OCRRecognizing? = nil,
     ocrSelectionOverlay: OCRRegionSelecting? = nil,
@@ -1464,6 +1550,7 @@ final class ControllerInteractionTests: XCTestCase {
       selectionService: selectionReader,
       permissionChecker: permissions,
       hotKeyService: hotKeyService,
+      appIdentityChecker: appIdentityChecker,
       floatingPanelFactory: { _ in panel },
       pipeline: pipeline,
       ocrService: ocrService,
@@ -1498,6 +1585,18 @@ final class ControllerInteractionTests: XCTestCase {
       providerID: .mock,
       providerName: "Mock",
       translatedText: text
+    )
+  }
+
+  private func unstableAppIdentity() -> AppIdentitySnapshot {
+    AppIdentitySnapshot(
+      bundleIdentifier: AppConstants.bundleID,
+      bundlePath: "/tmp/LexiRay.app",
+      executablePath: "/tmp/LexiRay.app/Contents/MacOS/LexiRay",
+      signatureState: .unstable,
+      signatureSummary: "unsigned or ad hoc signature",
+      certificateAuthority: nil,
+      duplicateExecutablePaths: []
     )
   }
 
@@ -1632,6 +1731,14 @@ private final class MockPermissionChecker: PermissionChecking {
   func requestAccessibilityIfNeeded(prompt: Bool) -> Bool {
     promptRequests.append(prompt)
     return isAccessibilityTrusted
+  }
+}
+
+private struct MockAppIdentityChecker: AppIdentityChecking {
+  let snapshot: AppIdentitySnapshot
+
+  var currentSnapshot: AppIdentitySnapshot {
+    snapshot
   }
 }
 

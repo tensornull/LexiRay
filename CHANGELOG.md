@@ -5,6 +5,22 @@ All notable changes to LexiRay are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Changed release DMGs to require a fixed self-signed app signature so macOS
+  permissions bind to a stable LexiRay identity.
+- Added App Identity diagnostics and local signed DMG packaging to prevent
+  permission-sensitive workflows from running under unstable app identities.
+
+### Fixed
+
+- Fixed Settings permission rows so Accessibility and Screen Recording status
+  refresh while the Settings tab is visible.
+- Blocked Selection and OCR when LexiRay is unsigned, ad hoc signed, or running
+  beside another LexiRay copy with a different executable path.
+
 ## [0.1.2] - 2026-06-02
 
 ### Changed

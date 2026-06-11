@@ -1,7 +1,10 @@
 import AppKit
 import SwiftUI
 
+private let appIdentityRefreshIntervalNanoseconds: UInt64 = 1_000_000_000
+
 struct MainView: View {
+  @Environment(\.scenePhase) private var scenePhase
   @ObservedObject var controller: LexiRayController
   @State private var manualText = ""
 
@@ -22,10 +25,7 @@ struct MainView: View {
           VStack(alignment: .leading, spacing: 20) {
             switch controller.selectedMainSection {
             case .dashboard:
-              header
-              quickActions
-              languagePanel
-              resultPanel
+              dashboardContent
             case .providers:
               providerPanel
             case .settings:
@@ -45,6 +45,32 @@ struct MainView: View {
       }
       .navigationTitle(controller.selectedMainSection.title)
       .animation(.easeInOut(duration: 0.16), value: controller.copyToast?.id)
+      .onChange(of: scenePhase) { _, newPhase in
+        guard newPhase == .active else {
+          return
+        }
+        refreshDashboardIdentityIfVisible()
+      }
+      .onChange(of: controller.selectedMainSection) { _, newSection in
+        guard newSection == .dashboard else {
+          return
+        }
+        controller.refreshAppIdentity()
+      }
+    }
+  }
+
+  private var dashboardContent: some View {
+    Group {
+      header
+      appIdentityWarning
+      quickActions
+      languagePanel
+      resultPanel
+    }
+    .onAppear(perform: controller.refreshAppIdentity)
+    .task {
+      await refreshDashboardIdentityUntilCancelled()
     }
   }
 
@@ -115,6 +141,36 @@ struct MainView: View {
 
           Spacer()
         }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var appIdentityWarning: some View {
+    if let blockingIssue = controller.appIdentity.blockingIssue {
+      HStack(alignment: .top, spacing: 10) {
+        Image(systemName: "exclamationmark.triangle.fill")
+          .foregroundStyle(.orange)
+        VStack(alignment: .leading, spacing: 4) {
+          Text(controller.appIdentity.statusTitle)
+            .font(.body.weight(.semibold))
+          Text(blockingIssue.message)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        Spacer()
+        Button("Settings") {
+          controller.selectSettings()
+        }
+        .accessibilityIdentifier("DashboardIdentityWarningSettingsButton")
+      }
+      .padding(12)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+      .overlay {
+        RoundedRectangle(cornerRadius: 8)
+          .stroke(Color.orange.opacity(0.32), lineWidth: 1)
       }
     }
   }
@@ -214,6 +270,27 @@ struct MainView: View {
     }
 
     return names.joined(separator: ", ")
+  }
+
+  private func refreshDashboardIdentityIfVisible() {
+    guard controller.selectedMainSection == .dashboard else {
+      return
+    }
+    controller.refreshAppIdentity()
+  }
+
+  @MainActor
+  private func refreshDashboardIdentityUntilCancelled() async {
+    controller.refreshAppIdentity()
+
+    while !Task.isCancelled {
+      do {
+        try await Task.sleep(nanoseconds: appIdentityRefreshIntervalNanoseconds)
+      } catch {
+        return
+      }
+      controller.refreshAppIdentity()
+    }
   }
 }
 

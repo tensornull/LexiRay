@@ -46,6 +46,10 @@ enum PermissionService {
     openSettings(path: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")
   }
 
+  static func openPrivacySettings() {
+    openSettings(path: "x-apple.systempreferences:com.apple.preference.security")
+  }
+
   @discardableResult
   static func requestScreenCaptureIfNeeded() -> Bool {
     guard !isScreenCaptureTrusted else {

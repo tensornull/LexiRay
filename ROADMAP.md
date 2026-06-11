@@ -16,9 +16,11 @@ surprises.
 
 ## Phase 0 — Stability (permissions never break again)
 
-- [~] Land the App Identity work (uncommitted on `dev`: AppIdentityService,
-      identity gating, release signing scripts + workflow). Needs final
-      acceptance + commit.
+- [x] Land the App Identity work (AppIdentityService, identity gating of
+      Selection/OCR, App Identity settings panel, release signing scripts +
+      workflow). Evidence 2026-06-11: L0-L3 green (206 unit tests), 8/8 GUI
+      scenarios PASS including the new `settings_identity` scenario, all
+      screenshots inspected.
 - [ ] Release 0.1.3 with the fixed release certificate; replace the
       `LexiRay Local Development`-signed copy currently in `/Applications`
       so the installed app has the long-term stable TCC identity.

@@ -1,5 +1,7 @@
 import SwiftUI
 
+private let permissionRefreshIntervalNanoseconds: UInt64 = 1_000_000_000
+
 struct DashboardSettingsView: View {
   @Environment(\.scenePhase) private var scenePhase
   @ObservedObject var controller: LexiRayController
@@ -19,10 +21,14 @@ struct DashboardSettingsView: View {
       hotKeyPanel
       floatingPanel
       historyPanel
+      appIdentityPanel
       permissionPanel
       advancedPanel
     }
     .onAppear(perform: refreshRuntimeState)
+    .task {
+      await refreshRuntimeStateUntilCancelled()
+    }
     .onChange(of: scenePhase) { _, newPhase in
       guard newPhase == .active else {
         return
@@ -126,14 +132,14 @@ struct DashboardSettingsView: View {
           title: "Accessibility",
           detail: permissions.isAccessibilityTrusted ? "Enabled" : "Needed for selected text",
           isEnabled: permissions.isAccessibilityTrusted,
-          action: PermissionService.openAccessibilitySettings
+          action: openAccessibilitySettings
         )
 
         PermissionSettingsRow(
           title: "Screen Recording",
           detail: permissions.isScreenCaptureTrusted ? "Enabled" : "Needed for OCR",
           isEnabled: permissions.isScreenCaptureTrusted,
-          action: PermissionService.openScreenCaptureSettings
+          action: openScreenCaptureSettings
         )
 
         PermissionSettingsRow(
@@ -143,6 +149,56 @@ struct DashboardSettingsView: View {
           action: PermissionService.openAutomationSettings
         )
       }
+    }
+  }
+
+  private var appIdentityPanel: some View {
+    SettingsSection(title: "App Identity", systemName: appIdentityIconName) {
+      VStack(alignment: .leading, spacing: 10) {
+        HStack(alignment: .top, spacing: 12) {
+          Image(systemName: appIdentityIconName)
+            .foregroundStyle(appIdentityColor)
+
+          VStack(alignment: .leading, spacing: 3) {
+            Text(controller.appIdentity.statusTitle)
+              .font(.body.weight(.medium))
+            Text(controller.appIdentity.signatureSummary)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+
+          Spacer()
+        }
+
+        AppIdentityDetailRow(title: "Authority", value: controller.appIdentity.certificateAuthority ?? "None")
+        AppIdentityDetailRow(title: "Path", value: controller.appIdentity.bundlePath)
+
+        if !controller.appIdentity.duplicateExecutablePaths.isEmpty {
+          Text("Other running copies: \(controller.appIdentity.duplicateExecutablePaths.joined(separator: ", "))")
+            .font(.caption)
+            .foregroundStyle(.orange)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+
+        HStack(spacing: 10) {
+          Button("Open Install Location") {
+            controller.openInstallLocation()
+          }
+          .accessibilityIdentifier("AppIdentityOpenInstallLocationButton")
+
+          Button("Open Privacy Settings") {
+            controller.openPrivacySettings()
+            refreshPermissions()
+          }
+          .accessibilityIdentifier("AppIdentityOpenPrivacySettingsButton")
+
+          Button("Copy Diagnostics") {
+            controller.copyAppDiagnosticsToClipboard()
+          }
+          .accessibilityIdentifier("AppIdentityCopyDiagnosticsButton")
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
 
@@ -197,6 +253,14 @@ struct DashboardSettingsView: View {
     loginItemStatus == .requiresApproval ? Color.orange : Color.secondary
   }
 
+  private var appIdentityIconName: String {
+    controller.appIdentity.blockingIssue == nil ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
+  }
+
+  private var appIdentityColor: Color {
+    controller.appIdentity.blockingIssue == nil ? .green : .orange
+  }
+
   private var translateHotKey: Binding<HotKeyConfiguration> {
     Binding(
       get: { settings.translateHotKey },
@@ -226,16 +290,45 @@ struct DashboardSettingsView: View {
   }
 
   private func refreshRuntimeState() {
+    controller.refreshAppIdentity()
     refreshPermissions()
     refreshLoginItemStatus()
   }
 
+  @MainActor
+  private func refreshRuntimeStateUntilCancelled() async {
+    refreshRuntimeState()
+
+    while !Task.isCancelled {
+      do {
+        try await Task.sleep(nanoseconds: permissionRefreshIntervalNanoseconds)
+      } catch {
+        return
+      }
+      refreshRuntimeState()
+    }
+  }
+
   private func refreshPermissions() {
-    permissions = .current
+    let currentPermissions = PermissionStatus.current
+    guard permissions != currentPermissions else {
+      return
+    }
+    permissions = currentPermissions
   }
 
   private func refreshLoginItemStatus() {
     loginItemStatus = LoginItemService.status
+  }
+
+  private func openAccessibilitySettings() {
+    PermissionService.openAccessibilitySettings()
+    refreshPermissions()
+  }
+
+  private func openScreenCaptureSettings() {
+    PermissionService.openScreenCaptureSettings()
+    refreshPermissions()
   }
 }
 
@@ -335,5 +428,22 @@ private struct PermissionSettingsRow: View {
     }
 
     return isEnabled == true ? .green : .orange
+  }
+}
+
+private struct AppIdentityDetailRow: View {
+  let title: String
+  let value: String
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(title)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      Text(value)
+        .font(.caption)
+        .textSelection(.enabled)
+        .fixedSize(horizontal: false, vertical: true)
+    }
   }
 }

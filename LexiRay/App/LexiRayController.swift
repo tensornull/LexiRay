@@ -18,6 +18,7 @@ final class LexiRayController: ObservableObject {
   @Published var lastSelectionSource: SelectionSource = .unavailable
   @Published var lastOCRText = ""
   @Published var selectedMainSection: MainSection = .dashboard
+  @Published private(set) var appIdentity: AppIdentitySnapshot
   @Published private(set) var copyToast: CopyToast?
   @Published private(set) var speakingResultID: UUID?
   @Published private(set) var activeHistoryPositionText: String?
@@ -29,6 +30,7 @@ final class LexiRayController: ObservableObject {
   private let permissionChecker: PermissionChecking
   private let pipeline: TranslationPipeline
   private let hotKeyService: HotKeyRegistering
+  private let appIdentityChecker: AppIdentityChecking
   private let ocrService: OCRRecognizing
   private let ocrSelectionOverlay: OCRRegionSelecting
   private let speechService: SpeechControlling
@@ -66,6 +68,7 @@ final class LexiRayController: ObservableObject {
     selectionService: TextSelectionReading = TextSelectionService(),
     permissionChecker: PermissionChecking = SystemPermissionChecker(),
     hotKeyService: HotKeyRegistering = GlobalHotKeyService(),
+    appIdentityChecker: AppIdentityChecking = AppIdentityCheckerFactory.makeDefault(),
     floatingPanelFactory: ((LexiRayController) -> FloatingPanelPresenting)? = nil,
     pipeline: TranslationPipeline? = nil,
     ocrService: OCRRecognizing? = nil,
@@ -77,11 +80,13 @@ final class LexiRayController: ObservableObject {
     self.selectionService = selectionService
     self.permissionChecker = permissionChecker
     self.hotKeyService = hotKeyService
+    self.appIdentityChecker = appIdentityChecker
     self.pipeline = pipeline ?? TranslationPipeline(settings: settings)
     self.ocrService = ocrService ?? OCRService()
     self.ocrSelectionOverlay = ocrSelectionOverlay ?? OCRSelectionOverlayController()
     self.speechService = speechService ?? SpeechService()
     self.historyStore = historyStore
+    appIdentity = appIdentityChecker.currentSnapshot
     translationHistory = historyStore.load(limit: settings.translationHistoryLimit)
     floatingPanel = floatingPanelFactory?(self) ?? FloatingPanelController(controller: self)
     hasTranslationHistory = !translationHistory.isEmpty
@@ -98,6 +103,7 @@ final class LexiRayController: ObservableObject {
       return
     }
 
+    refreshAppIdentity()
     permissionChecker.requestAccessibilityIfNeeded(prompt: false)
     registerHotKeys()
     observeSettings()
@@ -123,6 +129,10 @@ final class LexiRayController: ObservableObject {
   }
 
   func translateCurrentSelection() {
+    guard preparePermissionSensitiveWorkflow() else {
+      return
+    }
+
     translationTask?.cancel()
     translationTask = nil
 
@@ -175,6 +185,10 @@ final class LexiRayController: ObservableObject {
   }
 
   func translateOCRRegion() {
+    guard preparePermissionSensitiveWorkflow() else {
+      return
+    }
+
     cancelTranslationWork()
     isExpanded = false
     panelSourceText = ""
@@ -278,6 +292,34 @@ final class LexiRayController: ObservableObject {
     TranslationPasteboardWriter.write(result: result, format: format)
     settings.defaultCopyFormat = format
     showCopyToast(surface: surface)
+  }
+
+  func refreshAppIdentity() {
+    let currentIdentity = appIdentityChecker.currentSnapshot
+    guard appIdentity != currentIdentity else {
+      return
+    }
+    appIdentity = currentIdentity
+  }
+
+  func copyAppDiagnosticsToClipboard(surface: CopyToastSurface = .mainWindow) {
+    refreshAppIdentity()
+    let diagnostics = [
+      appIdentity.diagnosticsText,
+      "Accessibility trusted: \(PermissionService.isAccessibilityTrusted)",
+      "Screen Recording trusted: \(PermissionService.isScreenCaptureTrusted)"
+    ].joined(separator: "\n")
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(diagnostics, forType: .string)
+    showCopyToast(surface: surface)
+  }
+
+  func openInstallLocation() {
+    NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
+  }
+
+  func openPrivacySettings() {
+    PermissionService.openPrivacySettings()
   }
 
   func speakResult() {
@@ -386,6 +428,26 @@ final class LexiRayController: ObservableObject {
     }
 
     showBlankComposer()
+  }
+
+  private func preparePermissionSensitiveWorkflow() -> Bool {
+    refreshAppIdentity()
+    guard let blockingIssue = appIdentity.blockingIssue else {
+      return true
+    }
+
+    showAppIdentityError(blockingIssue.message)
+    return false
+  }
+
+  private func showAppIdentityError(_ message: String) {
+    cancelTranslationWork()
+    isExpanded = false
+    panelSourceText = ""
+    lastSelectionSource = .unavailable
+    panelState = .error(message)
+    floatingPanel.show(activating: false, repositioning: false)
+    AppLog.app.error("Blocked permission-sensitive workflow: \(message, privacy: .public)")
   }
 
   private func showSelectionPermissionError() {

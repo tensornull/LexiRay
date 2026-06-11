@@ -259,16 +259,19 @@ enum AppWindowPresenter {
   }
 
   private static func updateDockVisibility(showsMenuBarIcon: Bool) {
+    let hasVisibleRegularWindows = hasVisibleRegularWindows()
     let desiredPolicy = activationPolicy(
-      hasVisibleRegularWindows: hasVisibleRegularWindows(),
+      hasVisibleRegularWindows: hasVisibleRegularWindows,
       showsMenuBarIcon: showsMenuBarIcon
     )
-    guard NSApp.activationPolicy() != desiredPolicy else {
-      return
+    if NSApp.activationPolicy() != desiredPolicy {
+      NSApp.setActivationPolicy(desiredPolicy)
     }
 
-    NSApp.setActivationPolicy(desiredPolicy)
-    if desiredPolicy == .accessory {
+    if shouldHideApplication(
+      desiredPolicy: desiredPolicy,
+      hasVisibleAppSurface: hasVisibleAppSurfaces()
+    ) {
       NSApp.hide(nil)
     }
   }
@@ -284,6 +287,36 @@ enum AppWindowPresenter {
       && !window.isMiniaturized
       && window.level == .normal
       && window.canBecomeKey
+  }
+
+  private static func hasVisibleAppSurfaces() -> Bool {
+    let windows = NSApp.windows.map { window in
+      WindowSnapshot(
+        isVisible: window.isVisible,
+        identifier: window.identifier?.rawValue ?? "",
+        title: window.title,
+        isMiniaturized: window.isMiniaturized,
+        canBecomeKey: window.canBecomeKey,
+        isNormalWindowLevel: window.level == .normal,
+        isClosing: closingMainWindowIDs.contains(ObjectIdentifier(window))
+      )
+    }
+    return hasVisibleAppSurface(in: windows)
+  }
+
+  static func hasVisibleAppSurface(in windows: [WindowSnapshot]) -> Bool {
+    windows.contains { window in
+      window.isVisible
+        && !window.isMiniaturized
+        && !window.isClosing
+    }
+  }
+
+  static func shouldHideApplication(
+    desiredPolicy: NSApplication.ActivationPolicy,
+    hasVisibleAppSurface: Bool
+  ) -> Bool {
+    desiredPolicy == .accessory && !hasVisibleAppSurface
   }
 
   private static func matches(_ window: NSWindow, kind: WindowKind) -> Bool {

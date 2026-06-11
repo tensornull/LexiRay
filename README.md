@@ -25,9 +25,19 @@ near your current work.
 Download the latest DMG from
 [GitHub Releases](https://github.com/tensornull/LexiRay/releases).
 
-Current release builds are unsigned and not notarized. macOS Gatekeeper may warn
-when opening the app. Verify the downloaded DMG with the published `.sha256`
-file before installing.
+Current release builds are signed with a fixed self-signed certificate and are
+not notarized. macOS Gatekeeper may still warn when opening the app. Verify the
+downloaded DMG with the published `.sha256` file before installing.
+
+The fixed release signature gives macOS a stable app identity for Accessibility
+and Screen & System Audio Recording. If you installed an older unsigned release,
+remove the old LexiRay rows from Privacy & Security, install the current build,
+and grant permissions to LexiRay once.
+
+LexiRay also checks its running app identity in Settings. Selection and OCR are
+blocked when the app is unsigned, ad hoc signed, or another LexiRay copy with the
+same bundle identifier is running, because those states can make macOS bind
+permissions to the wrong app.
 
 LexiRay needs these macOS permissions for its core workflows:
 
@@ -75,6 +85,10 @@ Grant Accessibility and Screen & System Audio Recording to that app once in
 System Settings. Normal rebuilds should not reset TCC or require reauthorizing
 permissions.
 
+Do not use raw Xcode builds or hand-made DMGs for permission-sensitive testing.
+They can change the code identity macOS uses for TCC. LexiRay will show an App
+Identity warning and block Selection/OCR if it detects an unstable identity.
+
 ## Release
 
 Release preparation for `0.1.2` and later must start from `dev`:
@@ -92,7 +106,18 @@ git tag v0.1.2
 git push origin v0.1.2
 ```
 
-The tag triggers the unsigned DMG release workflow.
+The tag triggers the fixed self-signed DMG release workflow. Repository secrets
+must provide `LEXIRAY_RELEASE_CERT_P12_BASE64` and
+`LEXIRAY_RELEASE_CERT_PASSWORD`; the optional
+`LEXIRAY_RELEASE_CODE_SIGN_IDENTITY` repository variable defaults to
+`LexiRay Release Self-Signed`.
+
+To package a local signed DMG with the same checks, provide the same release
+signing environment variables and run:
+
+```bash
+./script/package_release_dmg.sh 0.1.2
+```
 
 ## Clean-Room Rule
 
