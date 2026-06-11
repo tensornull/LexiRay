@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "preferredProvider": "systemDictionary",
+  "providerOrder": [
+    "systemDictionary"
+  ],
+  "providers": {
+    "systemDictionary": {
+      "providerID": "systemDictionary",
+      "displayName": "",
+      "baseURL": "",
+      "model": "",
+      "isEnabled": true,
+      "apiKey": ""
+    }
+  }
+}
