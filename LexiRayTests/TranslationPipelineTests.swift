@@ -4,7 +4,7 @@ import XCTest
 @MainActor
 final class TranslationPipelineTests: XCTestCase {
   func testMockProviderReturnsTranslationResult() async throws {
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayPipelineTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
     enableOnly([.mock], in: settings)
     settings.language1 = "en"
@@ -20,7 +20,7 @@ final class TranslationPipelineTests: XCTestCase {
   }
 
   func testPipelineAutoSwitchesChineseToLanguage1() async throws {
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayPipelineTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
     enableOnly([.mock], in: settings)
     settings.language1 = "en"
@@ -33,7 +33,7 @@ final class TranslationPipelineTests: XCTestCase {
   }
 
   func testPipelineTreatsShortEnglishTextAsEnglishSource() throws {
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayPipelineTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
     settings.language1 = "en"
     settings.language2 = "zh-Hans"
@@ -46,7 +46,7 @@ final class TranslationPipelineTests: XCTestCase {
   }
 
   func testBatchKeepsOriginalTextAndAddsPreparedLLMInput() throws {
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayPipelineTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
     let pipeline = TranslationPipeline(settings: settings)
     let source = #"{"type":"error","message":"failed"}"#
@@ -59,7 +59,7 @@ final class TranslationPipelineTests: XCTestCase {
   }
 
   func testPipelineRejectsEmptyInput() async throws {
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayPipelineTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore())
     let pipeline = TranslationPipeline(settings: settings)
 
@@ -74,7 +74,7 @@ final class TranslationPipelineTests: XCTestCase {
   }
 
   func testBatchTranslationReturnsRowsForEnabledProviders() async throws {
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayPipelineTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
     enableOnly([.mock, .openAIResponses], in: settings)
     let pipeline = TranslationPipeline(settings: settings)
@@ -90,7 +90,7 @@ final class TranslationPipelineTests: XCTestCase {
   }
 
   func testBatchTranslationUsesCustomProviderName() async throws {
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayPipelineTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
     enableOnly([.mock], in: settings)
     var mock = settings.configuration(for: .mock)
@@ -104,7 +104,7 @@ final class TranslationPipelineTests: XCTestCase {
   }
 
   func testBatchTranslationIncludesCustomProviderInstance() async throws {
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayPipelineTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
     enableOnly([], in: settings)
     var custom = settings.addProvider(providerID: .openAIChatCompletions)
@@ -125,7 +125,7 @@ final class TranslationPipelineTests: XCTestCase {
   }
 
   func testBatchTranslationCanBypassCacheForExplicitRetranslate() async throws {
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayPipelineTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
     enableOnly([.mock], in: settings)
     let counter = ProviderCallCounter()
@@ -144,7 +144,7 @@ final class TranslationPipelineTests: XCTestCase {
   }
 
   func testBatchTranslationShowsDisabledRowsWhenNoProviderEnabled() async throws {
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayPipelineTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
     enableOnly([], in: settings)
     let pipeline = TranslationPipeline(settings: settings)
@@ -156,7 +156,7 @@ final class TranslationPipelineTests: XCTestCase {
   }
 
   func testSingleResultTranslationRejectsNoEnabledProvider() async throws {
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayPipelineTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
     enableOnly([], in: settings)
     let pipeline = TranslationPipeline(settings: settings)
@@ -172,9 +172,7 @@ final class TranslationPipelineTests: XCTestCase {
   }
 
   private func makeProviderFileStore() -> ProviderSettingsFileStore {
-    let fileURL = FileManager.default.temporaryDirectory
-      .appendingPathComponent("LexiRayPipelineTests-\(UUID().uuidString)", isDirectory: true)
-      .appendingPathComponent("providers.json", isDirectory: false)
+    let fileURL = makeScratchDirectory().appendingPathComponent("providers.json", isDirectory: false)
     return ProviderSettingsFileStore(fileURL: fileURL)
   }
 

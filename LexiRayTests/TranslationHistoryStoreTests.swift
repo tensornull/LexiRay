@@ -52,9 +52,7 @@ final class TranslationHistoryStoreTests: XCTestCase {
   }
 
   private func makeStore() -> TranslationHistoryStore {
-    let fileURL = FileManager.default.temporaryDirectory
-      .appendingPathComponent("LexiRayHistoryStoreTests-\(UUID().uuidString)", isDirectory: true)
-      .appendingPathComponent("history.json", isDirectory: false)
+    let fileURL = makeScratchDirectory().appendingPathComponent("history.json", isDirectory: false)
     return TranslationHistoryStore(fileURL: fileURL)
   }
 

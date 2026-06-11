@@ -356,9 +356,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(controller.panelSourceText, "hello")
   }
 
-  func testHistoryNavigationRestoresSavedBatchWithoutProviderCall() async throws {
+  func testHistoryNavigationRestoresSavedBatchWithoutProviderCall() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -412,9 +412,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(controller.panelSourceText, "")
   }
 
-  func testHistoryPositionTextIsOnlyShownWhileBrowsingHistory() async throws {
+  func testHistoryPositionTextIsOnlyShownWhileBrowsingHistory() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -449,9 +449,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertNil(controller.activeHistoryPositionText)
   }
 
-  func testHistoryPositionTextTracksArrowBrowsingFromBlankComposer() async throws {
+  func testHistoryPositionTextTracksArrowBrowsingFromBlankComposer() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -508,9 +508,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertNil(controller.activeHistoryPositionText)
   }
 
-  func testLatestHistoryIsBrowsableAfterFirstProviderSuccess() async throws {
+  func testLatestHistoryIsBrowsableAfterFirstProviderSuccess() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -556,9 +556,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(controller.activeHistoryPositionText, "History 1/1")
   }
 
-  func testHistoryNavigationDoesNotCancelInFlightBatchAfterFirstProviderSuccess() async throws {
+  func testHistoryNavigationDoesNotCancelInFlightBatchAfterFirstProviderSuccess() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -621,9 +621,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertTrue(controller.canNavigateTranslationHistory)
   }
 
-  func testHistoryNavigationFromCurrentSavedResultMovesToPreviousEntry() async throws {
+  func testHistoryNavigationFromCurrentSavedResultMovesToPreviousEntry() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -678,9 +678,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(controller.panelSourceText, "")
   }
 
-  func testHistoryLimitReductionPrunesPersistedHistory() async throws {
+  func testHistoryLimitReductionPrunesPersistedHistory() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -727,9 +727,9 @@ final class ControllerInteractionTests: XCTestCase {
     }
   }
 
-  func testManualRetranslateBypassesCacheForSameText() async throws {
+  func testManualRetranslateBypassesCacheForSameText() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -769,9 +769,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertFalse(panel.events.contains(where: \.isRepositioningShow))
   }
 
-  func testTranslateCurrentSelectionBypassesCacheForSameText() async throws {
+  func testTranslateCurrentSelectionBypassesCacheForSameText() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -811,9 +811,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertFalse(panel.events.contains(where: \.isRepositioningShow))
   }
 
-  func testStreamingPartialRefreshesPanelWithoutRepositioningShow() async throws {
+  func testStreamingPartialRefreshesPanelWithoutRepositioningShow() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -938,12 +938,12 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertNil(controller.copyToast)
   }
 
-  func testAutoCopyWaitsForFirstProviderInOrder() async throws {
+  func testAutoCopyWaitsForFirstProviderInOrder() async {
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
     pasteboard.setString("sentinel", forType: .string)
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -990,11 +990,11 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(controller.copyToast?.surface, .floatingPanel)
   }
 
-  func testAutoCopyDoesNotOverwriteWithLaterProviderSuccess() async throws {
+  func testAutoCopyDoesNotOverwriteWithLaterProviderSuccess() async {
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -1110,9 +1110,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertTrue(speech.speakRequests.isEmpty)
   }
 
-  func testProviderToggleDisablesStreamingProvider() async throws {
+  func testProviderToggleDisablesStreamingProvider() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -1153,9 +1153,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertTrue(entry.status.isDisabled)
   }
 
-  func testProviderToggleEnablesDisabledProviderForCurrentRequest() async throws {
+  func testProviderToggleEnablesDisabledProviderForCurrentRequest() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -1194,9 +1194,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertTrue(settings.configuration(for: .mock).isEnabled)
   }
 
-  func testProviderToggleMissingAPIKeyDoesNotPersistEnabled() async throws {
+  func testProviderToggleMissingAPIKeyDoesNotPersistEnabled() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -1537,7 +1537,7 @@ final class ControllerInteractionTests: XCTestCase {
     historyStore: TranslationHistoryStore? = nil,
     speechService: SpeechControlling? = nil
   ) -> LexiRayController {
-    let defaults = UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)")!
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -1561,16 +1561,12 @@ final class ControllerInteractionTests: XCTestCase {
   }
 
   private func makeProviderFileStore() -> ProviderSettingsFileStore {
-    let fileURL = FileManager.default.temporaryDirectory
-      .appendingPathComponent("LexiRayControllerTests-\(UUID().uuidString)", isDirectory: true)
-      .appendingPathComponent("providers.json", isDirectory: false)
+    let fileURL = makeScratchDirectory().appendingPathComponent("providers.json", isDirectory: false)
     return ProviderSettingsFileStore(fileURL: fileURL)
   }
 
   private func makeHistoryStore() -> TranslationHistoryStore {
-    let fileURL = FileManager.default.temporaryDirectory
-      .appendingPathComponent("LexiRayControllerTests-\(UUID().uuidString)", isDirectory: true)
-      .appendingPathComponent("history.json", isDirectory: false)
+    let fileURL = makeScratchDirectory().appendingPathComponent("history.json", isDirectory: false)
     return TranslationHistoryStore(fileURL: fileURL)
   }
 

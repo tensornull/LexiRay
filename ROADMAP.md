@@ -31,9 +31,13 @@ surprises.
       Root-cause fix for TCC identity churn AND Gatekeeper warnings. Self-signed
       certificates remain a workaround; if the cert is ever lost/recreated, all
       users must re-grant permissions.
-- [ ] Fix unit tests leaking thousands of `LexiRayControllerTests-*` /
-      `LexiRaySettingsStoreTests-*` UserDefaults domains and temp dirs
-      (add tearDown cleanup; add a one-time cleanup script for the machine).
+- [x] Fix unit tests leaking thousands of `LexiRayControllerTests-*` /
+      `LexiRaySettingsStoreTests-*` UserDefaults domains and temp dirs.
+      Tests now use in-memory scratch defaults (cfprefsd flushes leaked
+      domains after process exit, so teardown deletion alone cannot win) and
+      teardown-cleaned scratch directories; `script/clean_test_state.sh`
+      removed the accumulated 7733 domains + 944 temp dirs. Evidence
+      2026-06-11: three consecutive full unit runs leak zero files.
 
 ## Phase 1 — Pipeline (every iteration self-verifies) — DONE
 
@@ -73,8 +77,6 @@ surprises.
 
 ## Backlog (known issues, newest first)
 
-- Unit tests pollute `~/Library/Preferences` with thousands of per-run
-  UserDefaults domains (found 2026-06-11 during Phase 1).
 - Dashboard hotkey chips truncate ("Control-Optio…") at default window width
   (screenshot evidence 2026-06-11).
 - Pin state persists across panel sessions — next hotkey panel opens already
