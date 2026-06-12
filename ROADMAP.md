@@ -69,6 +69,12 @@ surprises.
 
 ## Phase 3 — Taste, performance, zero-bug feel
 
+- [x] OCR selection overlay drag jank: replaced full-view `draw(_:)`
+      invalidation with CALayer composition (CAShapeLayer dim/hole + border,
+      CATextLayer size label, pre-rendered prompt image). Also fixed the
+      overlay sometimes staying blank until the first drag (hotkey-callout
+      panels need an explicit display pass) and the prompt centering on the
+      multi-display union instead of the cursor's screen (2026-06-12).
 - [ ] Split `LexiRayController` (877 lines) into TranslationWorkflow /
       HistoryNavigation / PermissionWorkflow services. Precondition for
       confident iteration on interaction logic.

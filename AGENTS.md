@@ -129,6 +129,12 @@ Rules for every UI-affecting iteration:
 - Computer Use remains the final acceptance layer for behavior the scenarios
   cannot reach (drag interactions, visual styling judgment, multi-display).
   Capture and inspect multiple screenshots across the relevant states.
+- This machine can have multiple displays. `screencapture -x <file>` captures
+  only the main display, and the OCR overlay spans the union of all screens,
+  so union-relative centering is not main-display centering. When screenshot
+  evidence looks wrong (content missing, misplaced), check `NSScreen.screens`
+  before concluding the UI failed, and prefer numeric pixel checks over
+  eyeballing subtle effects like the 28% dim.
 
 For permission, TCC, release, signing, or packaging changes, use the existing
 repo scripts and the canonical workspace-built app paths below; do not substitute
