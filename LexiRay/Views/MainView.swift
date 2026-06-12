@@ -1,8 +1,6 @@
 import AppKit
 import SwiftUI
 
-private let appIdentityRefreshIntervalNanoseconds: UInt64 = 1_000_000_000
-
 struct MainView: View {
   @Environment(\.scenePhase) private var scenePhase
   @ObservedObject var controller: LexiRayController
@@ -69,9 +67,6 @@ struct MainView: View {
       resultPanel
     }
     .onAppear(perform: controller.refreshAppIdentity)
-    .task {
-      await refreshDashboardIdentityUntilCancelled()
-    }
   }
 
   private var header: some View {
@@ -277,20 +272,6 @@ struct MainView: View {
       return
     }
     controller.refreshAppIdentity()
-  }
-
-  @MainActor
-  private func refreshDashboardIdentityUntilCancelled() async {
-    controller.refreshAppIdentity()
-
-    while !Task.isCancelled {
-      do {
-        try await Task.sleep(nanoseconds: appIdentityRefreshIntervalNanoseconds)
-      } catch {
-        return
-      }
-      controller.refreshAppIdentity()
-    }
   }
 }
 

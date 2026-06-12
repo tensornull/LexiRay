@@ -4,6 +4,7 @@ import Foundation
 
 protocol PermissionChecking {
   var isAccessibilityTrusted: Bool { get }
+  var isScreenCaptureTrusted: Bool { get }
 
   @discardableResult
   func requestAccessibilityIfNeeded(prompt: Bool) -> Bool
@@ -12,6 +13,10 @@ protocol PermissionChecking {
 struct SystemPermissionChecker: PermissionChecking {
   var isAccessibilityTrusted: Bool {
     PermissionService.isAccessibilityTrusted
+  }
+
+  var isScreenCaptureTrusted: Bool {
+    PermissionService.isScreenCaptureTrusted
   }
 
   @discardableResult

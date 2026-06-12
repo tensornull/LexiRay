@@ -1,17 +1,16 @@
 import SwiftUI
 
-private let permissionRefreshIntervalNanoseconds: UInt64 = 1_000_000_000
-
 struct DashboardSettingsView: View {
   @Environment(\.scenePhase) private var scenePhase
   @ObservedObject var controller: LexiRayController
   @ObservedObject private var settings: SettingsStore
-  @State private var permissions = PermissionStatus.current
+  @ObservedObject private var permissionMonitor: PermissionStatusMonitor
   @State private var loginItemStatus = LoginItemService.status
 
   init(controller: LexiRayController) {
     self.controller = controller
     settings = controller.settings
+    permissionMonitor = controller.permissionMonitor
   }
 
   var body: some View {
@@ -26,8 +25,8 @@ struct DashboardSettingsView: View {
       advancedPanel
     }
     .onAppear(perform: refreshRuntimeState)
-    .task {
-      await refreshRuntimeStateUntilCancelled()
+    .onReceive(permissionMonitor.refreshEvents) {
+      refreshLoginItemStatus()
     }
     .onChange(of: scenePhase) { _, newPhase in
       guard newPhase == .active else {
@@ -130,15 +129,15 @@ struct DashboardSettingsView: View {
       VStack(alignment: .leading, spacing: 10) {
         PermissionSettingsRow(
           title: "Accessibility",
-          detail: permissions.isAccessibilityTrusted ? "Enabled" : "Needed for selected text",
-          isEnabled: permissions.isAccessibilityTrusted,
+          detail: permissionMonitor.status.isAccessibilityTrusted ? "Enabled" : "Needed for selected text",
+          isEnabled: permissionMonitor.status.isAccessibilityTrusted,
           action: openAccessibilitySettings
         )
 
         PermissionSettingsRow(
           title: "Screen Recording",
-          detail: permissions.isScreenCaptureTrusted ? "Enabled" : "Needed for OCR",
-          isEnabled: permissions.isScreenCaptureTrusted,
+          detail: permissionMonitor.status.isScreenCaptureTrusted ? "Enabled" : "Needed for OCR",
+          isEnabled: permissionMonitor.status.isScreenCaptureTrusted,
           action: openScreenCaptureSettings
         )
 
@@ -188,7 +187,7 @@ struct DashboardSettingsView: View {
 
           Button("Open Privacy Settings") {
             controller.openPrivacySettings()
-            refreshPermissions()
+            permissionMonitor.refreshNow()
           }
           .accessibilityIdentifier("AppIdentityOpenPrivacySettingsButton")
 
@@ -291,30 +290,8 @@ struct DashboardSettingsView: View {
 
   private func refreshRuntimeState() {
     controller.refreshAppIdentity()
-    refreshPermissions()
+    permissionMonitor.refreshNow()
     refreshLoginItemStatus()
-  }
-
-  @MainActor
-  private func refreshRuntimeStateUntilCancelled() async {
-    refreshRuntimeState()
-
-    while !Task.isCancelled {
-      do {
-        try await Task.sleep(nanoseconds: permissionRefreshIntervalNanoseconds)
-      } catch {
-        return
-      }
-      refreshRuntimeState()
-    }
-  }
-
-  private func refreshPermissions() {
-    let currentPermissions = PermissionStatus.current
-    guard permissions != currentPermissions else {
-      return
-    }
-    permissions = currentPermissions
   }
 
   private func refreshLoginItemStatus() {
@@ -323,24 +300,12 @@ struct DashboardSettingsView: View {
 
   private func openAccessibilitySettings() {
     PermissionService.openAccessibilitySettings()
-    refreshPermissions()
+    permissionMonitor.refreshNow()
   }
 
   private func openScreenCaptureSettings() {
     PermissionService.openScreenCaptureSettings()
-    refreshPermissions()
-  }
-}
-
-private struct PermissionStatus: Equatable {
-  let isAccessibilityTrusted: Bool
-  let isScreenCaptureTrusted: Bool
-
-  static var current: PermissionStatus {
-    PermissionStatus(
-      isAccessibilityTrusted: PermissionService.isAccessibilityTrusted,
-      isScreenCaptureTrusted: PermissionService.isScreenCaptureTrusted
-    )
+    permissionMonitor.refreshNow()
   }
 }
 

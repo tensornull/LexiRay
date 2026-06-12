@@ -1525,6 +1525,33 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(origin.y, 12)
   }
 
+  func testPermissionMonitorActivationEventRefreshesAppIdentity() async {
+    let applicationCenter = NotificationCenter()
+    let monitor = PermissionStatusMonitor(
+      permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
+      distributedCenter: NotificationCenter(),
+      applicationCenter: applicationCenter,
+      fallbackPollInterval: .seconds(3600),
+      notificationRecheckDelay: .seconds(3600)
+    )
+    defer { monitor.stop() }
+    let identityChecker = MutableAppIdentityChecker(snapshot: .stableForTesting())
+    let controller = makeController(
+      selectionReader: BlockingSelectionReader(),
+      panel: MockFloatingPanelPresenter(),
+      appIdentityChecker: identityChecker,
+      permissionMonitor: monitor
+    )
+    controller.startForTesting()
+    monitor.start()
+    XCTAssertEqual(controller.appIdentity.signatureState, .stable)
+
+    identityChecker.snapshot = unstableAppIdentity()
+    applicationCenter.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+
+    await waitUntil { controller.appIdentity.signatureState == .unstable }
+  }
+
   private func makeController(
     selectionReader: TextSelectionReading,
     panel: MockFloatingPanelPresenter,
@@ -1535,7 +1562,8 @@ final class ControllerInteractionTests: XCTestCase {
     ocrService: OCRRecognizing? = nil,
     ocrSelectionOverlay: OCRRegionSelecting? = nil,
     historyStore: TranslationHistoryStore? = nil,
-    speechService: SpeechControlling? = nil
+    speechService: SpeechControlling? = nil,
+    permissionMonitor: PermissionStatusMonitor? = nil
   ) -> LexiRayController {
     let defaults = makeScratchDefaults()
     let settings = SettingsStore(
@@ -1556,7 +1584,8 @@ final class ControllerInteractionTests: XCTestCase {
       ocrService: ocrService,
       ocrSelectionOverlay: ocrSelectionOverlay,
       historyStore: historyStore ?? makeHistoryStore(),
-      speechService: speechService
+      speechService: speechService,
+      permissionMonitor: permissionMonitor
     )
   }
 
@@ -1718,15 +1747,29 @@ private final class MockHotKeyService: HotKeyRegistering {
 
 private final class MockPermissionChecker: PermissionChecking {
   let isAccessibilityTrusted: Bool
+  let isScreenCaptureTrusted: Bool
   private(set) var promptRequests: [Bool] = []
 
-  init(isAccessibilityTrusted: Bool) {
+  init(isAccessibilityTrusted: Bool, isScreenCaptureTrusted: Bool = false) {
     self.isAccessibilityTrusted = isAccessibilityTrusted
+    self.isScreenCaptureTrusted = isScreenCaptureTrusted
   }
 
   func requestAccessibilityIfNeeded(prompt: Bool) -> Bool {
     promptRequests.append(prompt)
     return isAccessibilityTrusted
+  }
+}
+
+private final class MutableAppIdentityChecker: AppIdentityChecking {
+  var snapshot: AppIdentitySnapshot
+
+  init(snapshot: AppIdentitySnapshot) {
+    self.snapshot = snapshot
+  }
+
+  var currentSnapshot: AppIdentitySnapshot {
+    snapshot
   }
 }
 

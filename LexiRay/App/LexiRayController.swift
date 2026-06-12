@@ -25,6 +25,7 @@ final class LexiRayController: ObservableObject {
   @Published private(set) var hasTranslationHistory = false
 
   let settings: SettingsStore
+  let permissionMonitor: PermissionStatusMonitor
 
   private let selectionService: TextSelectionReading
   private let permissionChecker: PermissionChecking
@@ -74,11 +75,13 @@ final class LexiRayController: ObservableObject {
     ocrService: OCRRecognizing? = nil,
     ocrSelectionOverlay: OCRRegionSelecting? = nil,
     historyStore: TranslationHistoryStore = TranslationHistoryStore(),
-    speechService: SpeechControlling? = nil
+    speechService: SpeechControlling? = nil,
+    permissionMonitor: PermissionStatusMonitor? = nil
   ) {
     self.settings = settings
     self.selectionService = selectionService
     self.permissionChecker = permissionChecker
+    self.permissionMonitor = permissionMonitor ?? PermissionStatusMonitor(permissionChecker: permissionChecker)
     self.hotKeyService = hotKeyService
     self.appIdentityChecker = appIdentityChecker
     self.pipeline = pipeline ?? TranslationPipeline(settings: settings)
@@ -105,6 +108,7 @@ final class LexiRayController: ObservableObject {
 
     refreshAppIdentity()
     permissionChecker.requestAccessibilityIfNeeded(prompt: false)
+    permissionMonitor.start()
     registerHotKeys()
     observeSettings()
     AppLog.app.info("LexiRay started")
@@ -525,6 +529,12 @@ final class LexiRayController: ObservableObject {
       .dropFirst()
       .sink { [weak self] limit in
         self?.pruneTranslationHistory(limit: limit)
+      }
+      .store(in: &settingsCancellables)
+
+    permissionMonitor.refreshEvents
+      .sink { [weak self] in
+        self?.refreshAppIdentity()
       }
       .store(in: &settingsCancellables)
   }

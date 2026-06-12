@@ -24,9 +24,16 @@ surprises.
 - [ ] Release 0.1.3 with the fixed release certificate; replace the
       `LexiRay Local Development`-signed copy currently in `/Applications`
       so the installed app has the long-term stable TCC identity.
-- [ ] Replace 1s permission polling with event-driven refresh
+- [x] Replace 1s permission polling with event-driven refresh
       (`DistributedNotificationCenter` accessibility notification +
       app-activation refresh). Keep polling only as a slow fallback.
+      PermissionStatusMonitor listens for `com.apple.accessibility.api`
+      (with a delayed re-check for late TCC writes) and
+      `didBecomeActiveNotification`, polls at 15s as backstop; both former
+      1s view loops removed. Evidence 2026-06-12: 8 monitor unit tests +
+      controller integration test green, 9/9 GUI scenarios PASS, all
+      screenshots inspected. Real TCC-toggle latency needs a manual
+      System Settings pass (harness cannot flip TCC).
 - [ ] Decide: Apple Developer Program ($99/yr) for Developer ID + notarization.
       Root-cause fix for TCC identity churn AND Gatekeeper warnings. Self-signed
       certificates remain a workaround; if the cert is ever lost/recreated, all
