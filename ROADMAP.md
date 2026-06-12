@@ -49,7 +49,10 @@ surprises.
       `.pending` marker; interrupted runs auto-recover on the next run).
       Evidence: kill -9 mid-suite then rerun restores 4 providers + 100
       history entries.
-- [x] `CLAUDE.md` → `AGENTS.md` symlink so Codex and Claude Code share rules.
+- [x] Claude Code repo integration disabled for this project:
+      `.claude/settings.json` blanks commit/PR attribution, and the former
+      `CLAUDE.md` symlink was removed on 2026-06-12 so Claude Code no longer
+      gets repo instructions from this repository.
 - [x] `ROADMAP.md` (this file) as persistent progress tracking.
 - [x] Commit Phase 1 to `dev`. Landed as its own commit, separate from the
       App Identity work (2026-06-11).
