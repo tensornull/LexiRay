@@ -5,20 +5,26 @@ require(focusFloatingSourceEditor(), "source editor did not accept focus before 
 
 press(126)
 require(
-  waitFor("up arrow restores history", {
+  waitFor("up arrow restores history") {
     let text = floatingSourceText()
-    return text.contains(seededHistoryText) || text.contains(selectionSmokeText)
-  }),
+    return text.contains(seededHistoryText)
+      || text.contains(richWrapHistoryText)
+      || text.contains(selectionSmokeText)
+  },
   "up arrow did not restore translation history"
 )
 
-if !floatingSourceText().contains(seededHistoryText) {
+for _ in 0 ..< 3 where !floatingSourceText().contains(seededHistoryText) {
   press(126)
+}
+
+if !floatingSourceText().contains(seededHistoryText) {
   require(
-    waitFor("second up arrow reaches seeded history", { floatingSourceText().contains(seededHistoryText) }),
-    "up arrow did not continue to older translation history"
+    waitFor("up arrow reaches seeded history") { floatingSourceText().contains(seededHistoryText) },
+    "up arrow did not continue to seeded translation history"
   )
 }
+
 snapPanel("history-restored")
 
 var returnedToBlankComposer = false
@@ -36,6 +42,7 @@ for _ in 0 ..< 3 {
     break
   }
 }
+
 require(returnedToBlankComposer, "down arrow did not leave history browsing")
 snapPanel("history-back-to-blank")
 

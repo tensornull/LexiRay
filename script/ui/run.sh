@@ -23,7 +23,7 @@ LEXIRAY_HOME="$HOME/.lexiray"
 PROVIDERS_FILE="$LEXIRAY_HOME/providers.json"
 HISTORY_FILE="$LEXIRAY_HOME/history.json"
 
-SCENARIO_ORDER=(launch providers settings_identity panel_blank source_editor history_nav pin selection_translate)
+SCENARIO_ORDER=(launch providers settings_identity panel_blank source_editor history_nav rich_result_wrap pin selection_translate)
 
 cd "$ROOT_DIR"
 

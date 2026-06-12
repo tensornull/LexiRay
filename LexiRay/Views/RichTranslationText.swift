@@ -127,6 +127,9 @@ struct RichInlineToken: Equatable, Identifiable {
   let id: String
   let value: Value
 
+  private static let maximumUnbrokenTextCharacters = 24
+  private static let maximumBreakableTextCharacters = 4
+
   enum Value: Equatable {
     case text(AttributedString)
     case code(String)
@@ -162,19 +165,29 @@ struct RichInlineToken: Equatable, Identifiable {
 
     var tokens: [AttributedString] = []
     var tokenStart = attributed.startIndex
-    var tokenIsWhitespace: Bool?
+    var tokenKind: TextTokenKind?
+    var tokenLength = 0
     var index = attributed.startIndex
 
     while index < attributed.endIndex {
       let character = attributed.characters[index]
-      let isWhitespace = character.isInlineWhitespace
-      if tokenIsWhitespace == nil {
-        tokenIsWhitespace = isWhitespace
+      let kind = TextTokenKind(character)
+      if tokenKind == nil {
+        tokenKind = kind
         tokenStart = index
-      } else if tokenIsWhitespace != isWhitespace {
+        tokenLength = 1
+      } else if shouldStartNewTextToken(
+        currentKind: tokenKind!,
+        nextKind: kind,
+        currentLength: tokenLength,
+        nextCharacter: character
+      ) {
         tokens.append(AttributedString(attributed[tokenStart ..< index]))
         tokenStart = index
-        tokenIsWhitespace = isWhitespace
+        tokenKind = kind
+        tokenLength = 1
+      } else {
+        tokenLength += 1
       }
       index = attributed.characters.index(after: index)
     }
@@ -183,12 +196,52 @@ struct RichInlineToken: Equatable, Identifiable {
     return tokens.filter { !$0.characters.isEmpty }.map { .text($0) }
   }
 
+  private static func shouldStartNewTextToken(
+    currentKind: TextTokenKind,
+    nextKind: TextTokenKind,
+    currentLength: Int,
+    nextCharacter: Character
+  ) -> Bool {
+    if currentKind != .whitespace, nextCharacter.attachesToPreviousInlineToken {
+      return false
+    }
+
+    guard currentKind == nextKind else {
+      return true
+    }
+
+    switch currentKind {
+    case .whitespace:
+      return false
+    case .regular:
+      return currentLength >= maximumUnbrokenTextCharacters
+    case .breakable:
+      return currentLength >= maximumBreakableTextCharacters
+    }
+  }
+
   private static func identityKey(for value: Value) -> String {
     switch value {
     case let .text(attributed):
       "text:\(String(attributed.characters))"
     case let .code(text):
       "code:\(text)"
+    }
+  }
+}
+
+private enum TextTokenKind: Equatable {
+  case whitespace
+  case regular
+  case breakable
+
+  init(_ character: Character) {
+    if character.isInlineWhitespace {
+      self = .whitespace
+    } else if character.hasCJKLineBreakOpportunity {
+      self = .breakable
+    } else {
+      self = .regular
     }
   }
 }
@@ -229,30 +282,17 @@ private struct InlineFlowLayout: Layout {
     subviews: Subviews,
     cache _: inout ()
   ) -> CGSize {
-    let maxWidth = proposal.width ?? .greatestFiniteMagnitude
-    var lineWidth: CGFloat = 0
-    var lineHeight: CGFloat = 0
-    var totalWidth: CGFloat = 0
-    var totalHeight: CGFloat = 0
-
-    for subview in subviews {
-      let size = subview.sizeThatFits(.unspecified)
-      if lineWidth > 0, lineWidth + size.width > maxWidth {
-        totalWidth = max(totalWidth, lineWidth)
-        totalHeight += lineHeight + verticalSpacing
-        lineWidth = 0
-        lineHeight = 0
-      }
-      lineWidth += size.width
-      lineHeight = max(lineHeight, size.height)
-    }
-
-    totalWidth = max(totalWidth, lineWidth)
-    totalHeight += lineHeight
+    let itemSizes = subviews.map { $0.sizeThatFits(.unspecified) }
+    let frames = InlineFlowLayoutEngine.frames(
+      for: itemSizes,
+      maxWidth: proposal.width ?? .greatestFiniteMagnitude,
+      verticalSpacing: verticalSpacing
+    )
+    let contentSize = InlineFlowLayoutEngine.contentSize(for: frames)
 
     return CGSize(
-      width: proposal.width.map { min(max(totalWidth, 0), $0) } ?? totalWidth,
-      height: totalHeight
+      width: proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? contentSize.width,
+      height: contentSize.height
     )
   }
 
@@ -262,31 +302,131 @@ private struct InlineFlowLayout: Layout {
     subviews: Subviews,
     cache _: inout ()
   ) {
-    let maxWidth = bounds.width
-    var x = bounds.minX
-    var y = bounds.minY
+    let itemSizes = subviews.map { $0.sizeThatFits(.unspecified) }
+    let frames = InlineFlowLayoutEngine.frames(
+      for: itemSizes,
+      maxWidth: bounds.width,
+      verticalSpacing: verticalSpacing
+    )
+
+    for (index, subview) in subviews.enumerated() {
+      let frame = frames[index]
+      subview.place(
+        at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+        proposal: ProposedViewSize(width: frame.width, height: frame.height)
+      )
+    }
+  }
+}
+
+enum InlineFlowLayoutEngine {
+  static func frames(for itemSizes: [CGSize], maxWidth: CGFloat, verticalSpacing: CGFloat) -> [CGRect] {
+    guard !itemSizes.isEmpty else {
+      return []
+    }
+
+    let lineWidth = normalizedLineWidth(maxWidth)
+    let spacing = max(0, verticalSpacing)
+    var frames: [CGRect] = []
+    var x: CGFloat = 0
+    var y: CGFloat = 0
     var lineHeight: CGFloat = 0
 
-    for subview in subviews {
-      let size = subview.sizeThatFits(.unspecified)
-      if x > bounds.minX, x + size.width > bounds.minX + maxWidth {
-        x = bounds.minX
-        y += lineHeight + verticalSpacing
+    for itemSize in itemSizes {
+      let size = CGSize(width: max(0, itemSize.width), height: max(0, itemSize.height))
+      if x > 0, x + size.width > lineWidth {
+        x = 0
+        y += lineHeight + spacing
         lineHeight = 0
       }
-      subview.place(
-        at: CGPoint(x: x, y: y),
-        proposal: ProposedViewSize(width: size.width, height: size.height)
-      )
+
+      frames.append(CGRect(origin: CGPoint(x: x, y: y), size: size))
       x += size.width
       lineHeight = max(lineHeight, size.height)
     }
+
+    return frames
+  }
+
+  static func contentSize(for frames: [CGRect]) -> CGSize {
+    guard !frames.isEmpty else {
+      return .zero
+    }
+
+    return CGSize(
+      width: frames.reduce(CGFloat.zero) { max($0, $1.maxX) },
+      height: frames.reduce(CGFloat.zero) { max($0, $1.maxY) }
+    )
+  }
+
+  private static func normalizedLineWidth(_ maxWidth: CGFloat) -> CGFloat {
+    guard maxWidth.isFinite, maxWidth > 0 else {
+      return .greatestFiniteMagnitude
+    }
+    return maxWidth
   }
 }
 
 private extension Character {
   var isInlineWhitespace: Bool {
     unicodeScalars.allSatisfy { CharacterSet.whitespacesAndNewlines.contains($0) }
+  }
+
+  var hasCJKLineBreakOpportunity: Bool {
+    unicodeScalars.contains { $0.isCJKLineBreakScalar }
+  }
+
+  var attachesToPreviousInlineToken: Bool {
+    unicodeScalars.contains { $0.attachesToPreviousInlineToken }
+  }
+}
+
+private extension Unicode.Scalar {
+  var isCJKLineBreakScalar: Bool {
+    switch value {
+    case 0x3000 ... 0x303F,
+         0x3040 ... 0x30FF,
+         0x3400 ... 0x4DBF,
+         0x4E00 ... 0x9FFF,
+         0xAC00 ... 0xD7AF,
+         0xF900 ... 0xFAFF,
+         0xFF00 ... 0xFFEF,
+         0x20000 ... 0x2A6DF,
+         0x2A700 ... 0x2B73F,
+         0x2B740 ... 0x2B81F,
+         0x2B820 ... 0x2CEAF:
+      return true
+    default:
+      return false
+    }
+  }
+
+  var attachesToPreviousInlineToken: Bool {
+    switch value {
+    case 0x2026,
+         0x3001 ... 0x3002,
+         0x3009,
+         0x300B,
+         0x300D,
+         0x300F,
+         0x3011,
+         0x3015,
+         0x3017,
+         0x3019,
+         0x301B,
+         0xFF01,
+         0xFF09,
+         0xFF0C,
+         0xFF0E,
+         0xFF1A,
+         0xFF1B,
+         0xFF1F,
+         0xFF3D,
+         0xFF5D:
+      return true
+    default:
+      return false
+    }
   }
 }
 

@@ -75,6 +75,12 @@ surprises.
       overlay sometimes staying blank until the first drag (hotkey-callout
       panels need an explicit display pass) and the prompt centering on the
       multi-display union instead of the cursor's screen (2026-06-12).
+- [x] Rich translation results clipping at the panel edge: tokenizer now
+      emits breakable tokens (CJK break opportunities, 24-char cap on
+      unbroken runs) and InlineFlowLayoutEngine computes wrap frames from
+      the real panel width (GeometryReader). Evidence 2026-06-12: 5 new
+      renderer unit tests, new `rich_result_wrap` GUI scenario PASS with
+      default-width and 900px screenshots inspected.
 - [ ] Split `LexiRayController` (877 lines) into TranslationWorkflow /
       HistoryNavigation / PermissionWorkflow services. Precondition for
       confident iteration on interaction logic.

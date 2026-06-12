@@ -14,6 +14,7 @@ let scenarioName = CommandLine.arguments[4]
 
 let lexirayBundleID = "io.github.tensornull.lexiray"
 let seededHistoryText = "LexiRay seeded history text."
+let richWrapHistoryText = "LexiRay rich wrap history text."
 let selectionSmokeText = "LexiRay smoke selection text."
 let appExecutablePrefix = appBundle + "/Contents/MacOS/"
 
@@ -267,6 +268,67 @@ func panelAXSizes() -> [CGSize] {
 
 func lexirayVisibleTextContains(_ needle: String) -> Bool {
   lexirayAXElements().contains { axVisibleText($0).contains(needle) }
+}
+
+func visibleStaticTextOverflowingFloatingPanelRightBoundary() -> [String] {
+  guard let panelInfo = floatingPanelWindowInfo() else {
+    return ["floating panel window was not found"]
+  }
+
+  let panelFrame = windowBounds(panelInfo)
+  let rightLimit = panelFrame.maxX - 8
+  return lexirayAXElements().compactMap { element in
+    guard axString(element, kAXRoleAttribute) == "AXStaticText",
+          let frame = axFrame(element),
+          frame.intersects(panelFrame),
+          frame.width > 1,
+          frame.maxX > rightLimit
+    else {
+      return nil
+    }
+
+    let text = axVisibleText(element).replacingOccurrences(of: "\n", with: " ")
+    return "\(String(text.prefix(80))) maxX=\(frame.maxX) limit=\(rightLimit)"
+  }
+}
+
+func floatingPanelSize() -> CGSize? {
+  floatingPanelWindowInfo().map(windowBounds)?.size
+}
+
+func floatingPanelAXWindow() -> AXUIElement? {
+  guard let panelInfo = floatingPanelWindowInfo() else {
+    return nil
+  }
+
+  let panelFrame = windowBounds(panelInfo)
+  return lexirayAXElements().first { element in
+    guard axString(element, kAXRoleAttribute) == "AXWindow",
+          let frame = axFrame(element)
+    else {
+      return false
+    }
+
+    return abs(frame.midX - panelFrame.midX) < 8
+      && abs(frame.midY - panelFrame.midY) < 8
+      && abs(frame.width - panelFrame.width) < 8
+      && abs(frame.height - panelFrame.height) < 8
+  }
+}
+
+func setFloatingPanelSize(_ size: CGSize) -> Bool {
+  guard let window = floatingPanelAXWindow() else {
+    return false
+  }
+
+  var requestedSize = size
+  guard let value = AXValueCreate(.cgSize, &requestedSize) else {
+    return false
+  }
+
+  let result = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, value)
+  RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+  return result == .success
 }
 
 // MARK: - Source editor
