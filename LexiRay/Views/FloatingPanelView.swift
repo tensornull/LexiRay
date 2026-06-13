@@ -9,10 +9,13 @@ struct FloatingPanelView: View {
       VStack(alignment: .leading, spacing: 10) {
         header
         sourceComposer
-        resultArea
+        if showsResultArea {
+          resultArea
+            .transition(.opacity.combined(with: .move(edge: .top)))
+        }
       }
-      .padding(12)
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+      .padding(14)
+      .frame(maxWidth: .infinity, alignment: .topLeading)
 
       if let toast = controller.copyToast, toast.surface == .floatingPanel {
         CopyToastView(toast: toast)
@@ -22,11 +25,13 @@ struct FloatingPanelView: View {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+    .background(Color.clear)
     .overlay {
-      RoundedRectangle(cornerRadius: 12)
-        .stroke(Color(nsColor: .separatorColor).opacity(0.7), lineWidth: 1)
+      RoundedRectangle(cornerRadius: 22, style: .continuous)
+        .stroke(Color(nsColor: .separatorColor).opacity(0.48), lineWidth: 1)
     }
+    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+    .animation(.easeInOut(duration: 0.16), value: showsResultArea)
     .animation(.easeInOut(duration: 0.16), value: controller.copyToast?.id)
   }
 
@@ -115,18 +120,20 @@ struct FloatingPanelView: View {
       SourceTextEditor(
         text: $controller.panelSourceText,
         placeholder: sourcePlaceholder,
-        minHeight: controller.isExpanded ? 150 : 116,
+        minHeight: sourceEditorMinimumHeight,
+        maxHeight: sourceEditorMaximumHeight,
         accessibilityIdentifier: "FloatingPanelSourceEditor",
         helpText: sourceEditorHelpText,
         onMoveUp: controller.showPreviousHistory,
-        onMoveDown: controller.showNextHistory
+        onMoveDown: controller.showNextHistory,
+        onHeightChange: controller.refreshFloatingPanelLayout
       )
     }
     .padding(10)
-    .background(Color(nsColor: .controlBackgroundColor).opacity(0.34), in: RoundedRectangle(cornerRadius: 8))
+    .background(.black.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     .overlay {
-      RoundedRectangle(cornerRadius: 8)
-        .stroke(Color(nsColor: .separatorColor).opacity(0.48), lineWidth: 1)
+      RoundedRectangle(cornerRadius: 14, style: .continuous)
+        .stroke(Color(nsColor: .separatorColor).opacity(0.34), lineWidth: 1)
     }
     .transaction { transaction in
       transaction.animation = nil
@@ -137,10 +144,10 @@ struct FloatingPanelView: View {
     resultContent
       .padding(10)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-      .background(Color(nsColor: .textBackgroundColor).opacity(0.22), in: RoundedRectangle(cornerRadius: 8))
+      .background(.black.opacity(0.055), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
       .overlay {
-        RoundedRectangle(cornerRadius: 8)
-          .stroke(Color(nsColor: .separatorColor).opacity(0.42), lineWidth: 1)
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+          .stroke(Color(nsColor: .separatorColor).opacity(0.3), lineWidth: 1)
       }
   }
 
@@ -362,6 +369,23 @@ struct FloatingPanelView: View {
         false
       }
     }
+  }
+
+  private var showsResultArea: Bool {
+    switch controller.panelState {
+    case .idle:
+      false
+    case .loading, .batch, .result, .error:
+      true
+    }
+  }
+
+  private var sourceEditorMinimumHeight: CGFloat {
+    controller.isExpanded ? 80 : 56
+  }
+
+  private var sourceEditorMaximumHeight: CGFloat {
+    controller.isExpanded ? 240 : 150
   }
 }
 

@@ -189,7 +189,7 @@ final class TranslationPipeline: @unchecked Sendable {
 
     switch id {
     case .mock:
-      return MockTranslationProvider()
+      return MockTranslationProvider(streamingFixtureEnabled: AppRuntime.usesStreamingMockProvider)
     case .systemDictionary:
       return SystemDictionaryProvider()
     case .openAIChatCompletions:

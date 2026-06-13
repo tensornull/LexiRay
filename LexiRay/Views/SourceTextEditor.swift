@@ -10,13 +10,16 @@ struct SourceTextEditor: View {
 
   @Binding var text: String
   let placeholder: String
-  var minHeight: CGFloat = 116
+  var minHeight: CGFloat = 56
+  var maxHeight: CGFloat = 150
   var accessibilityIdentifier = "SourceTextEditor"
   var helpText: String?
   var onMoveUp: (() -> Bool)?
   var onMoveDown: (() -> Bool)?
+  var onHeightChange: (() -> Void)?
 
   @State private var isFocused = false
+  @State private var measuredTextHeight: CGFloat = 0
 
   var body: some View {
     ZStack(alignment: .topLeading) {
@@ -26,6 +29,7 @@ struct SourceTextEditor: View {
         textInset: Self.textInset,
         lineFragmentPadding: Self.lineFragmentPadding,
         accessibilityIdentifier: accessibilityIdentifier,
+        onMeasuredHeightChange: handleMeasuredHeightChange,
         onMoveUp: onMoveUp,
         onMoveDown: onMoveDown
       )
@@ -39,16 +43,31 @@ struct SourceTextEditor: View {
           .allowsHitTesting(false)
       }
     }
-    .frame(minHeight: minHeight, maxHeight: minHeight)
-    .background(Color(nsColor: .textBackgroundColor).opacity(0.34), in: RoundedRectangle(cornerRadius: 8))
+    .frame(minHeight: editorHeight, maxHeight: editorHeight)
+    .background(.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     .overlay {
-      RoundedRectangle(cornerRadius: 8)
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
         .stroke(
-          isFocused ? Color.accentColor.opacity(0.75) : Color(nsColor: .separatorColor).opacity(0.55),
+          isFocused ? Color.accentColor.opacity(0.72) : Color(nsColor: .separatorColor).opacity(0.38),
           lineWidth: isFocused ? 1.25 : 1
         )
     }
     .help(helpText ?? placeholder)
+  }
+
+  private var editorHeight: CGFloat {
+    let measured = measuredTextHeight > 0 ? measuredTextHeight : minHeight
+    return min(maxHeight, max(minHeight, measured))
+  }
+
+  private func handleMeasuredHeightChange(_ measuredHeight: CGFloat) {
+    let clampedHeight = min(maxHeight, max(minHeight, measuredHeight))
+    guard abs(clampedHeight - measuredTextHeight) > 1 else {
+      return
+    }
+
+    measuredTextHeight = clampedHeight
+    onHeightChange?()
   }
 }
 
@@ -58,6 +77,7 @@ private struct SourceTextView: NSViewRepresentable {
   let textInset: CGSize
   let lineFragmentPadding: CGFloat
   let accessibilityIdentifier: String
+  let onMeasuredHeightChange: (CGFloat) -> Void
   let onMoveUp: (() -> Bool)?
   let onMoveDown: (() -> Bool)?
 
@@ -77,12 +97,19 @@ private struct SourceTextView: NSViewRepresentable {
     textView.historyNavigationHandler = { [coordinator = context.coordinator] direction in
       coordinator.handleHistoryNavigation(direction)
     }
+    textView.contentHeightDidChange = { [coordinator = context.coordinator, weak textView] in
+      guard let textView else {
+        return
+      }
+      coordinator.scheduleHeightRefresh(for: textView)
+    }
     configure(textView)
     textView.delegate = context.coordinator
     textView.string = text
     textView.identifier = NSUserInterfaceItemIdentifier(accessibilityIdentifier)
 
     scrollView.documentView = textView
+    context.coordinator.scheduleHeightRefresh(for: textView)
     return scrollView
   }
 
@@ -99,6 +126,7 @@ private struct SourceTextView: NSViewRepresentable {
       textView.string = text
       context.coordinator.isProgrammaticUpdate = false
     }
+    context.coordinator.scheduleHeightRefresh(for: textView)
   }
 
   private func configure(_ textView: NSTextView) {
@@ -108,33 +136,69 @@ private struct SourceTextView: NSViewRepresentable {
     textView.allowsUndo = true
     textView.isEditable = true
     textView.isSelectable = true
-    textView.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
-    textView.textColor = .textColor
+    let textAttributes = Self.textAttributes()
+    textView.font = Self.textFont
+    textView.textColor = Self.textColor
+    textView.typingAttributes = textAttributes
+    if let textStorage = textView.textStorage, textStorage.length > 0 {
+      textStorage.addAttributes(textAttributes, range: NSRange(location: 0, length: textStorage.length))
+    }
     textView.insertionPointColor = .controlAccentColor
     textView.textContainerInset = textInset
     textView.textContainer?.lineFragmentPadding = lineFragmentPadding
     textView.textContainer?.widthTracksTextView = true
     textView.isHorizontallyResizable = false
     textView.isVerticallyResizable = true
-    textView.minSize = NSSize(width: 0, height: scrollViewDefaultHeight)
+    textView.minSize = NSSize(width: 0, height: 0)
     textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-    textView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+    textView.textContainer?.containerSize = NSSize(
+      width: max(0, textView.bounds.width - textInset.width * 2),
+      height: CGFloat.greatestFiniteMagnitude
+    )
     textView.autoresizingMask = [.width]
     textView.usesFindPanel = true
     textView.isAutomaticQuoteSubstitutionEnabled = false
     textView.isAutomaticDashSubstitutionEnabled = false
   }
 
-  private var scrollViewDefaultHeight: CGFloat {
-    116
+  private static var textFont: NSFont {
+    NSFont.systemFont(ofSize: NSFont.systemFontSize)
   }
 
+  private static var textColor: NSColor {
+    NSColor(calibratedWhite: 0.93, alpha: 1)
+  }
+
+  private static func textAttributes() -> [NSAttributedString.Key: Any] {
+    [
+      .font: textFont,
+      .foregroundColor: textColor
+    ]
+  }
+
+  @MainActor
   final class Coordinator: NSObject, NSTextViewDelegate {
     var parent: SourceTextView
     var isProgrammaticUpdate = false
+    private var pendingHeightRefresh = false
+    private var lastReportedHeight: CGFloat = 0
 
     init(_ parent: SourceTextView) {
       self.parent = parent
+    }
+
+    func scheduleHeightRefresh(for textView: NSTextView) {
+      guard !pendingHeightRefresh else {
+        return
+      }
+      pendingHeightRefresh = true
+      Task { @MainActor [weak self, weak textView] in
+        guard let self, let textView else {
+          return
+        }
+        pendingHeightRefresh = false
+        reportHeight(for: textView)
+      }
     }
 
     func textDidChange(_ notification: Notification) {
@@ -146,6 +210,14 @@ private struct SourceTextView: NSViewRepresentable {
         return
       }
       parent.text = textView.string
+      let editedText = textView.string
+      Task { @MainActor [weak self, weak textView] in
+        guard let self, let textView, textView.string == editedText else {
+          return
+        }
+        applyTextAttributes(to: textView)
+      }
+      scheduleHeightRefresh(for: textView)
     }
 
     func textDidBeginEditing(_: Notification) {
@@ -169,11 +241,49 @@ private struct SourceTextView: NSViewRepresentable {
         parent.onMoveDown?() ?? false
       }
     }
+
+    private func reportHeight(for textView: NSTextView) {
+      guard let layoutManager = textView.layoutManager,
+            let textContainer = textView.textContainer
+      else {
+        return
+      }
+
+      layoutManager.ensureLayout(for: textContainer)
+      let usedHeight = layoutManager.usedRect(for: textContainer).height
+      let measuredHeight = ceil(usedHeight + parent.textInset.height * 2)
+      guard abs(measuredHeight - lastReportedHeight) > 1 else {
+        return
+      }
+
+      lastReportedHeight = measuredHeight
+      parent.onMeasuredHeightChange(measuredHeight)
+    }
+
+    private func applyTextAttributes(to textView: NSTextView) {
+      let textAttributes = SourceTextView.textAttributes()
+      textView.typingAttributes = textAttributes
+      if let textStorage = textView.textStorage, textStorage.length > 0 {
+        textStorage.addAttributes(textAttributes, range: NSRange(location: 0, length: textStorage.length))
+        textView.layoutManager?.invalidateDisplay(forCharacterRange: NSRange(location: 0, length: textStorage.length))
+      }
+      textView.setNeedsDisplay(textView.bounds)
+    }
   }
 }
 
 private final class SourceTextNSTextView: NSTextView {
   var historyNavigationHandler: ((SourceTextHistoryDirection) -> Bool)?
+  var contentHeightDidChange: (() -> Void)?
+
+  override func layout() {
+    super.layout()
+    textContainer?.containerSize = NSSize(
+      width: max(0, bounds.width - textContainerInset.width * 2),
+      height: CGFloat.greatestFiniteMagnitude
+    )
+    contentHeightDidChange?()
+  }
 
   override func keyDown(with event: NSEvent) {
     if let direction = SourceTextHistoryDirection(event: event),

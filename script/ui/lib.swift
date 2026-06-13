@@ -17,6 +17,8 @@ let seededHistoryText = "LexiRay seeded history text."
 let richWrapHistoryText = "LexiRay rich wrap history text."
 let selectionSmokeText = "LexiRay smoke selection text."
 let appExecutablePrefix = appBundle + "/Contents/MacOS/"
+let lexirayHomeURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".lexiray", isDirectory: true)
+let providersFileURL = lexirayHomeURL.appendingPathComponent("providers.json")
 
 // MARK: - Target app resolution
 // Two LexiRay copies can run at once (workspace build + installed release).
@@ -124,13 +126,13 @@ func lexirayMainWindowInfo() -> [String: Any]? {
 func floatingPanelWindowInfo() -> [String: Any]? {
   lexirayWindowInfos().first { window in
     let rect = windowBounds(window)
-    return rect.width >= 560 && rect.width <= 980 && rect.height >= 250 && rect.height <= 780
+    return rect.width >= 560 && rect.width <= 980 && rect.height >= 180 && rect.height <= 780
   }
 }
 
 func panelWindows() -> [CGRect] {
   lexirayWindowInfos().map(windowBounds).filter { rect in
-    rect.width >= 560 && rect.width <= 980 && rect.height >= 250 && rect.height <= 780
+    rect.width >= 560 && rect.width <= 980 && rect.height >= 180 && rect.height <= 780
   }
 }
 
@@ -258,7 +260,7 @@ func panelAXSizes() -> [CGSize] {
     let axValue = sizeValue as! AXValue
     var size = CGSize.zero
     guard AXValueGetValue(axValue, .cgSize, &size),
-          size.width >= 560 && size.width <= 980 && size.height >= 250 && size.height <= 780
+          size.width >= 560 && size.width <= 980 && size.height >= 180 && size.height <= 780
     else {
       return nil
     }
@@ -363,10 +365,6 @@ func focusAndReplaceSourceText(_ text: String) -> Bool {
   }
 
   RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-
-  if AXUIElementSetAttributeValue(editor, kAXValueAttribute as CFString, text as CFString) == .success {
-    return true
-  }
 
   NSPasteboard.general.clearContents()
   NSPasteboard.general.setString(text, forType: .string)
@@ -644,6 +642,31 @@ func ensureAppRunning() {
     fail("LexiRay did not launch from \(appBundle)")
   }
   RunLoop.current.run(until: Date().addingTimeInterval(1))
+}
+
+func terminateWorkspaceApp() {
+  guard let app = workspaceInstance() else {
+    return
+  }
+
+  _ = app.terminate()
+  let deadline = Date().addingTimeInterval(5)
+  while Date() < deadline {
+    if workspaceInstance() == nil {
+      return
+    }
+    RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+  }
+
+  if let pid = workspaceInstance()?.processIdentifier {
+    kill(pid, SIGKILL)
+  }
+  _ = waitFor("workspace app terminates", timeout: 3, { workspaceInstance() == nil })
+}
+
+func restartWorkspaceApp() {
+  terminateWorkspaceApp()
+  ensureAppRunning()
 }
 
 func openMainWindow() {

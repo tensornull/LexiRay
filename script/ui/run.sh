@@ -23,7 +23,7 @@ LEXIRAY_HOME="$HOME/.lexiray"
 PROVIDERS_FILE="$LEXIRAY_HOME/providers.json"
 HISTORY_FILE="$LEXIRAY_HOME/history.json"
 
-SCENARIO_ORDER=(launch providers settings_identity panel_blank source_editor history_nav rich_result_wrap pin selection_translate)
+SCENARIO_ORDER=(launch providers settings_identity panel_blank source_editor history_nav rich_result_wrap pin selection_translate streaming_growth)
 
 cd "$ROOT_DIR"
 
@@ -123,6 +123,8 @@ restore_foreign_copies() {
   rm -f "$FOREIGN_BUNDLES_FILE"
 }
 
+launchctl setenv LEXIRAY_UI_SCENARIO 1 >/dev/null 2>&1 || true
+
 # --- Evidence directory.
 RUN_STAMP="$(date +%Y%m%d-%H%M%S)"
 ARTIFACT_DIR="${LEXIRAY_UI_ARTIFACT_DIR:-$ROOT_DIR/build/ui-artifacts/$RUN_STAMP}"
@@ -186,6 +188,7 @@ stop_workspace_app() {
 cleanup() {
   stop_workspace_app
   restore_user_state
+  launchctl unsetenv LEXIRAY_UI_SCENARIO >/dev/null 2>&1 || true
   if [[ "$LEXIRAY_HOME_EXISTED" == 0 ]]; then
     rmdir "$LEXIRAY_HOME" 2>/dev/null || true
   fi
