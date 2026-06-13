@@ -64,14 +64,36 @@ final class ControllerInteractionTests: XCTestCase {
     controller.translateCurrentSelection()
     await waitUntil { selectionReader.didStart }
     selectionReader.resume(with: SelectionReadResult(text: nil, source: .unavailable, failureReason: .copyFailed))
-    await Task.yield()
-    await Task.yield()
+    await waitUntil { !panel.events.isEmpty }
 
     XCTAssertEqual(controller.panelState, .idle)
     XCTAssertEqual(controller.panelSourceText, "")
     XCTAssertEqual(controller.lastSelectionSource, .unavailable)
     XCTAssertEqual(panel.events.first, .show(activating: true, repositioning: false))
     XCTAssertTrue(permissions.promptRequests.isEmpty)
+  }
+
+  func testUnstableAppIdentityBlocksSelectionBeforeReadingText() async {
+    let selectionReader = BlockingSelectionReader()
+    let panel = MockFloatingPanelPresenter()
+    let permissions = MockPermissionChecker(isAccessibilityTrusted: true)
+    let controller = makeController(
+      selectionReader: selectionReader,
+      panel: panel,
+      permissions: permissions,
+      appIdentityChecker: MockAppIdentityChecker(snapshot: unstableAppIdentity())
+    )
+
+    controller.translateCurrentSelection()
+    await Task.yield()
+
+    XCTAssertFalse(selectionReader.didStart)
+    XCTAssertTrue(permissions.promptRequests.isEmpty)
+    XCTAssertEqual(panel.events.first, .show(activating: false, repositioning: false))
+    guard case let .error(message) = controller.panelState else {
+      return XCTFail("Expected error state")
+    }
+    XCTAssertTrue(message.contains("unstable app identity"))
   }
 
   func testOCRSelectionRecognizesAndTranslatesRegion() async {
@@ -149,6 +171,29 @@ final class ControllerInteractionTests: XCTestCase {
 
     XCTAssertEqual(panel.hideCount, 1)
     XCTAssertEqual(panel.events.last, .show(activating: false, repositioning: false))
+  }
+
+  func testDuplicateAppIdentityBlocksOCRBeforeOverlayStarts() {
+    let panel = MockFloatingPanelPresenter()
+    let overlay = MockOCRSelectionOverlay()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      appIdentityChecker: MockAppIdentityChecker(
+        snapshot: .stableForTesting(duplicateExecutablePaths: ["/Applications/LexiRay.app/Contents/MacOS/LexiRay"])
+      ),
+      ocrSelectionOverlay: overlay
+    )
+
+    controller.translateOCRRegion()
+
+    XCTAssertEqual(overlay.beginCount, 0)
+    XCTAssertEqual(panel.hideCount, 0)
+    XCTAssertEqual(panel.events.first, .show(activating: false, repositioning: false))
+    guard case let .error(message) = controller.panelState else {
+      return XCTFail("Expected error state")
+    }
+    XCTAssertTrue(message.contains("Multiple LexiRay copies"))
   }
 
   func testPinnedAndCloseActionsReachPanelPresenter() {
@@ -310,9 +355,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(controller.panelSourceText, "hello")
   }
 
-  func testHistoryNavigationRestoresSavedBatchWithoutProviderCall() async throws {
+  func testHistoryNavigationRestoresSavedBatchWithoutProviderCall() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -366,9 +411,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(controller.panelSourceText, "")
   }
 
-  func testHistoryPositionTextIsOnlyShownWhileBrowsingHistory() async throws {
+  func testHistoryPositionTextIsOnlyShownWhileBrowsingHistory() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -403,9 +448,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertNil(controller.activeHistoryPositionText)
   }
 
-  func testHistoryPositionTextTracksArrowBrowsingFromBlankComposer() async throws {
+  func testHistoryPositionTextTracksArrowBrowsingFromBlankComposer() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -462,9 +507,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertNil(controller.activeHistoryPositionText)
   }
 
-  func testLatestHistoryIsBrowsableAfterFirstProviderSuccess() async throws {
+  func testLatestHistoryIsBrowsableAfterFirstProviderSuccess() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -510,9 +555,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(controller.activeHistoryPositionText, "History 1/1")
   }
 
-  func testHistoryNavigationDoesNotCancelInFlightBatchAfterFirstProviderSuccess() async throws {
+  func testHistoryNavigationDoesNotCancelInFlightBatchAfterFirstProviderSuccess() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -575,9 +620,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertTrue(controller.canNavigateTranslationHistory)
   }
 
-  func testHistoryNavigationFromCurrentSavedResultMovesToPreviousEntry() async throws {
+  func testHistoryNavigationFromCurrentSavedResultMovesToPreviousEntry() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -632,9 +677,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(controller.panelSourceText, "")
   }
 
-  func testHistoryLimitReductionPrunesPersistedHistory() async throws {
+  func testHistoryLimitReductionPrunesPersistedHistory() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -681,9 +726,9 @@ final class ControllerInteractionTests: XCTestCase {
     }
   }
 
-  func testManualRetranslateBypassesCacheForSameText() async throws {
+  func testManualRetranslateBypassesCacheForSameText() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -723,9 +768,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertFalse(panel.events.contains(where: \.isRepositioningShow))
   }
 
-  func testTranslateCurrentSelectionBypassesCacheForSameText() async throws {
+  func testTranslateCurrentSelectionBypassesCacheForSameText() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -765,9 +810,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertFalse(panel.events.contains(where: \.isRepositioningShow))
   }
 
-  func testStreamingPartialRefreshesPanelWithoutRepositioningShow() async throws {
+  func testStreamingPartialRefreshesPanelWithoutRepositioningShow() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -892,12 +937,12 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertNil(controller.copyToast)
   }
 
-  func testAutoCopyWaitsForFirstProviderInOrder() async throws {
+  func testAutoCopyWaitsForFirstProviderInOrder() async {
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
     pasteboard.setString("sentinel", forType: .string)
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -944,11 +989,11 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(controller.copyToast?.surface, .floatingPanel)
   }
 
-  func testAutoCopyDoesNotOverwriteWithLaterProviderSuccess() async throws {
+  func testAutoCopyDoesNotOverwriteWithLaterProviderSuccess() async {
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -1064,9 +1109,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertTrue(speech.speakRequests.isEmpty)
   }
 
-  func testProviderToggleDisablesStreamingProvider() async throws {
+  func testProviderToggleDisablesStreamingProvider() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -1107,9 +1152,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertTrue(entry.status.isDisabled)
   }
 
-  func testProviderToggleEnablesDisabledProviderForCurrentRequest() async throws {
+  func testProviderToggleEnablesDisabledProviderForCurrentRequest() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -1148,9 +1193,9 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertTrue(settings.configuration(for: .mock).isEnabled)
   }
 
-  func testProviderToggleMissingAPIKeyDoesNotPersistEnabled() async throws {
+  func testProviderToggleMissingAPIKeyDoesNotPersistEnabled() async {
     let panel = MockFloatingPanelPresenter()
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)"))
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -1339,6 +1384,45 @@ final class ControllerInteractionTests: XCTestCase {
     )
   }
 
+  func testDockHideDecisionPreservesVisibleAppSurfaces() {
+    XCTAssertFalse(
+      AppWindowPresenter.shouldHideApplication(
+        desiredPolicy: .accessory,
+        hasVisibleAppSurface: true
+      )
+    )
+    XCTAssertTrue(
+      AppWindowPresenter.shouldHideApplication(
+        desiredPolicy: .accessory,
+        hasVisibleAppSurface: false
+      )
+    )
+    XCTAssertFalse(
+      AppWindowPresenter.shouldHideApplication(
+        desiredPolicy: .regular,
+        hasVisibleAppSurface: false
+      )
+    )
+  }
+
+  func testVisibleAppSurfaceIncludesFloatingPanelLevelWindows() {
+    let floatingPanel = AppWindowPresenter.WindowSnapshot(
+      isVisible: true,
+      identifier: "",
+      title: "LexiRay",
+      isNormalWindowLevel: false
+    )
+    let closingMainWindow = AppWindowPresenter.WindowSnapshot(
+      isVisible: true,
+      identifier: "main",
+      title: "LexiRay",
+      isClosing: true
+    )
+
+    XCTAssertTrue(AppWindowPresenter.hasVisibleAppSurface(in: [floatingPanel]))
+    XCTAssertFalse(AppWindowPresenter.hasVisibleAppSurface(in: [closingMainWindow]))
+  }
+
   func testPendingMainWindowPresentationCancelsWhenAppResigns() async {
     defer {
       AppWindowPresenter.cancelPendingMainWindowPresentation()
@@ -1440,18 +1524,47 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(origin.y, 12)
   }
 
+  func testPermissionMonitorActivationEventRefreshesAppIdentity() async {
+    let applicationCenter = NotificationCenter()
+    let monitor = PermissionStatusMonitor(
+      permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
+      distributedCenter: NotificationCenter(),
+      applicationCenter: applicationCenter,
+      fallbackPollInterval: .seconds(3600),
+      notificationRecheckDelay: .seconds(3600)
+    )
+    defer { monitor.stop() }
+    let identityChecker = MutableAppIdentityChecker(snapshot: .stableForTesting())
+    let controller = makeController(
+      selectionReader: BlockingSelectionReader(),
+      panel: MockFloatingPanelPresenter(),
+      appIdentityChecker: identityChecker,
+      permissionMonitor: monitor
+    )
+    controller.startForTesting()
+    monitor.start()
+    XCTAssertEqual(controller.appIdentity.signatureState, .stable)
+
+    identityChecker.snapshot = unstableAppIdentity()
+    applicationCenter.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+
+    await waitUntil { controller.appIdentity.signatureState == .unstable }
+  }
+
   private func makeController(
     selectionReader: TextSelectionReading,
     panel: MockFloatingPanelPresenter,
     permissions: PermissionChecking = MockPermissionChecker(isAccessibilityTrusted: true),
     hotKeyService: HotKeyRegistering = MockHotKeyService(),
+    appIdentityChecker: AppIdentityChecking = StaticAppIdentityChecker(snapshot: .stableForTesting()),
     pipeline: TranslationPipeline? = nil,
     ocrService: OCRRecognizing? = nil,
     ocrSelectionOverlay: OCRRegionSelecting? = nil,
     historyStore: TranslationHistoryStore? = nil,
-    speechService: SpeechControlling? = nil
+    speechService: SpeechControlling? = nil,
+    permissionMonitor: PermissionStatusMonitor? = nil
   ) -> LexiRayController {
-    let defaults = UserDefaults(suiteName: "LexiRayControllerTests-\(UUID().uuidString)")!
+    let defaults = makeScratchDefaults()
     let settings = SettingsStore(
       defaults: defaults,
       providerFileStore: makeProviderFileStore(),
@@ -1464,26 +1577,24 @@ final class ControllerInteractionTests: XCTestCase {
       selectionService: selectionReader,
       permissionChecker: permissions,
       hotKeyService: hotKeyService,
+      appIdentityChecker: appIdentityChecker,
       floatingPanelFactory: { _ in panel },
       pipeline: pipeline,
       ocrService: ocrService,
       ocrSelectionOverlay: ocrSelectionOverlay,
       historyStore: historyStore ?? makeHistoryStore(),
-      speechService: speechService
+      speechService: speechService,
+      permissionMonitor: permissionMonitor
     )
   }
 
   private func makeProviderFileStore() -> ProviderSettingsFileStore {
-    let fileURL = FileManager.default.temporaryDirectory
-      .appendingPathComponent("LexiRayControllerTests-\(UUID().uuidString)", isDirectory: true)
-      .appendingPathComponent("providers.json", isDirectory: false)
+    let fileURL = makeScratchDirectory().appendingPathComponent("providers.json", isDirectory: false)
     return ProviderSettingsFileStore(fileURL: fileURL)
   }
 
   private func makeHistoryStore() -> TranslationHistoryStore {
-    let fileURL = FileManager.default.temporaryDirectory
-      .appendingPathComponent("LexiRayControllerTests-\(UUID().uuidString)", isDirectory: true)
-      .appendingPathComponent("history.json", isDirectory: false)
+    let fileURL = makeScratchDirectory().appendingPathComponent("history.json", isDirectory: false)
     return TranslationHistoryStore(fileURL: fileURL)
   }
 
@@ -1498,6 +1609,18 @@ final class ControllerInteractionTests: XCTestCase {
       providerID: .mock,
       providerName: "Mock",
       translatedText: text
+    )
+  }
+
+  private func unstableAppIdentity() -> AppIdentitySnapshot {
+    AppIdentitySnapshot(
+      bundleIdentifier: AppConstants.bundleID,
+      bundlePath: "/tmp/LexiRay.app",
+      executablePath: "/tmp/LexiRay.app/Contents/MacOS/LexiRay",
+      signatureState: .unstable,
+      signatureSummary: "unsigned or ad hoc signature",
+      certificateAuthority: nil,
+      duplicateExecutablePaths: []
     )
   }
 
@@ -1623,15 +1746,37 @@ private final class MockHotKeyService: HotKeyRegistering {
 
 private final class MockPermissionChecker: PermissionChecking {
   let isAccessibilityTrusted: Bool
+  let isScreenCaptureTrusted: Bool
   private(set) var promptRequests: [Bool] = []
 
-  init(isAccessibilityTrusted: Bool) {
+  init(isAccessibilityTrusted: Bool, isScreenCaptureTrusted: Bool = false) {
     self.isAccessibilityTrusted = isAccessibilityTrusted
+    self.isScreenCaptureTrusted = isScreenCaptureTrusted
   }
 
   func requestAccessibilityIfNeeded(prompt: Bool) -> Bool {
     promptRequests.append(prompt)
     return isAccessibilityTrusted
+  }
+}
+
+private final class MutableAppIdentityChecker: AppIdentityChecking {
+  var snapshot: AppIdentitySnapshot
+
+  init(snapshot: AppIdentitySnapshot) {
+    self.snapshot = snapshot
+  }
+
+  var currentSnapshot: AppIdentitySnapshot {
+    snapshot
+  }
+}
+
+private struct MockAppIdentityChecker: AppIdentityChecking {
+  let snapshot: AppIdentitySnapshot
+
+  var currentSnapshot: AppIdentitySnapshot {
+    snapshot
   }
 }
 

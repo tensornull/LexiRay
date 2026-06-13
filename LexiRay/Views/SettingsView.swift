@@ -4,12 +4,13 @@ struct DashboardSettingsView: View {
   @Environment(\.scenePhase) private var scenePhase
   @ObservedObject var controller: LexiRayController
   @ObservedObject private var settings: SettingsStore
-  @State private var permissions = PermissionStatus.current
+  @ObservedObject private var permissionMonitor: PermissionStatusMonitor
   @State private var loginItemStatus = LoginItemService.status
 
   init(controller: LexiRayController) {
     self.controller = controller
     settings = controller.settings
+    permissionMonitor = controller.permissionMonitor
   }
 
   var body: some View {
@@ -19,10 +20,14 @@ struct DashboardSettingsView: View {
       hotKeyPanel
       floatingPanel
       historyPanel
+      appIdentityPanel
       permissionPanel
       advancedPanel
     }
     .onAppear(perform: refreshRuntimeState)
+    .onReceive(permissionMonitor.refreshEvents) {
+      refreshLoginItemStatus()
+    }
     .onChange(of: scenePhase) { _, newPhase in
       guard newPhase == .active else {
         return
@@ -124,16 +129,16 @@ struct DashboardSettingsView: View {
       VStack(alignment: .leading, spacing: 10) {
         PermissionSettingsRow(
           title: "Accessibility",
-          detail: permissions.isAccessibilityTrusted ? "Enabled" : "Needed for selected text",
-          isEnabled: permissions.isAccessibilityTrusted,
-          action: PermissionService.openAccessibilitySettings
+          detail: permissionMonitor.status.isAccessibilityTrusted ? "Enabled" : "Needed for selected text",
+          isEnabled: permissionMonitor.status.isAccessibilityTrusted,
+          action: openAccessibilitySettings
         )
 
         PermissionSettingsRow(
           title: "Screen Recording",
-          detail: permissions.isScreenCaptureTrusted ? "Enabled" : "Needed for OCR",
-          isEnabled: permissions.isScreenCaptureTrusted,
-          action: PermissionService.openScreenCaptureSettings
+          detail: permissionMonitor.status.isScreenCaptureTrusted ? "Enabled" : "Needed for OCR",
+          isEnabled: permissionMonitor.status.isScreenCaptureTrusted,
+          action: openScreenCaptureSettings
         )
 
         PermissionSettingsRow(
@@ -143,6 +148,56 @@ struct DashboardSettingsView: View {
           action: PermissionService.openAutomationSettings
         )
       }
+    }
+  }
+
+  private var appIdentityPanel: some View {
+    SettingsSection(title: "App Identity", systemName: appIdentityIconName) {
+      VStack(alignment: .leading, spacing: 10) {
+        HStack(alignment: .top, spacing: 12) {
+          Image(systemName: appIdentityIconName)
+            .foregroundStyle(appIdentityColor)
+
+          VStack(alignment: .leading, spacing: 3) {
+            Text(controller.appIdentity.statusTitle)
+              .font(.body.weight(.medium))
+            Text(controller.appIdentity.signatureSummary)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+
+          Spacer()
+        }
+
+        AppIdentityDetailRow(title: "Authority", value: controller.appIdentity.certificateAuthority ?? "None")
+        AppIdentityDetailRow(title: "Path", value: controller.appIdentity.bundlePath)
+
+        if !controller.appIdentity.duplicateExecutablePaths.isEmpty {
+          Text("Other running copies: \(controller.appIdentity.duplicateExecutablePaths.joined(separator: ", "))")
+            .font(.caption)
+            .foregroundStyle(.orange)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+
+        HStack(spacing: 10) {
+          Button("Open Install Location") {
+            controller.openInstallLocation()
+          }
+          .accessibilityIdentifier("AppIdentityOpenInstallLocationButton")
+
+          Button("Open Privacy Settings") {
+            controller.openPrivacySettings()
+            permissionMonitor.refreshNow()
+          }
+          .accessibilityIdentifier("AppIdentityOpenPrivacySettingsButton")
+
+          Button("Copy Diagnostics") {
+            controller.copyAppDiagnosticsToClipboard()
+          }
+          .accessibilityIdentifier("AppIdentityCopyDiagnosticsButton")
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
 
@@ -197,6 +252,14 @@ struct DashboardSettingsView: View {
     loginItemStatus == .requiresApproval ? Color.orange : Color.secondary
   }
 
+  private var appIdentityIconName: String {
+    controller.appIdentity.blockingIssue == nil ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
+  }
+
+  private var appIdentityColor: Color {
+    controller.appIdentity.blockingIssue == nil ? .green : .orange
+  }
+
   private var translateHotKey: Binding<HotKeyConfiguration> {
     Binding(
       get: { settings.translateHotKey },
@@ -226,28 +289,23 @@ struct DashboardSettingsView: View {
   }
 
   private func refreshRuntimeState() {
-    refreshPermissions()
+    controller.refreshAppIdentity()
+    permissionMonitor.refreshNow()
     refreshLoginItemStatus()
-  }
-
-  private func refreshPermissions() {
-    permissions = .current
   }
 
   private func refreshLoginItemStatus() {
     loginItemStatus = LoginItemService.status
   }
-}
 
-private struct PermissionStatus: Equatable {
-  let isAccessibilityTrusted: Bool
-  let isScreenCaptureTrusted: Bool
+  private func openAccessibilitySettings() {
+    PermissionService.openAccessibilitySettings()
+    permissionMonitor.refreshNow()
+  }
 
-  static var current: PermissionStatus {
-    PermissionStatus(
-      isAccessibilityTrusted: PermissionService.isAccessibilityTrusted,
-      isScreenCaptureTrusted: PermissionService.isScreenCaptureTrusted
-    )
+  private func openScreenCaptureSettings() {
+    PermissionService.openScreenCaptureSettings()
+    permissionMonitor.refreshNow()
   }
 }
 
@@ -335,5 +393,22 @@ private struct PermissionSettingsRow: View {
     }
 
     return isEnabled == true ? .green : .orange
+  }
+}
+
+private struct AppIdentityDetailRow: View {
+  let title: String
+  let value: String
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(title)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      Text(value)
+        .font(.caption)
+        .textSelection(.enabled)
+        .fixedSize(horizontal: false, vertical: true)
+    }
   }
 }

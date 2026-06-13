@@ -194,16 +194,19 @@ struct FloatingPanelView: View {
   }
 
   private func batchView(_ batch: TranslationBatch) -> some View {
-    ScrollView {
-      TranslationBatchResultsView(
-        controller: controller,
-        batch: batch,
-        showsSourcePreview: false,
-        resultLineLimit: nil,
-        copyToastSurface: .floatingPanel
-      )
-      .padding(.trailing, 12)
-      .frame(maxWidth: .infinity, alignment: .topLeading)
+    GeometryReader { proxy in
+      ScrollView {
+        TranslationBatchResultsView(
+          controller: controller,
+          batch: batch,
+          showsSourcePreview: false,
+          resultLineLimit: nil,
+          copyToastSurface: .floatingPanel
+        )
+        .padding(.trailing, 12)
+        .frame(width: max(0, proxy.size.width), alignment: .topLeading)
+      }
+      .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
   }

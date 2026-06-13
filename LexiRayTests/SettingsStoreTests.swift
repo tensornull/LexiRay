@@ -640,16 +640,11 @@ final class SettingsStoreTests: XCTestCase {
   }
 
   private func makeDefaults() throws -> UserDefaults {
-    let suiteName = "LexiRayTests-\(UUID().uuidString)"
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-    defaults.removePersistentDomain(forName: suiteName)
-    return defaults
+    makeScratchDefaults()
   }
 
   private func makeProviderFileStore() -> ProviderSettingsFileStore {
-    let fileURL = FileManager.default.temporaryDirectory
-      .appendingPathComponent("LexiRaySettingsStoreTests-\(UUID().uuidString)", isDirectory: true)
-      .appendingPathComponent("providers.json", isDirectory: false)
+    let fileURL = makeScratchDirectory().appendingPathComponent("providers.json", isDirectory: false)
     return ProviderSettingsFileStore(fileURL: fileURL)
   }
 

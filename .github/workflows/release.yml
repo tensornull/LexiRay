@@ -39,7 +39,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             SWIFT_COMPILATION_MODE=wholemodule
 
-      - name: Build unsigned app
+      - name: Build release app
         run: |
           xcodebuild build \
             -project LexiRay.xcodeproj \
@@ -50,6 +50,18 @@ jobs:
             CONFIGURATION_BUILD_DIR="$PWD/build/release" \
             CODE_SIGNING_ALLOWED=NO \
             SWIFT_COMPILATION_MODE=wholemodule
+
+      - name: Import release signing certificate
+        env:
+          LEXIRAY_RELEASE_CERT_P12_BASE64: ${{ secrets.LEXIRAY_RELEASE_CERT_P12_BASE64 }}
+          LEXIRAY_RELEASE_CERT_PASSWORD: ${{ secrets.LEXIRAY_RELEASE_CERT_PASSWORD }}
+          LEXIRAY_RELEASE_CODE_SIGN_IDENTITY: ${{ vars.LEXIRAY_RELEASE_CODE_SIGN_IDENTITY }}
+        run: ./script/import_release_signing_identity.sh
+
+      - name: Sign release app
+        env:
+          LEXIRAY_RELEASE_CODE_SIGN_IDENTITY: ${{ vars.LEXIRAY_RELEASE_CODE_SIGN_IDENTITY }}
+        run: ./script/sign_release_app.sh build/release/LexiRay.app
 
       - name: Build DMG
         run: |
@@ -63,7 +75,7 @@ jobs:
           test "$APP_VERSION" = "$TAG_VERSION"
 
           hdiutil create -volname "LexiRay" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_PATH"
-          hdiutil verify "$DMG_PATH"
+          ./script/verify_release_dmg.sh "$DMG_PATH" "$TAG_VERSION"
           (cd build && shasum -a 256 "LexiRay-${TAG_VERSION}.dmg" > "LexiRay-${TAG_VERSION}.dmg.sha256")
           test -s "$SHA_PATH"
 
@@ -72,7 +84,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
-          printf 'LexiRay %s.\n\nThis is an unsigned DMG. macOS Gatekeeper may show a trust warning when opening it.\n' "$TAG_VERSION" > build/release-notes.md
+          printf 'LexiRay %s.\n\nThis DMG contains a fixed self-signed, non-notarized app. macOS Gatekeeper may still show a trust warning, but Accessibility and Screen Recording permissions are now bound to a stable code signature.\n' "$TAG_VERSION" > build/release-notes.md
 
           gh release create "$GITHUB_REF_NAME" \
             "build/LexiRay-${TAG_VERSION}.dmg" \
