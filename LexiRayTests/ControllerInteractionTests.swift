@@ -230,22 +230,51 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertLessThanOrEqual(size.height, 410)
   }
 
-  func testSavedFloatingPanelSizeOverridesAutomaticSize() {
+  func testIdlePanelUsesCompactFloatingPanelHeight() {
     let panel = MockFloatingPanelPresenter()
     let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
+
+    let size = FloatingPanelController.contentSize(for: controller)
+
+    XCTAssertLessThanOrEqual(size.width, 680)
+    XCTAssertLessThanOrEqual(size.height, 230)
+  }
+
+  func testSavedFloatingPanelSizeUsesWidthButIgnoresHeight() {
+    let panel = MockFloatingPanelPresenter()
+    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
+    controller.panelState = .result(makeTranslationResult(text: "你好"))
 
     controller.settings.recordFloatingPanelSize(width: 760, height: 520)
 
-    XCTAssertEqual(FloatingPanelController.contentSize(for: controller), NSSize(width: 760, height: 520))
+    let size = FloatingPanelController.contentSize(for: controller)
+
+    XCTAssertEqual(size.width, 760)
+    XCTAssertLessThan(size.height, 520)
   }
 
-  func testSavedFloatingPanelSizeIsClampedToSupportedRange() {
+  func testOversizedSavedFloatingPanelWidthIsIgnoredForIdlePanel() {
     let panel = MockFloatingPanelPresenter()
     let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
 
-    controller.settings.recordFloatingPanelSize(width: 120, height: 120)
+    controller.settings.recordFloatingPanelSize(width: 900, height: 700)
 
-    XCTAssertEqual(FloatingPanelController.contentSize(for: controller), FloatingPanelController.minimumContentSize)
+    let size = FloatingPanelController.contentSize(for: controller)
+
+    XCTAssertLessThanOrEqual(size.width, 680)
+    XCTAssertLessThanOrEqual(size.height, 230)
+  }
+
+  func testSavedFloatingPanelSizeIsClampedToSupportedWidth() {
+    let panel = MockFloatingPanelPresenter()
+    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
+
+    controller.settings.recordFloatingPanelSize(width: 120, height: 520)
+
+    let size = FloatingPanelController.contentSize(for: controller)
+
+    XCTAssertGreaterThanOrEqual(size.width, FloatingPanelController.minimumContentSize.width)
+    XCTAssertLessThan(size.height, 520)
   }
 
   func testLongResultUsesTallerFloatingPanelHeight() {

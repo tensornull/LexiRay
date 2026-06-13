@@ -12,6 +12,7 @@ final class LexiRayController: ObservableObject {
   @Published var panelSourceText = "" {
     didSet {
       updateHistoryNavigationForSourceChange()
+      floatingPanel?.refreshContentLayout()
     }
   }
 
@@ -65,7 +66,7 @@ final class LexiRayController: ObservableObject {
   }
 
   init(
-    settings: SettingsStore = SettingsStore(),
+    settings: SettingsStore = SettingsStore(allowsMockProvider: AppRuntime.allowsMockProvider),
     selectionService: TextSelectionReading = TextSelectionService(),
     permissionChecker: PermissionChecking = SystemPermissionChecker(),
     hotKeyService: HotKeyRegistering = GlobalHotKeyService(),
@@ -387,6 +388,10 @@ final class LexiRayController: ObservableObject {
 
   func hideFloatingPanel() {
     floatingPanel.hide()
+  }
+
+  func refreshFloatingPanelLayout() {
+    floatingPanel.refreshContentLayout()
   }
 
   func showPreviousHistory() -> Bool {

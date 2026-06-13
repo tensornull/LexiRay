@@ -93,9 +93,18 @@ surprises.
       confident iteration on interaction logic.
 - [ ] Performance budgets asserted in GUI scenarios: hotkey→panel visible,
       first provider result latency.
-- [ ] UI detail pass with screenshots as evidence (see Backlog for known
-      issues).
-- [ ] Empty states, error states, motion polish.
+- [x] UI detail pass with screenshots as evidence: floating panel now uses
+      system glass (`NSGlassEffectView` on macOS 26, visual-effect fallback
+      on earlier macOS), 22pt outer radius, lighter inner surfaces, and a
+      constrained top-aligned content layer. Evidence 2026-06-14:
+      L0/L1 green plus 10/10 GUI scenarios PASS; screenshots inspected in
+      `build/ui-artifacts/20260614-011026`.
+- [x] Empty states, error states, motion polish: blank panel no longer shows a
+      large result card, source editor height is content-driven, saved panel
+      height is ignored for automatic layout, and streaming partials resize
+      the panel progressively with coalescing. Evidence 2026-06-14:
+      `panel_blank`, `source_editor`, `history_nav`, `selection_translate`,
+      and `streaming_growth` screenshots inspected.
 
 ## Backlog (known issues, newest first)
 

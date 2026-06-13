@@ -8,7 +8,7 @@ require(
 )
 
 let measuredHeight = panelAXSizes().first?.height ?? panelWindows()[0].height
-require(measuredHeight <= 560, "short floating panel is too tall: \(measuredHeight)")
+require(measuredHeight <= 260, "blank floating panel is too tall: \(measuredHeight)")
 
 snapPanel("panel-blank")
 closePanel()
