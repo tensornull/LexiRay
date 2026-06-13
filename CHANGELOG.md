@@ -7,6 +7,22 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-06-14
+
+### Added
+
+- Added progressive floating panel growth that resizes as streaming partial
+  results arrive, coalescing resizes to keep the motion smooth.
+
+### Changed
+
+- Refreshed the floating panel surface with system glass (on macOS 26, with a
+  visual-effect fallback on earlier macOS), a larger corner radius, and
+  lighter, top-aligned content.
+- Made the source text editor height follow its content between a minimum and
+  maximum, and hid the result area for the blank composer so empty states no
+  longer show a large card.
+
 ## [0.1.3] - 2026-06-13
 
 ### Changed
