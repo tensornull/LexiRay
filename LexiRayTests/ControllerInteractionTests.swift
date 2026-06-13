@@ -64,8 +64,7 @@ final class ControllerInteractionTests: XCTestCase {
     controller.translateCurrentSelection()
     await waitUntil { selectionReader.didStart }
     selectionReader.resume(with: SelectionReadResult(text: nil, source: .unavailable, failureReason: .copyFailed))
-    await Task.yield()
-    await Task.yield()
+    await waitUntil { !panel.events.isEmpty }
 
     XCTAssertEqual(controller.panelState, .idle)
     XCTAssertEqual(controller.panelSourceText, "")
