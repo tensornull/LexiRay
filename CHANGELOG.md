@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-06-13
+
 ### Changed
 
 - Changed release DMGs to require a fixed self-signed app signature so macOS
@@ -20,6 +22,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   refresh while the Settings tab is visible.
 - Blocked Selection and OCR when LexiRay is unsigned, ad hoc signed, or running
   beside another LexiRay copy with a different executable path.
+- Fixed rich translation results clipping at the floating panel's right edge for
+  long inline-code runs and unspaced CJK text.
+- Fixed the OCR selection overlay staying blank until the first drag and the
+  prompt centering on the multi-display union instead of the active screen, and
+  removed drag jank by compositing the overlay with CALayers.
 
 ## [0.1.2] - 2026-06-02
 
