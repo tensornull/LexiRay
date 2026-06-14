@@ -14,6 +14,14 @@ LexiRay is a clean-room macOS selection translation app. The user wants the most
 - Do not commit local `.codex/`, build artifacts, DerivedData, generated Xcode
   projects, xcresults, or release outputs.
 
+## Agent Assets
+
+- Repo-local skills and reusable prompts live under `.agents/`.
+- `.agents/skills/lexiray-install-applications/SKILL.md` is the canonical
+  installed-app preview workflow.
+- `.codex/skills` and `.codex/prompts` are compatibility symlinks only; edit
+  `.agents/skills` and `.agents/prompts` first.
+
 ## Roadmap and Progress
 
 - `ROADMAP.md` is the single source of truth for phases, tasks, status, known
