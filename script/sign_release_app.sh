@@ -9,6 +9,7 @@ fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_PATH="$1"
 IDENTITY_NAME="${LEXIRAY_RELEASE_CODE_SIGN_IDENTITY:-LexiRay Release Self-Signed}"
+KEYCHAIN_PATH="${LEXIRAY_RELEASE_KEYCHAIN_PATH:-$ROOT_DIR/build/release-signing.keychain-db}"
 ENTITLEMENTS_PATH="$ROOT_DIR/LexiRay/Resources/LexiRay.entitlements"
 EXPECTED_BUNDLE_ID="io.github.tensornull.lexiray"
 
@@ -28,13 +29,23 @@ if [[ "$bundle_id" != "$EXPECTED_BUNDLE_ID" ]]; then
   exit 1
 fi
 
-/usr/bin/codesign \
+if [[ ! -f "$KEYCHAIN_PATH" ]]; then
+  echo "Release signing keychain not found: $KEYCHAIN_PATH" >&2
+  echo "Run script/import_release_signing_identity.sh before signing the release app." >&2
+  exit 1
+fi
+
+codesign_args=(
   --force \
   --options runtime \
   --timestamp=none \
   --entitlements "$ENTITLEMENTS_PATH" \
   --sign "$IDENTITY_NAME" \
-  "$APP_PATH"
+  --keychain "$KEYCHAIN_PATH"
+)
+codesign_args+=("$APP_PATH")
+
+/usr/bin/codesign "${codesign_args[@]}"
 
 /usr/bin/codesign --verify --deep --strict --verbose=4 "$APP_PATH"
 signature="$(/usr/bin/codesign -dvvv "$APP_PATH" 2>&1)"
