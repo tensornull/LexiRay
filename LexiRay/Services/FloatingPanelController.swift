@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import SwiftUI
 
 @MainActor
@@ -45,6 +46,7 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   private var pendingResizeTask: Task<Void, Never>?
   private var isMovingProgrammatically = false
   private var isSizingProgrammatically = false
+  private var userContentSizeOverride: NSSize?
 
   init(controller: LexiRayController) {
     self.controller = controller
@@ -60,11 +62,16 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     self.panel = panel
     Self.updatePanelPresentation(panel, isPinned: controller.isPanelPinned)
 
-    let shouldPosition = repositioning || !panel.isVisible
+    let wasVisible = panel.isVisible
+    if !wasVisible {
+      userContentSizeOverride = nil
+    }
+
+    let shouldPosition = repositioning || !wasVisible
     resize(
       panel,
       for: controller,
-      preservingTopLeft: panel.isVisible && !shouldPosition,
+      preservingTopLeft: wasVisible && !shouldPosition,
       animated: false,
       force: true
     )
@@ -88,6 +95,7 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   func hide() {
     pendingResizeTask?.cancel()
     pendingResizeTask = nil
+    userContentSizeOverride = nil
     panel?.orderOut(nil)
     stopDismissMonitors()
   }
@@ -139,6 +147,7 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     panel.hidesOnDeactivate = false
     panel.isOpaque = false
     panel.backgroundColor = .clear
+    panel.hasShadow = false
     panel.delegate = self
     panel.contentView = Self.makeContentView(controller: controller)
     applySizeLimits(panel, for: controller)
@@ -150,12 +159,10 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     let hostingView = NSHostingView(rootView: FloatingPanelView(controller: controller))
 
     if #available(macOS 26.0, *) {
-      let glassView = NSGlassEffectView()
+      let glassView = FloatingPanelGlassEffectView(cornerRadius: cornerRadius)
       glassView.style = .regular
-      glassView.cornerRadius = cornerRadius
-      glassView.tintColor = NSColor.windowBackgroundColor.withAlphaComponent(0.06)
       hostingView.translatesAutoresizingMaskIntoConstraints = false
-      glassView.addSubview(hostingView)
+      glassView.contentView = hostingView
       NSLayoutConstraint.activate([
         hostingView.leadingAnchor.constraint(equalTo: glassView.leadingAnchor),
         hostingView.trailingAnchor.constraint(equalTo: glassView.trailingAnchor),
@@ -353,8 +360,14 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     force: Bool
   ) {
     applySizeLimits(panel, for: controller)
+    let automaticSize = Self.contentSize(for: controller)
+    let targetSize = Self.contentSize(
+      automaticSize,
+      respectingUserOverride: userContentSizeOverride,
+      maximum: Self.maximumContentSize(for: controller)
+    )
     setContentSize(
-      Self.contentSize(for: controller),
+      targetSize,
       for: panel,
       preservingTopLeft: preservingTopLeft,
       animated: animated,
@@ -409,21 +422,9 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
       isMovingProgrammatically = true
     }
 
-    let finish = { [weak self] in
-      guard let self else {
-        return
-      }
-      if marksResize {
-        isSizingProgrammatically = false
-      }
-      if marksMove {
-        isMovingProgrammatically = false
-      }
-    }
-
     guard animated else {
       panel.setFrame(frame, display: true)
-      finish()
+      finishProgrammaticFrameChange(marksResize: marksResize, marksMove: marksMove)
       return
     }
 
@@ -431,8 +432,19 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
       context.duration = 0.14
       context.allowsImplicitAnimation = true
       panel.animator().setFrame(frame, display: true)
-    } completionHandler: {
-      finish()
+    } completionHandler: { [weak self] in
+      Task { @MainActor [weak self] in
+        self?.finishProgrammaticFrameChange(marksResize: marksResize, marksMove: marksMove)
+      }
+    }
+  }
+
+  private func finishProgrammaticFrameChange(marksResize: Bool, marksMove: Bool) {
+    if marksResize {
+      isSizingProgrammatically = false
+    }
+    if marksMove {
+      isMovingProgrammatically = false
     }
   }
 
@@ -455,6 +467,24 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     )
   }
 
+  static func contentSize(
+    _ automaticSize: NSSize,
+    respectingUserOverride userOverride: NSSize?,
+    maximum: NSSize
+  ) -> NSSize {
+    guard let userOverride else {
+      return clampedContentSize(automaticSize, maximum: maximum)
+    }
+
+    return clampedContentSize(
+      NSSize(
+        width: max(automaticSize.width, userOverride.width),
+        height: max(automaticSize.height, userOverride.height)
+      ),
+      maximum: maximum
+    )
+  }
+
   static func panelLevel(isPinned: Bool) -> NSWindow.Level {
     isPinned ? .floating : .normal
   }
@@ -473,7 +503,17 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
 
     switch controller.panelState {
     case .idle:
-      return clampedContentHeight(baseHeight + 8, minimum: 200, maximum: maximumHeight)
+      let providerCount = controller.settings.visibleProviderConfigurations().count
+      let previewHeight = idleProviderPreviewHeight(for: controller)
+      guard previewHeight > 0 else {
+        return clampedContentHeight(baseHeight + 8, minimum: 200, maximum: maximumHeight)
+      }
+
+      return clampedContentHeight(
+        baseHeight + resultSpacing + resultContainerPadding + previewHeight,
+        minimum: providerCount >= 4 ? 360 : 240,
+        maximum: min(460, maximumHeight)
+      )
     case let .loading(state):
       let previewHeight = state.preview.map {
         estimatedTextHeight(
@@ -564,6 +604,17 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     case .loading, .error, .batch, .result:
       return max(automaticWidth, savedWidth)
     }
+  }
+
+  private static func idleProviderPreviewHeight(for controller: LexiRayController) -> CGFloat {
+    let providerCount = controller.settings.visibleProviderConfigurations().count
+    guard providerCount > 0 else {
+      return 0
+    }
+
+    let rowHeight: CGFloat = 36
+    let dividerHeight: CGFloat = 1
+    return CGFloat(providerCount) * rowHeight + CGFloat(max(0, providerCount - 1)) * dividerHeight
   }
 
   private static func widthForText(_ text: String, base: CGFloat) -> CGFloat {
@@ -781,9 +832,19 @@ extension FloatingPanelController: NSWindowDelegate {
       return
     }
 
-    controller?.settings.recordFloatingPanelSize(
-      width: panel.frame.width,
-      height: panel.frame.height
+    guard let controller else {
+      return
+    }
+
+    let contentSize = panel.contentRect(forFrameRect: panel.frame).size
+    userContentSizeOverride = Self.contentSize(
+      contentSize,
+      respectingUserOverride: nil,
+      maximum: Self.maximumContentSize(for: controller)
+    )
+    controller.settings.recordFloatingPanelSize(
+      width: contentSize.width,
+      height: contentSize.height
     )
   }
 
@@ -799,6 +860,49 @@ extension FloatingPanelController: NSWindowDelegate {
     controller?.settings.recordFloatingPanelOrigin(
       x: panel.frame.origin.x,
       y: panel.frame.origin.y
+    )
+  }
+}
+
+@available(macOS 26.0, *)
+private final class FloatingPanelGlassEffectView: NSGlassEffectView {
+  private let panelCornerRadius: CGFloat
+  private var lastMaskSize: NSSize = .zero
+  private let shapeMask = CAShapeLayer()
+
+  init(cornerRadius: CGFloat) {
+    panelCornerRadius = cornerRadius
+    super.init(frame: .zero)
+    self.cornerRadius = cornerRadius
+    wantsLayer = true
+    layer?.cornerRadius = cornerRadius
+    layer?.masksToBounds = true
+    shapeMask.fillColor = NSColor.black.cgColor
+    layer?.mask = shapeMask
+  }
+
+  @available(*, unavailable)
+  required init?(coder _: NSCoder) {
+    nil
+  }
+
+  override func layout() {
+    super.layout()
+    updateShapeMask()
+  }
+
+  private func updateShapeMask() {
+    guard bounds.width > 0, bounds.height > 0, bounds.size != lastMaskSize else {
+      return
+    }
+
+    lastMaskSize = bounds.size
+    shapeMask.frame = bounds
+    shapeMask.path = CGPath(
+      roundedRect: bounds,
+      cornerWidth: panelCornerRadius,
+      cornerHeight: panelCornerRadius,
+      transform: nil
     )
   }
 }
@@ -831,10 +935,12 @@ private final class FloatingPanelVisualEffectView: NSVisualEffectView {
     }
 
     lastMaskSize = bounds.size
-    maskImage = Self.maskImage(size: bounds.size, cornerRadius: panelCornerRadius)
+    maskImage = FloatingPanelCornerMask.image(size: bounds.size, cornerRadius: panelCornerRadius)
   }
+}
 
-  private static func maskImage(size: NSSize, cornerRadius: CGFloat) -> NSImage {
+private enum FloatingPanelCornerMask {
+  static func image(size: NSSize, cornerRadius: CGFloat) -> NSImage {
     let image = NSImage(size: size)
     image.lockFocus()
     NSColor.black.setFill()

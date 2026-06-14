@@ -230,14 +230,15 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertLessThanOrEqual(size.height, 410)
   }
 
-  func testIdlePanelUsesCompactFloatingPanelHeight() {
+  func testIdlePanelUsesCompactProviderPreviewHeight() {
     let panel = MockFloatingPanelPresenter()
     let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
 
     let size = FloatingPanelController.contentSize(for: controller)
 
     XCTAssertLessThanOrEqual(size.width, 680)
-    XCTAssertLessThanOrEqual(size.height, 230)
+    XCTAssertGreaterThanOrEqual(size.height, 360)
+    XCTAssertLessThanOrEqual(size.height, 460)
   }
 
   func testSavedFloatingPanelSizeUsesWidthButIgnoresHeight() {
@@ -262,7 +263,7 @@ final class ControllerInteractionTests: XCTestCase {
     let size = FloatingPanelController.contentSize(for: controller)
 
     XCTAssertLessThanOrEqual(size.width, 680)
-    XCTAssertLessThanOrEqual(size.height, 230)
+    XCTAssertLessThanOrEqual(size.height, 460)
   }
 
   func testSavedFloatingPanelSizeIsClampedToSupportedWidth() {
@@ -275,6 +276,28 @@ final class ControllerInteractionTests: XCTestCase {
 
     XCTAssertGreaterThanOrEqual(size.width, FloatingPanelController.minimumContentSize.width)
     XCTAssertLessThan(size.height, 520)
+  }
+
+  func testManualContentSizeOverridePreventsAutomaticShrink() {
+    let size = FloatingPanelController.contentSize(
+      NSSize(width: 660, height: 360),
+      respectingUserOverride: NSSize(width: 900, height: 620),
+      maximum: NSSize(width: 980, height: 680)
+    )
+
+    XCTAssertEqual(size.width, 900)
+    XCTAssertEqual(size.height, 620)
+  }
+
+  func testManualContentSizeOverrideAllowsAutomaticGrowthAndClampsToMaximum() {
+    let size = FloatingPanelController.contentSize(
+      NSSize(width: 1100, height: 720),
+      respectingUserOverride: NSSize(width: 900, height: 620),
+      maximum: NSSize(width: 980, height: 680)
+    )
+
+    XCTAssertEqual(size.width, 980)
+    XCTAssertEqual(size.height, 680)
   }
 
   func testLongResultUsesTallerFloatingPanelHeight() {
@@ -1360,6 +1383,7 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(SourceTextEditor.textInset.width, 11)
     XCTAssertEqual(SourceTextEditor.textInset.height, 9)
     XCTAssertEqual(SourceTextEditor.lineFragmentPadding, 0)
+    XCTAssertTrue(SourceTextEditor.textColor.isEqual(NSColor.labelColor))
   }
 
   func testFloatingPanelSettingsActionSelectsSettingsAndHidesIfNeeded() {

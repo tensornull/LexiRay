@@ -26,11 +26,6 @@ struct FloatingPanelView: View {
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .background(Color.clear)
-    .overlay {
-      RoundedRectangle(cornerRadius: 22, style: .continuous)
-        .stroke(Color(nsColor: .separatorColor).opacity(0.48), lineWidth: 1)
-    }
-    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     .animation(.easeInOut(duration: 0.16), value: showsResultArea)
     .animation(.easeInOut(duration: 0.16), value: controller.copyToast?.id)
   }
@@ -143,7 +138,7 @@ struct FloatingPanelView: View {
   private var resultArea: some View {
     resultContent
       .padding(10)
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+      .frame(maxWidth: .infinity, maxHeight: resultAreaMaximumHeight, alignment: .topLeading)
       .background(.black.opacity(0.055), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
       .overlay {
         RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -152,16 +147,19 @@ struct FloatingPanelView: View {
   }
 
   private var idleView: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      Image(systemName: "text.viewfinder")
-        .foregroundStyle(.secondary)
-      Text("Ready")
-        .font(.body.weight(.medium))
-      Text("No source text yet.")
-        .font(.callout)
-        .foregroundStyle(.secondary)
+    VStack(alignment: .leading, spacing: 0) {
+      ForEach(Array(standbyProviderConfigurations.enumerated()), id: \.element.id) { index, configuration in
+        ProviderStandbyRow(settings: controller.settings, configuration: configuration)
+
+        if index < standbyProviderConfigurations.count - 1 {
+          Divider()
+            .opacity(0.52)
+            .padding(.leading, 28)
+        }
+      }
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .padding(.vertical, 2)
+    .frame(maxWidth: .infinity, alignment: .topLeading)
   }
 
   private func loadingView(_ state: PanelLoadingState) -> some View {
@@ -374,9 +372,22 @@ struct FloatingPanelView: View {
   private var showsResultArea: Bool {
     switch controller.panelState {
     case .idle:
-      false
+      !standbyProviderConfigurations.isEmpty
     case .loading, .batch, .result, .error:
       true
+    }
+  }
+
+  private var standbyProviderConfigurations: [ProviderConfiguration] {
+    controller.settings.visibleProviderConfigurations()
+  }
+
+  private var resultAreaMaximumHeight: CGFloat? {
+    switch controller.panelState {
+    case .idle:
+      nil
+    case .loading, .batch, .result, .error:
+      .infinity
     }
   }
 
@@ -405,5 +416,89 @@ private struct PanelPill: View {
     .padding(.horizontal, 7)
     .padding(.vertical, 3)
     .background(.quaternary, in: Capsule())
+  }
+}
+
+private struct ProviderStandbyRow: View {
+  let settings: SettingsStore
+  let configuration: ProviderConfiguration
+
+  var body: some View {
+    HStack(alignment: .center, spacing: 10) {
+      ProviderIconView(providerID: configuration.providerID)
+
+      VStack(alignment: .leading, spacing: 2) {
+        Text(configuration.effectiveDisplayName)
+          .font(.callout.weight(.semibold))
+          .lineLimit(1)
+
+        if configuration.hasCustomDisplayName {
+          Text(configuration.providerID.displayName)
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+      }
+
+      Spacer(minLength: 12)
+
+      PanelPill(title: status.title, systemName: status.systemName, color: status.color)
+    }
+    .frame(minHeight: 36, alignment: .center)
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel("\(configuration.effectiveDisplayName), \(status.title)")
+  }
+
+  private var status: ProviderStandbyStatus {
+    guard configuration.isEnabled else {
+      return .off
+    }
+
+    if configuration.providerID.needsAPIKey,
+       !settings.hasAPIKey(forConfigurationID: configuration.id)
+    {
+      return .keyNeeded
+    }
+
+    return .standBy
+  }
+}
+
+private enum ProviderStandbyStatus {
+  case standBy
+  case off
+  case keyNeeded
+
+  var title: String {
+    switch self {
+    case .standBy:
+      "Stand by"
+    case .off:
+      "Off"
+    case .keyNeeded:
+      "Key needed"
+    }
+  }
+
+  var systemName: String {
+    switch self {
+    case .standBy:
+      "checkmark.circle"
+    case .off:
+      "pause.circle"
+    case .keyNeeded:
+      "key.fill"
+    }
+  }
+
+  var color: Color {
+    switch self {
+    case .standBy:
+      .accentColor
+    case .off:
+      .secondary
+    case .keyNeeded:
+      .orange
+    }
   }
 }

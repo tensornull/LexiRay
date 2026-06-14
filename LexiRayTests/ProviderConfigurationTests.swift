@@ -94,9 +94,9 @@ final class ProviderConfigurationTests: XCTestCase {
     let expectedSize = ProviderID.menuIconSize
 
     let officialIcons: [(ProviderID, ProviderMenuIconSource)] = [
-      (.openAIResponses, .asset(name: "OpenAIProviderIcon", isTemplate: true)),
-      (.openAIChatCompletions, .asset(name: "OpenAIProviderIcon", isTemplate: true)),
-      (.anthropicMessages, .asset(name: "AnthropicProviderIcon", isTemplate: true)),
+      (.openAIResponses, .asset(name: "OpenAIProviderIcon", isTemplate: false)),
+      (.openAIChatCompletions, .asset(name: "OpenAIProviderIcon", isTemplate: false)),
+      (.anthropicMessages, .asset(name: "AnthropicProviderIcon", isTemplate: false)),
       (.geminiGenerateContent, .asset(name: "GeminiProviderIcon", isTemplate: false))
     ]
 

@@ -105,6 +105,11 @@ surprises.
       the panel progressively with coalescing. Evidence 2026-06-14:
       `panel_blank`, `source_editor`, `history_nav`, `selection_translate`,
       and `streaming_growth` screenshots inspected.
+- [x] Floating panel installed-preview polish follow-up: idle provider standby
+      preview, current-session manual resize preservation, dynamic
+      source-editor text color, and non-template colored provider icons.
+      Evidence 2026-06-14: L0/L1 green plus 11/11 GUI scenarios PASS;
+      screenshots inspected in `build/ui-artifacts/20260614-112129`.
 
 ## Backlog (known issues, newest first)
 
