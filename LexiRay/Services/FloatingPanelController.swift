@@ -883,7 +883,7 @@ private final class FloatingPanelGlassEffectView: NSGlassEffectView {
 
   @available(*, unavailable)
   required init?(coder _: NSCoder) {
-    nil
+    fatalError("init(coder:) has not been implemented")
   }
 
   override func layout() {
