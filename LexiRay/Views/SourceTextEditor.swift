@@ -8,6 +8,10 @@ struct SourceTextEditor: View {
 
   static let lineFragmentPadding: CGFloat = 0
 
+  static var textColor: NSColor {
+    .labelColor
+  }
+
   @Binding var text: String
   let placeholder: String
   var minHeight: CGFloat = 56
@@ -97,6 +101,9 @@ private struct SourceTextView: NSViewRepresentable {
     textView.historyNavigationHandler = { [coordinator = context.coordinator] direction in
       coordinator.handleHistoryNavigation(direction)
     }
+    textView.appearanceDidChange = { [coordinator = context.coordinator] textView in
+      coordinator.applyTextAttributes(to: textView)
+    }
     textView.contentHeightDidChange = { [coordinator = context.coordinator, weak textView] in
       guard let textView else {
         return
@@ -166,7 +173,7 @@ private struct SourceTextView: NSViewRepresentable {
   }
 
   private static var textColor: NSColor {
-    NSColor(calibratedWhite: 0.93, alpha: 1)
+    SourceTextEditor.textColor
   }
 
   private static func textAttributes() -> [NSAttributedString.Key: Any] {
@@ -260,8 +267,9 @@ private struct SourceTextView: NSViewRepresentable {
       parent.onMeasuredHeightChange(measuredHeight)
     }
 
-    private func applyTextAttributes(to textView: NSTextView) {
+    func applyTextAttributes(to textView: NSTextView) {
       let textAttributes = SourceTextView.textAttributes()
+      textView.textColor = SourceTextView.textColor
       textView.typingAttributes = textAttributes
       if let textStorage = textView.textStorage, textStorage.length > 0 {
         textStorage.addAttributes(textAttributes, range: NSRange(location: 0, length: textStorage.length))
@@ -275,6 +283,7 @@ private struct SourceTextView: NSViewRepresentable {
 private final class SourceTextNSTextView: NSTextView {
   var historyNavigationHandler: ((SourceTextHistoryDirection) -> Bool)?
   var contentHeightDidChange: (() -> Void)?
+  var appearanceDidChange: ((SourceTextNSTextView) -> Void)?
 
   override func layout() {
     super.layout()
@@ -293,6 +302,11 @@ private final class SourceTextNSTextView: NSTextView {
     }
 
     super.keyDown(with: event)
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    appearanceDidChange?(self)
   }
 }
 

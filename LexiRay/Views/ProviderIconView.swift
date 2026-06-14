@@ -29,18 +29,14 @@ struct ProviderIconView: View {
     switch providerID.iconKind {
     case .openAI:
       Image("OpenAIProviderIcon")
-        .renderingMode(.template)
         .resizable()
         .scaledToFit()
-        .foregroundStyle(.primary)
         .frame(width: 17, height: 17)
         .accessibilityLabel("OpenAI")
     case .anthropic:
       Image("AnthropicProviderIcon")
-        .renderingMode(.template)
         .resizable()
         .scaledToFit()
-        .foregroundStyle(.primary)
         .frame(width: 17, height: 17)
         .accessibilityLabel("Anthropic")
     case .gemini:

@@ -13,9 +13,9 @@ extension ProviderID {
   var menuIconSource: ProviderMenuIconSource {
     switch iconKind {
     case .openAI:
-      .asset(name: "OpenAIProviderIcon", isTemplate: true)
+      .asset(name: "OpenAIProviderIcon", isTemplate: false)
     case .anthropic:
-      .asset(name: "AnthropicProviderIcon", isTemplate: true)
+      .asset(name: "AnthropicProviderIcon", isTemplate: false)
     case .gemini:
       .asset(name: "GeminiProviderIcon", isTemplate: false)
     case let .system(systemName):

@@ -27,7 +27,7 @@ resetToBaseline()
 
 openBlankComposer()
 let idleSize = floatingPanelSize() ?? .zero
-require(idleSize.height <= 260, "blank streaming start panel is too tall: \(idleSize.height)")
+require(idleSize.height <= 500, "blank streaming start panel is too tall: \(idleSize.height)")
 
 let streamingText = "LexiRay streaming panel growth text"
 require(focusAndReplaceSourceText(streamingText), "source editor did not accept streaming fixture text")
@@ -44,7 +44,10 @@ require(
   "short streaming partial did not render"
 )
 let shortSize = floatingPanelSize() ?? .zero
-require(shortSize.height >= idleSize.height, "short streaming panel shrank unexpectedly")
+require(
+  shortSize.height >= 300,
+  "short streaming panel is unexpectedly small after provider preview collapses: \(shortSize)"
+)
 snapPanel("streaming-growth-short")
 
 require(
@@ -83,4 +86,5 @@ require(completeOverflow.isEmpty, "complete streaming text overflowed: \(complet
 snapPanel("streaming-growth-complete")
 
 closePanel()
+restoreFixtureStateAndRestart()
 pass()

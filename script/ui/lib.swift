@@ -11,6 +11,14 @@ let appBundle = CommandLine.arguments[1]
 let workDir = CommandLine.arguments[2]
 let shotDir = CommandLine.arguments[3]
 let scenarioName = CommandLine.arguments[4]
+let repoRoot = CommandLine.arguments.count > 5 ? CommandLine.arguments[5] : URL(fileURLWithPath: appBundle)
+  .deletingLastPathComponent()
+  .deletingLastPathComponent()
+  .deletingLastPathComponent()
+  .deletingLastPathComponent()
+  .deletingLastPathComponent()
+  .deletingLastPathComponent()
+  .path
 
 let lexirayBundleID = "io.github.tensornull.lexiray"
 let seededHistoryText = "LexiRay seeded history text."
@@ -19,6 +27,10 @@ let selectionSmokeText = "LexiRay smoke selection text."
 let appExecutablePrefix = appBundle + "/Contents/MacOS/"
 let lexirayHomeURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".lexiray", isDirectory: true)
 let providersFileURL = lexirayHomeURL.appendingPathComponent("providers.json")
+let historyFileURL = lexirayHomeURL.appendingPathComponent("history.json")
+let fixtureDirectoryURL = URL(fileURLWithPath: repoRoot).appendingPathComponent("script/ui/fixtures", isDirectory: true)
+let fixtureProvidersFileURL = fixtureDirectoryURL.appendingPathComponent("providers.json")
+let fixtureHistoryFileURL = fixtureDirectoryURL.appendingPathComponent("history.json")
 
 // MARK: - Target app resolution
 // Two LexiRay copies can run at once (workspace build + installed release).
@@ -470,19 +482,75 @@ func scroll(at point: CGPoint, deltaY: Int32) {
 /// Snapshot evidence must show the asserted UI, not just satisfy AX queries
 /// against offscreen elements.
 func scrollMainWindowToReveal(identifier: String, maxAttempts: Int = 30) -> Bool {
+  let targetIsVisible = {
+    guard let windowInfo = lexirayMainWindowInfo() else {
+      return false
+    }
+    let window = windowBounds(windowInfo)
+    guard let frame = axElement(identifier: identifier).flatMap(axFrame) else {
+      return false
+    }
+    return frame.minY >= window.minY && frame.maxY <= window.maxY
+  }
+
+  if targetIsVisible() {
+    return true
+  }
+
+  if mainWindowScrollBar() != nil {
+    for value in stride(from: 0.0, through: 1.0, by: 0.08) {
+      _ = setMainWindowScrollValue(value)
+      RunLoop.current.run(until: Date().addingTimeInterval(0.12))
+      if targetIsVisible() {
+        return true
+      }
+    }
+  }
+
   for _ in 0 ..< maxAttempts {
     guard let windowInfo = lexirayMainWindowInfo() else {
       return false
     }
     let window = windowBounds(windowInfo)
-    if let frame = axElement(identifier: identifier).flatMap(axFrame),
-       frame.minY >= window.minY, frame.maxY <= window.maxY {
+    if targetIsVisible() {
       return true
     }
-    scroll(at: CGPoint(x: window.midX, y: window.midY), deltaY: -160)
+
+    let frame = axElement(identifier: identifier).flatMap(axFrame)
+    var deltaY: Int32 = 200
+    if let frame, frame.maxY < window.minY {
+      deltaY = -200
+    }
+    scroll(at: CGPoint(x: window.midX, y: window.midY), deltaY: deltaY)
     RunLoop.current.run(until: Date().addingTimeInterval(0.15))
   }
   return false
+}
+
+func mainWindowScrollBar() -> AXUIElement? {
+  guard let windowInfo = lexirayMainWindowInfo() else {
+    return nil
+  }
+  let window = windowBounds(windowInfo)
+  return lexirayAXElements().first { element in
+    guard axString(element, kAXRoleAttribute) == "AXScrollBar",
+          axString(element, kAXOrientationAttribute) == "AXVerticalOrientation",
+          let frame = axFrame(element)
+    else {
+      return false
+    }
+
+    return frame.intersects(window) && frame.minX >= window.maxX - 40
+  }
+}
+
+func setMainWindowScrollValue(_ value: Double) -> Bool {
+  guard let scrollBar = mainWindowScrollBar() else {
+    return false
+  }
+
+  let clampedValue = NSNumber(value: min(max(value, 0), 1))
+  return AXUIElementSetAttributeValue(scrollBar, kAXValueAttribute as CFString, clampedValue) == .success
 }
 
 func modifierKeyCodes(_ flags: CGEventFlags) -> [CGKeyCode] {
@@ -749,6 +817,19 @@ func resetToBaseline() {
   if !panelWindows().isEmpty || !lexirayMainWindows().isEmpty {
     fail("could not reset to baseline; LexiRay windows are stuck open")
   }
+}
+
+func restoreFixtureStateAndRestart() {
+  do {
+    try FileManager.default.createDirectory(at: lexirayHomeURL, withIntermediateDirectories: true)
+    try Data(contentsOf: fixtureProvidersFileURL).write(to: providersFileURL, options: .atomic)
+    try Data(contentsOf: fixtureHistoryFileURL).write(to: historyFileURL, options: .atomic)
+  } catch {
+    fail("could not restore UI fixture state: \(error.localizedDescription)")
+  }
+
+  restartWorkspaceApp()
+  resetToBaseline()
 }
 
 guardAgainstShieldedSession()

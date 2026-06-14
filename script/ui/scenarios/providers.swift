@@ -2,7 +2,11 @@
 // leftover language-direction pill.
 openMainWindow()
 
-require(pressLexiRayElement(identifier: "SidebarProviders"), "providers sidebar item was not reachable")
+guard let providersFrame = axElement(identifier: "SidebarProviders").flatMap(axFrame) else {
+  fail("providers sidebar item was not reachable")
+}
+click(CGPoint(x: providersFrame.minX + 90, y: providersFrame.midY))
+RunLoop.current.run(until: Date().addingTimeInterval(0.2))
 require(
   waitFor("provider header and add button", timeout: 5, {
     axElement(identifier: "ProviderHeaderTitle") != nil && axElement(identifier: "ProviderAddMenuButton") != nil

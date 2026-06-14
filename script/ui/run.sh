@@ -23,7 +23,7 @@ LEXIRAY_HOME="$HOME/.lexiray"
 PROVIDERS_FILE="$LEXIRAY_HOME/providers.json"
 HISTORY_FILE="$LEXIRAY_HOME/history.json"
 
-SCENARIO_ORDER=(launch providers settings_identity panel_blank source_editor history_nav rich_result_wrap pin selection_translate streaming_growth)
+SCENARIO_ORDER=(launch providers settings_identity panel_blank source_editor history_nav rich_result_wrap pin selection_translate manual_resize_preserved streaming_growth)
 
 cd "$ROOT_DIR"
 
@@ -228,7 +228,7 @@ for name in "${REQUESTED[@]}"; do
   echo "--- scenario: $name"
   set +e
   cat "$UI_DIR/lib.swift" "$SCENARIO_DIR/$name.swift" |
-    swift - "$APP_BUNDLE" "$WORK_DIR" "$ARTIFACT_DIR" "$name"
+    swift - "$APP_BUNDLE" "$WORK_DIR" "$ARTIFACT_DIR" "$name" "$ROOT_DIR"
   status=$?
   set -e
 
