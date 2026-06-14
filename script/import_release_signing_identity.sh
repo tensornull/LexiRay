@@ -49,10 +49,10 @@ done < <(/usr/bin/security list-keychains -d user | /usr/bin/sed 's/[ "]//g')
   -k "$KEYCHAIN_PASSWORD" \
   "$KEYCHAIN_PATH" >/dev/null
 
-if ! /usr/bin/security find-identity -p codesigning -v "$KEYCHAIN_PATH" |
+if ! /usr/bin/security find-identity -p codesigning "$KEYCHAIN_PATH" |
   /usr/bin/grep -F "\"$IDENTITY_NAME\"" >/dev/null; then
   echo "Imported certificate, but did not find signing identity \"$IDENTITY_NAME\"." >&2
-  /usr/bin/security find-identity -p codesigning -v "$KEYCHAIN_PATH" >&2
+  /usr/bin/security find-identity -p codesigning "$KEYCHAIN_PATH" >&2
   exit 1
 fi
 
