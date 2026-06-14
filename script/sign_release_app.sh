@@ -29,16 +29,20 @@ if [[ "$bundle_id" != "$EXPECTED_BUNDLE_ID" ]]; then
   exit 1
 fi
 
+if [[ ! -f "$KEYCHAIN_PATH" ]]; then
+  echo "Release signing keychain not found: $KEYCHAIN_PATH" >&2
+  echo "Run script/import_release_signing_identity.sh before signing the release app." >&2
+  exit 1
+fi
+
 codesign_args=(
   --force \
   --options runtime \
   --timestamp=none \
   --entitlements "$ENTITLEMENTS_PATH" \
-  --sign "$IDENTITY_NAME"
+  --sign "$IDENTITY_NAME" \
+  --keychain "$KEYCHAIN_PATH"
 )
-if [[ -f "$KEYCHAIN_PATH" ]]; then
-  codesign_args+=(--keychain "$KEYCHAIN_PATH")
-fi
 codesign_args+=("$APP_PATH")
 
 /usr/bin/codesign "${codesign_args[@]}"
