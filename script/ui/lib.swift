@@ -790,9 +790,7 @@ func guardAgainstForeignCopies() {
   }
 }
 
-func resetToBaseline() {
-  ensureAppRunning()
-
+func closeVisibleLexiRayWindows() {
   // Dismiss any lingering context menu before touching windows; an open menu
   // swallows synthetic keyboard and hotkey events.
   press(53)
@@ -813,9 +811,23 @@ func resetToBaseline() {
     _ = closeLexiRayMainWindow()
     RunLoop.current.run(until: Date().addingTimeInterval(0.4))
   }
+}
+
+func resetToBaseline() {
+  ensureAppRunning()
+  closeVisibleLexiRayWindows()
 
   if !panelWindows().isEmpty || !lexirayMainWindows().isEmpty {
-    fail("could not reset to baseline; LexiRay windows are stuck open")
+    terminateWorkspaceApp()
+    ensureAppRunning()
+    closeVisibleLexiRayWindows()
+  }
+
+  if !panelWindows().isEmpty || !lexirayMainWindows().isEmpty {
+    fail(
+      "could not reset to baseline; LexiRay windows are stuck open "
+        + "(panels=\(panelWindows().count), main=\(lexirayMainWindows().count))"
+    )
   }
 }
 

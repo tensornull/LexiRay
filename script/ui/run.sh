@@ -185,6 +185,15 @@ stop_workspace_app() {
   done
 }
 
+seed_fixture_state() {
+  stop_workspace_app
+  defaults delete "$DEFAULTS_DOMAIN" >/dev/null 2>&1 || true
+  mkdir -p "$LEXIRAY_HOME"
+  cp "$UI_DIR/fixtures/providers.json" "$PROVIDERS_FILE"
+  cp "$UI_DIR/fixtures/history.json" "$HISTORY_FILE"
+  chmod 600 "$PROVIDERS_FILE" "$HISTORY_FILE"
+}
+
 cleanup() {
   stop_workspace_app
   restore_user_state
@@ -213,18 +222,13 @@ rm -f "$STATE_BACKUP/providers.json" "$STATE_BACKUP/history.json" "$STATE_BACKUP
 defaults export "$DEFAULTS_DOMAIN" "$STATE_BACKUP/defaults.plist" 2>/dev/null || true
 touch "$PENDING_MARKER"
 
-defaults delete "$DEFAULTS_DOMAIN" >/dev/null 2>&1 || true
-mkdir -p "$LEXIRAY_HOME"
-cp "$UI_DIR/fixtures/providers.json" "$PROVIDERS_FILE"
-cp "$UI_DIR/fixtures/history.json" "$HISTORY_FILE"
-chmod 600 "$PROVIDERS_FILE" "$HISTORY_FILE"
-
 # --- Run scenarios.
 declare -a RESULTS=()
 FAILED=0
 BLOCKED=0
 
 for name in "${REQUESTED[@]}"; do
+  seed_fixture_state
   echo "--- scenario: $name"
   set +e
   cat "$UI_DIR/lib.swift" "$SCENARIO_DIR/$name.swift" |

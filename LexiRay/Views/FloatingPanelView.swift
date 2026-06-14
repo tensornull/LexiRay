@@ -2,7 +2,13 @@ import SwiftUI
 
 struct FloatingPanelView: View {
   @ObservedObject var controller: LexiRayController
+  @ObservedObject private var settings: SettingsStore
   @Environment(\.openWindow) private var openWindow
+
+  init(controller: LexiRayController) {
+    _controller = ObservedObject(wrappedValue: controller)
+    _settings = ObservedObject(wrappedValue: controller.settings)
+  }
 
   var body: some View {
     ZStack(alignment: .top) {
@@ -28,6 +34,12 @@ struct FloatingPanelView: View {
     .background(Color.clear)
     .animation(.easeInOut(duration: 0.16), value: showsResultArea)
     .animation(.easeInOut(duration: 0.16), value: controller.copyToast?.id)
+    .onReceive(settings.$providerConfigurations) { _ in
+      refreshLayoutForStandbyProviderChanges()
+    }
+    .onReceive(settings.$apiKeyRevision) { _ in
+      refreshLayoutForStandbyProviderChanges()
+    }
   }
 
   private var header: some View {
@@ -147,19 +159,22 @@ struct FloatingPanelView: View {
   }
 
   private var idleView: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      ForEach(Array(standbyProviderConfigurations.enumerated()), id: \.element.id) { index, configuration in
-        ProviderStandbyRow(settings: controller.settings, configuration: configuration)
+    ScrollView {
+      VStack(alignment: .leading, spacing: 0) {
+        ForEach(Array(standbyProviderConfigurations.enumerated()), id: \.element.id) { index, configuration in
+          ProviderStandbyRow(settings: settings, configuration: configuration)
 
-        if index < standbyProviderConfigurations.count - 1 {
-          Divider()
-            .opacity(0.52)
-            .padding(.leading, 28)
+          if index < standbyProviderConfigurations.count - 1 {
+            Divider()
+              .opacity(0.52)
+              .padding(.leading, 28)
+          }
         }
       }
+      .padding(.vertical, 2)
+      .frame(maxWidth: .infinity, alignment: .topLeading)
     }
-    .padding(.vertical, 2)
-    .frame(maxWidth: .infinity, alignment: .topLeading)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
   }
 
   private func loadingView(_ state: PanelLoadingState) -> some View {
@@ -379,13 +394,13 @@ struct FloatingPanelView: View {
   }
 
   private var standbyProviderConfigurations: [ProviderConfiguration] {
-    controller.settings.visibleProviderConfigurations()
+    settings.visibleProviderConfigurations()
   }
 
   private var resultAreaMaximumHeight: CGFloat? {
     switch controller.panelState {
     case .idle:
-      nil
+      .infinity
     case .loading, .batch, .result, .error:
       .infinity
     }
@@ -397,6 +412,14 @@ struct FloatingPanelView: View {
 
   private var sourceEditorMaximumHeight: CGFloat {
     controller.isExpanded ? 240 : 150
+  }
+
+  private func refreshLayoutForStandbyProviderChanges() {
+    guard case .idle = controller.panelState else {
+      return
+    }
+
+    controller.refreshFloatingPanelLayout()
   }
 }
 
