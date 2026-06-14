@@ -7,12 +7,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
-## [0.1.4] - 2026-06-14
+## [0.2.0] - 2026-06-14
 
 ### Added
 
 - Added progressive floating panel growth that resizes as streaming partial
   results arrive, coalescing resizes to keep the motion smooth.
+- Added a provider standby preview to the blank floating panel so configured
+  providers and setup status are visible before entering source text.
+- Added a GUI scenario for preserving a manually resized floating panel through
+  the current panel session.
 
 ### Changed
 
@@ -22,6 +26,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Made the source text editor height follow its content between a minimum and
   maximum, and hid the result area for the blank composer so empty states no
   longer show a large card.
+- Preserved manual floating panel resize as a current-session lower bound while
+  still allowing automatic growth for larger streaming or result content.
+- Updated source text color to follow the effective macOS appearance.
+- Updated OpenAI and Anthropic provider icons to render in their official
+  colors in provider rows and menus.
 
 ## [0.1.3] - 2026-06-13
 
