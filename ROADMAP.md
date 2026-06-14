@@ -21,7 +21,7 @@ surprises.
       workflow). Evidence 2026-06-11: L0-L3 green (206 unit tests), 8/8 GUI
       scenarios PASS including the new `settings_identity` scenario, all
       screenshots inspected.
-- [ ] Release 0.1.3 with the fixed release certificate; replace the
+- [ ] Release 0.2.0 with the fixed release certificate; replace the
       `LexiRay Local Development`-signed copy currently in `/Applications`
       so the installed app has the long-term stable TCC identity.
 - [x] Replace 1s permission polling with event-driven refresh
