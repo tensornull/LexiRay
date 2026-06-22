@@ -7,6 +7,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-22
+
+### Fixed
+
+- LexiRay no longer takes a Dock slot. It now runs as a menu bar background
+  agent (`LSUIElement`) and launches straight into the menu bar without
+  auto-opening the main window, so the Dock icon stays hidden even while the
+  Settings window is open. The Dock icon only returns as a fallback when the
+  menu bar icon is turned off.
+- The floating panel keeps a consistent width and baseline height across the
+  idle, translating, and translated states. It now opens at one size and only
+  grows when the content needs more room, instead of jumping in width and
+  height between states.
+
 ## [0.2.0] - 2026-06-14
 
 ### Added

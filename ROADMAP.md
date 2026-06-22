@@ -126,6 +126,11 @@ surprises.
 
 ## Decision log
 
+- 2026-06-15: Release artifacts are built, signed, verified, and uploaded from
+  the local tagged checkout via `script/publish_release.sh`; GitHub Release
+  workflow only validates uploaded assets and checksums, so long CodeQL/Actions
+  waits should be handed off with run URLs and resume commands instead of
+  synchronous polling.
 - 2026-06-11: GUI verification standardized on `script/ui/run.sh` scenarios
   (AX-driven, screenshot evidence). Computer Use stays as the final layer for
   what scenarios cannot reach.

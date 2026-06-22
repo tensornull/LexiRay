@@ -1,93 +1,53 @@
-name: Release
+name: Release Asset Check
 
 on:
-  push:
-    tags:
-      - "v*"
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version without leading v, for example 0.2.0"
+        required: true
+        type: string
 
 jobs:
-  release:
-    runs-on: macos-26
+  verify-release-assets:
+    runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
 
     steps:
+      - name: Resolve release version
+        id: release
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            tag="${{ github.event.release.tag_name }}"
+          else
+            version="${{ inputs.version }}"
+            if [[ "$version" == v* ]]; then
+              tag="$version"
+            else
+              tag="v$version"
+            fi
+          fi
+
+          version="${tag#v}"
+          if [[ -z "$version" || "$tag" != v* ]]; then
+            echo "Release tags must use v<version>, got: $tag" >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.release.outputs.tag }}
 
-      - name: Select Xcode
-        run: |
-          sudo xcode-select -s /Applications/Xcode.app
-          xcodebuild -version
-
-      - name: Install tools
-        run: brew install xcodegen swiftformat
-
-      - name: Generate project
-        run: xcodegen generate
-
-      - name: SwiftFormat lint
-        run: swiftformat LexiRay LexiRayTests Package.swift --lint
-
-      - name: Test
-        run: |
-          xcodebuild test \
-            -project LexiRay.xcodeproj \
-            -scheme LexiRay \
-            -configuration Debug \
-            -destination 'platform=macOS' \
-            CODE_SIGNING_ALLOWED=NO \
-            SWIFT_COMPILATION_MODE=wholemodule
-
-      - name: Build release app
-        run: |
-          xcodebuild build \
-            -project LexiRay.xcodeproj \
-            -scheme LexiRay \
-            -configuration Release \
-            -destination 'platform=macOS' \
-            -derivedDataPath build/DerivedData \
-            CONFIGURATION_BUILD_DIR="$PWD/build/release" \
-            CODE_SIGNING_ALLOWED=NO \
-            SWIFT_COMPILATION_MODE=wholemodule
-
-      - name: Import release signing certificate
-        env:
-          LEXIRAY_RELEASE_CERT_P12_BASE64: ${{ secrets.LEXIRAY_RELEASE_CERT_P12_BASE64 }}
-          LEXIRAY_RELEASE_CERT_PASSWORD: ${{ secrets.LEXIRAY_RELEASE_CERT_PASSWORD }}
-          LEXIRAY_RELEASE_CODE_SIGN_IDENTITY: ${{ vars.LEXIRAY_RELEASE_CODE_SIGN_IDENTITY }}
-        run: ./script/import_release_signing_identity.sh
-
-      - name: Sign release app
-        env:
-          LEXIRAY_RELEASE_CODE_SIGN_IDENTITY: ${{ vars.LEXIRAY_RELEASE_CODE_SIGN_IDENTITY }}
-        run: ./script/sign_release_app.sh build/release/LexiRay.app
-
-      - name: Build DMG
-        run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          APP_PATH="build/release/LexiRay.app"
-          DMG_PATH="build/LexiRay-${TAG_VERSION}.dmg"
-          SHA_PATH="build/LexiRay-${TAG_VERSION}.dmg.sha256"
-
-          test -d "$APP_PATH"
-          APP_VERSION="$(plutil -extract CFBundleShortVersionString raw -o - "$APP_PATH/Contents/Info.plist")"
-          test "$APP_VERSION" = "$TAG_VERSION"
-
-          hdiutil create -volname "LexiRay" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_PATH"
-          ./script/verify_release_dmg.sh "$DMG_PATH" "$TAG_VERSION"
-          (cd build && shasum -a 256 "LexiRay-${TAG_VERSION}.dmg" > "LexiRay-${TAG_VERSION}.dmg.sha256")
-          test -s "$SHA_PATH"
-
-      - name: Upload GitHub Release
+      - name: Verify published release assets
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          printf 'LexiRay %s.\n\nThis DMG contains a fixed self-signed, non-notarized app. macOS Gatekeeper may still show a trust warning, but Accessibility and Screen Recording permissions are now bound to a stable code signature.\n' "$TAG_VERSION" > build/release-notes.md
-
-          gh release create "$GITHUB_REF_NAME" \
-            "build/LexiRay-${TAG_VERSION}.dmg" \
-            "build/LexiRay-${TAG_VERSION}.dmg.sha256" \
-            --title "LexiRay ${TAG_VERSION}" \
-            --notes-file build/release-notes.md
+        run: ./script/verify_github_release_assets.sh "${{ steps.release.outputs.version }}"

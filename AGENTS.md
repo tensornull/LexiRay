@@ -252,9 +252,14 @@ checks, or real UI acceptance when the changed behavior is visible.
   the user explicitly asks for a main/release operation.
 - Public releases use PR flow: prepare on `dev`, open PR to `main`, wait for
   `build-test` and `Analyze Swift`, merge only after checks pass, wait for main
-  checks, then push `v<version>`.
+  checks, then push `v<version>`. If GitHub checks are slow, report run URLs and
+  resume commands instead of burning an interactive session on long polling.
 - Before tagging a release, run `./script/release_check.sh <version>` from a
   clean worktree.
+- Release artifacts are built, signed, verified, and uploaded from the local
+  tagged checkout with `./script/publish_release.sh <version>`. The GitHub
+  Release workflow only validates uploaded assets and checksums; do not rely on
+  GitHub runners as the default DMG builder.
 - Release artifacts are fixed self-signed, non-notarized DMGs. README and
   release notes must say that macOS Gatekeeper may warn and users should verify
   the `.sha256` file.
