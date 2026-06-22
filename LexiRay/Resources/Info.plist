@@ -20,6 +20,8 @@
   <string>6</string>
   <key>LSMinimumSystemVersion</key>
   <string>15.0</string>
+  <key>LSUIElement</key>
+  <true/>
   <key>NSAppleEventsUsageDescription</key>
   <string>LexiRay uses browser automation only to read the currently selected text when Accessibility cannot provide it.</string>
   <key>NSAccessibilityUsageDescription</key>

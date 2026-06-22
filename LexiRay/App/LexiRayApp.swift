@@ -17,7 +17,7 @@ struct LexiRayApp: App {
         }
     }
     .defaultSize(width: 820, height: 560)
-    .defaultLaunchBehavior(.presented)
+    .defaultLaunchBehavior(.suppressed)
 
     MenuBarExtra("LexiRay", systemImage: "translate", isInserted: showsMenuBarIcon) {
       MenuBarView(controller: controller)
