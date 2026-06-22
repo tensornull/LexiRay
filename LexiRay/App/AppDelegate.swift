@@ -4,7 +4,9 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationDidFinishLaunching(_: Notification) {
     installApplicationIcon()
-    AppWindowPresenter.showDockAndActivate()
+    AppWindowPresenter.applyActivationPolicy(
+      showsMenuBarIcon: LexiRayController.shared.settings.showsMenuBarIcon
+    )
 
     guard !AppRuntime.isRunningTests else {
       return
@@ -19,7 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows _: Bool) -> Bool {
-    AppWindowPresenter.showDockAndActivate()
+    AppWindowPresenter.activateApp()
     AppWindowPresenter.bringMainWindowToFrontSoon()
     return true
   }

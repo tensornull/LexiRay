@@ -34,12 +34,19 @@ enum AppWindowPresenter {
     }
   }
 
-  static func showDockAndActivate() {
-    if NSApp.activationPolicy() != .regular {
-      NSApp.setActivationPolicy(.regular)
-    }
+  static func activateApp() {
     NSApp.unhide(nil)
     NSApp.activate(ignoringOtherApps: true)
+  }
+
+  static func applyActivationPolicy(showsMenuBarIcon: Bool) {
+    let desiredPolicy = activationPolicy(
+      hasVisibleRegularWindows: hasVisibleRegularWindows(),
+      showsMenuBarIcon: showsMenuBarIcon
+    )
+    if NSApp.activationPolicy() != desiredPolicy {
+      NSApp.setActivationPolicy(desiredPolicy)
+    }
   }
 
   static func hideDockIfNoRegularWindowsSoon(showsMenuBarIcon: Bool) {
@@ -51,10 +58,14 @@ enum AppWindowPresenter {
   }
 
   static func activationPolicy(
-    hasVisibleRegularWindows: Bool,
+    hasVisibleRegularWindows _: Bool,
     showsMenuBarIcon: Bool
   ) -> NSApplication.ActivationPolicy {
-    hasVisibleRegularWindows || !showsMenuBarIcon ? .regular : .accessory
+    // Background tool: when the menu bar icon is available it stays out of the
+    // Dock entirely, even while a regular window (e.g. Settings) is on screen.
+    // Only fall back to a Dock icon when the menu bar icon is hidden, so the
+    // app always keeps at least one entry point.
+    showsMenuBarIcon ? .accessory : .regular
   }
 
   static func refreshDockVisibilitySoon(showsMenuBarIcon: Bool) {
@@ -78,7 +89,7 @@ enum AppWindowPresenter {
   static func requestMainWindowPresentation() {
     startPresentationCancellationObservation()
     pendingMainWindowPresentation = PresentationRequest(deadline: Date().addingTimeInterval(5))
-    showDockAndActivate()
+    activateApp()
   }
 
   static var isMainWindowPresentationPending: Bool {

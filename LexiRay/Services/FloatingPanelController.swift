@@ -38,6 +38,12 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   private static let idleMaximumContentWidth: CGFloat = 680
   private static let resizeThreshold: CGFloat = 6
 
+  /// Shared minimum content height for every panel state so the footprint stays
+  /// consistent before / during / after a translation. Content longer than this
+  /// still grows the panel via the per-state height estimates below.
+  private static let baselineMinimumContentHeight: CGFloat = 300
+  private static let idleMaximumContentHeight: CGFloat = 460
+
   private weak var controller: LexiRayController?
   private var panel: NSPanel?
   private var globalMouseMonitor: Any?
@@ -501,19 +507,20 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     let resultSpacing: CGFloat = 10
     let resultCharsPerLine = resultCharsPerLine(for: width)
 
+    // The idle footprint (header + source composer + provider preview) is the
+    // baseline for every state, so the panel opens at one size and only grows —
+    // it never shrinks between "before / during / after" a translation.
+    let baseline = idleBaselineHeight(
+      baseHeight: baseHeight,
+      previewHeight: idleProviderPreviewHeight(for: controller),
+      resultSpacing: resultSpacing,
+      resultContainerPadding: resultContainerPadding,
+      maximumHeight: maximumHeight
+    )
+
     switch controller.panelState {
     case .idle:
-      let providerCount = controller.settings.visibleProviderConfigurations().count
-      let previewHeight = idleProviderPreviewHeight(for: controller)
-      guard previewHeight > 0 else {
-        return clampedContentHeight(baseHeight + 8, minimum: 200, maximum: maximumHeight)
-      }
-
-      return clampedContentHeight(
-        baseHeight + resultSpacing + resultContainerPadding + previewHeight,
-        minimum: providerCount >= 4 ? 360 : 240,
-        maximum: min(460, maximumHeight)
-      )
+      return baseline
     case let .loading(state):
       let previewHeight = state.preview.map {
         estimatedTextHeight(
@@ -525,14 +532,14 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
       let resultHeight = 28 + (previewHeight > 0 ? 10 + previewHeight : 0)
       return clampedContentHeight(
         baseHeight + resultSpacing + resultContainerPadding + resultHeight,
-        minimum: 284,
+        minimum: baseline,
         maximum: maximumHeight
       )
     case let .error(message):
       let resultHeight = 28 + 10 + estimatedTextHeight(message, charsPerLine: resultCharsPerLine)
       return clampedContentHeight(
         baseHeight + resultSpacing + resultContainerPadding + resultHeight,
-        minimum: 304,
+        minimum: baseline,
         maximum: maximumHeight
       )
     case let .batch(batch):
@@ -545,17 +552,37 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
       }
       return clampedContentHeight(
         baseHeight + resultSpacing + resultContainerPadding + resultHeight,
-        minimum: 306,
+        minimum: baseline,
         maximum: maximumHeight
       )
     case let .result(result):
       let resultHeight = 48 + estimatedTextHeight(result.translatedText, charsPerLine: resultCharsPerLine)
       return clampedContentHeight(
         baseHeight + resultSpacing + resultContainerPadding + resultHeight,
-        minimum: 306,
+        minimum: baseline,
         maximum: maximumHeight
       )
     }
+  }
+
+  /// Idle-state content height, also used as the shared minimum floor for the
+  /// loading / error / batch / result states so the panel keeps a consistent
+  /// footprint across a translation.
+  private static func idleBaselineHeight(
+    baseHeight: CGFloat,
+    previewHeight: CGFloat,
+    resultSpacing: CGFloat,
+    resultContainerPadding: CGFloat,
+    maximumHeight: CGFloat
+  ) -> CGFloat {
+    let content = previewHeight > 0
+      ? baseHeight + resultSpacing + resultContainerPadding + previewHeight
+      : baseHeight + 8
+    return clampedContentHeight(
+      content,
+      minimum: baselineMinimumContentHeight,
+      maximum: min(idleMaximumContentHeight, maximumHeight)
+    )
   }
 
   private static func maximumContentSize(for controller: LexiRayController) -> NSSize {
@@ -565,7 +592,7 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   private static func automaticContentWidth(for controller: LexiRayController) -> CGFloat {
     switch controller.panelState {
     case .idle:
-      640
+      defaultContentWidth
     case let .loading(state):
       widthForText(state.preview ?? controller.panelSourceText, base: defaultContentWidth)
     case let .error(message):

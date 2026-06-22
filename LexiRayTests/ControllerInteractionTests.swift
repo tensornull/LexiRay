@@ -219,15 +219,20 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(panel.updateLayoutCount, 1)
   }
 
-  func testShortResultUsesCompactFloatingPanelHeight() {
+  func testShortResultMatchesIdleBaselineHeight() {
     let panel = MockFloatingPanelPresenter()
     let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
+
+    let idleHeight = FloatingPanelController.contentSize(for: controller).height
+
     controller.panelState = .result(makeTranslationResult(text: "你好"))
+    let resultSize = FloatingPanelController.contentSize(for: controller)
 
-    let size = FloatingPanelController.contentSize(for: controller)
-
-    XCTAssertEqual(size.width, 660)
-    XCTAssertLessThanOrEqual(size.height, 410)
+    XCTAssertEqual(resultSize.width, 660)
+    // A short translation keeps the idle footprint instead of shrinking below it,
+    // so the panel stays consistent before / during / after a translation.
+    XCTAssertEqual(resultSize.height, idleHeight)
+    XCTAssertLessThanOrEqual(resultSize.height, 460)
   }
 
   func testIdlePanelUsesCompactProviderPreviewHeight() {
@@ -1422,17 +1427,24 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertTrue(AppRuntime.isRunningTests)
   }
 
-  func testDockPolicyUsesAccessoryWhenNoRegularWindowsAreVisible() {
+  func testDockPolicyDependsOnlyOnMenuBarIcon() {
+    // With the menu bar icon available the app stays an accessory (out of the
+    // Dock) regardless of whether a regular window is on screen.
     XCTAssertEqual(
       AppWindowPresenter.activationPolicy(hasVisibleRegularWindows: true),
-      .regular
+      .accessory
     )
     XCTAssertEqual(
       AppWindowPresenter.activationPolicy(hasVisibleRegularWindows: false),
       .accessory
     )
+    // When the menu bar icon is hidden the Dock icon is the only entry point.
     XCTAssertEqual(
       AppWindowPresenter.activationPolicy(hasVisibleRegularWindows: false, showsMenuBarIcon: false),
+      .regular
+    )
+    XCTAssertEqual(
+      AppWindowPresenter.activationPolicy(hasVisibleRegularWindows: true, showsMenuBarIcon: false),
       .regular
     )
   }

@@ -91,32 +91,44 @@ Identity warning and block Selection/OCR if it detects an unstable identity.
 
 ## Release
 
-Release preparation for `0.1.2` and later must start from `dev`:
+Release preparation for `0.2.0` and later must start from `dev`:
 
 ```bash
 ./script/ci_local.sh
-./script/release_check.sh 0.1.2
+./script/release_check.sh 0.2.0
 ```
 
 Open a PR from `dev` to `main`. After the PR checks pass and `main` is updated,
-wait for `main` CI and CodeQL to pass, then tag the release:
+confirm `main` CI and CodeQL are green before tagging. If those checks are slow,
+record the run URLs and resume commands instead of waiting in an interactive
+agent session.
 
 ```bash
-git tag v0.1.2
-git push origin v0.1.2
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
-The tag triggers the fixed self-signed DMG release workflow. Repository secrets
-must provide `LEXIRAY_RELEASE_CERT_P12_BASE64` and
-`LEXIRAY_RELEASE_CERT_PASSWORD`; the optional
-`LEXIRAY_RELEASE_CODE_SIGN_IDENTITY` repository variable defaults to
-`LexiRay Release Self-Signed`.
-
-To package a local signed DMG with the same checks, provide the same release
-signing environment variables and run:
+Release artifacts are built, signed, verified, and uploaded from the local
+release checkout. After the tag is pushed, fetch it, check out the exact
+tagged commit, make sure the local release signing environment is available,
+then run:
 
 ```bash
-./script/package_release_dmg.sh 0.1.2
+./script/publish_release.sh 0.2.0
+```
+
+`publish_release.sh` requires a clean worktree, verifies that `v<version>` points
+to `origin/main`, calls `package_release_dmg.sh`, reruns
+`verify_release_dmg.sh`, uploads the DMG and `.sha256` to GitHub Releases, and
+downloads the uploaded assets to verify the checksum.
+
+The GitHub Release workflow is only an asset/checksum validation gate. It does
+not compile, sign, or package the app. Repository release signing secrets may
+remain as a fallback, but the default release builder is the local machine with
+the fixed self-signed release identity (`LexiRay Release Self-Signed`).
+
+```bash
+gh release view v0.2.0 --json assets,url
 ```
 
 ## Clean-Room Rule
