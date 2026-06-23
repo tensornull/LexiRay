@@ -48,15 +48,18 @@ struct MenuBarView: View {
   }
 
   private func openMainWindow() {
-    controller.selectDashboard()
-    controller.hideFloatingPanelIfNeeded()
-    AppWindowPresenter.requestMainWindowPresentation()
-    openWindow(id: "main")
-    AppWindowPresenter.presentMainWindowIfAvailable()
+    presentMainWindow { controller.selectDashboard() }
   }
 
   private func openSettingsWindow() {
-    controller.selectSettings()
+    presentMainWindow { controller.selectSettings() }
+  }
+
+  private func presentMainWindow(selectingSection: () -> Void) {
+    selectingSection()
+    // Opening a regular window must never resurrect a dismissed floating panel:
+    // hide it first, then activate the app and bring the main window forward.
+    controller.hideFloatingPanelIfNeeded()
     AppWindowPresenter.requestMainWindowPresentation()
     openWindow(id: "main")
     AppWindowPresenter.presentMainWindowIfAvailable()

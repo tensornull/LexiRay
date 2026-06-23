@@ -589,34 +589,11 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     NSSize(width: 980, height: maximumContentHeight(isExpanded: controller.isExpanded))
   }
 
-  private static func automaticContentWidth(for controller: LexiRayController) -> CGFloat {
-    switch controller.panelState {
-    case .idle:
-      defaultContentWidth
-    case let .loading(state):
-      widthForText(state.preview ?? controller.panelSourceText, base: defaultContentWidth)
-    case let .error(message):
-      widthForText(message, base: defaultContentWidth)
-    case let .result(result):
-      widthForText(result.translatedText, base: defaultContentWidth)
-    case let .batch(batch):
-      widthForTexts(
-        [batch.request.text]
-          + batch.entries.compactMap { entry in
-            switch entry.status {
-            case let .streaming(text):
-              text
-            case let .success(result):
-              result.translatedText
-            case let .failure(message):
-              message
-            case .disabled, .translating:
-              nil
-            }
-          },
-        base: defaultContentWidth
-      )
-    }
+  private static func automaticContentWidth(for _: LexiRayController) -> CGFloat {
+    // Fixed automatic width for every state: the panel grows only vertically as
+    // content arrives (like Hapigo). A manual drag-resize is still honored via
+    // contentWidth(for:automaticWidth:) below.
+    defaultContentWidth
   }
 
   private static func contentWidth(for controller: LexiRayController, automaticWidth: CGFloat) -> CGFloat {
@@ -642,19 +619,6 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     let rowHeight: CGFloat = 36
     let dividerHeight: CGFloat = 1
     return CGFloat(providerCount) * rowHeight + CGFloat(max(0, providerCount - 1)) * dividerHeight
-  }
-
-  private static func widthForText(_ text: String, base: CGFloat) -> CGFloat {
-    widthForTexts([text], base: base)
-  }
-
-  private static func widthForTexts(_ texts: [String], base: CGFloat) -> CGFloat {
-    let longestLine = texts
-      .flatMap { $0.components(separatedBy: .newlines) }
-      .map(\.count)
-      .max() ?? 0
-    let extraWidth = CGFloat(max(0, longestLine - 56)) * 3.8
-    return min(900, max(base, base + extraWidth))
   }
 
   private static func clampedContentSize(_ size: NSSize, maximum: NSSize) -> NSSize {
