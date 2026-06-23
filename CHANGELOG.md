@@ -7,6 +7,28 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-23
+
+### Fixed
+
+- Opening the main or Settings window from the menu bar no longer brings a
+  dismissed floating panel back on screen alongside the window.
+- The floating panel keeps a fixed width and grows only vertically as content
+  arrives, instead of also widening with longer text. A manual drag-resize of
+  the width is still preserved.
+
+### Added
+
+- The floating panel now restores the previous input text and translation
+  results when it is re-summoned without a new text selection within five
+  minutes of being dismissed, instead of always opening blank.
+
+### Changed
+
+- CodeQL analysis no longer runs on pull requests (it still runs on pushes to
+  `main` and on the weekly schedule), so PRs are not gated on the long
+  analysis.
+
 ## [0.2.1] - 2026-06-22
 
 ### Fixed
