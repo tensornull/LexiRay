@@ -7,6 +7,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-06-23
+
+### Fixed
+
+- Re-summoning the panel after clearing the input box now opens blank
+  instead of restoring the previous translation. Content is retained
+  only when the source text is non-empty at dismiss time.
+- Disabled ("Off") providers sink to the bottom of the floating panel;
+  enabled providers stay on top. Provider order in Settings is unchanged.
+- Manually dragging the panel to a narrower width no longer snaps back
+  to the default width on the next content change.
+
 ## [0.2.2] - 2026-06-23
 
 ### Fixed
