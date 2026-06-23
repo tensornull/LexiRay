@@ -31,5 +31,7 @@ xcodebuild test \
   -scheme LexiRay \
   -configuration Debug \
   -destination 'platform=macOS' \
-  CODE_SIGNING_ALLOWED=NO \
+  CODE_SIGN_IDENTITY="-" \
+  CODE_SIGN_STYLE=Manual \
+  DEVELOPMENT_TEAM= \
   SWIFT_COMPILATION_MODE=wholemodule
