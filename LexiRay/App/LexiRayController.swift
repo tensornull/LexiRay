@@ -466,8 +466,10 @@ final class LexiRayController: ObservableObject {
     showBlankComposer()
   }
 
-  /// Whether the panel currently holds recent, non-empty content that should be
-  /// restored on re-summon rather than wiped.
+  /// Whether the panel should restore its previous contents on re-summon. The
+  /// rule mirrors the dismissal state: only restore when the source composer
+  /// still holds text. If the user cleared the input before dismissing, the
+  /// panel re-opens blank instead of resurrecting the prior result.
   private var shouldRestoreRetainedPanelContent: Bool {
     guard let lastPanelContentAt,
           Date().timeIntervalSince(lastPanelContentAt) <= Self.panelContentRetention
@@ -475,16 +477,7 @@ final class LexiRayController: ObservableObject {
       return false
     }
 
-    if panelSourceText.nonEmptyTrimmed != nil {
-      return true
-    }
-
-    switch panelState {
-    case .batch, .result:
-      return true
-    case .idle, .loading, .error:
-      return false
-    }
+    return panelSourceText.nonEmptyTrimmed != nil
   }
 
   /// Re-show the panel with its existing contents untouched, refreshing the

@@ -511,6 +511,43 @@ final class SettingsStoreTests: XCTestCase {
     XCTAssertEqual(try permission(at: providerFileStore.fileURL), 0o600)
   }
 
+  func testPanelOrderedProviderConfigurationsPutsEnabledFirst() throws {
+    let defaults = try makeDefaults()
+    let providerFileStore = makeProviderFileStore()
+    let store = SettingsStore(defaults: defaults, providerFileStore: providerFileStore, allowsMockProvider: true)
+
+    // Disable every visible provider, then explicitly enable exactly two so the
+    // test is independent of default enabled state.
+    for id in store.visibleProviderIDs() {
+      var cfg = store.configuration(for: id)
+      cfg.isEnabled = false
+      store.updateConfiguration(cfg)
+    }
+    var mock = store.configuration(for: .mock)
+    mock.isEnabled = true
+    store.updateConfiguration(mock)
+    var anthropic = store.configuration(for: .anthropicMessages)
+    anthropic.isEnabled = true
+    store.updateConfiguration(anthropic)
+
+    let panelOrdered = store.panelOrderedProviderConfigurations()
+    let ids = panelOrdered.map(\.providerID)
+    let enabledIDs = ids.prefix(while: { store.configuration(for: $0).isEnabled })
+    let disabledIDs = ids.drop(while: { store.configuration(for: $0).isEnabled })
+
+    // All enabled providers appear before all disabled providers.
+    XCTAssertFalse(enabledIDs.isEmpty)
+    for id in disabledIDs {
+      XCTAssertFalse(store.configuration(for: id).isEnabled, "\(id) should be disabled but appears before a disabled provider")
+    }
+    XCTAssertTrue(enabledIDs.contains(.mock))
+    XCTAssertTrue(enabledIDs.contains(.anthropicMessages))
+
+    // The persistent providerConfigurations order is NOT changed by panelOrdered.
+    let persistentIDs = store.providerConfigurations.map(\.providerID)
+    XCTAssertNotEqual(persistentIDs, ids)
+  }
+
   func testMigratesLegacyUserDefaultsAPIKeyIntoProviderFile() throws {
     let defaults = try makeDefaults()
     let providerFileStore = makeProviderFileStore()
