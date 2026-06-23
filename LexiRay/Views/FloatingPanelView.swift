@@ -394,7 +394,7 @@ struct FloatingPanelView: View {
   }
 
   private var standbyProviderConfigurations: [ProviderConfiguration] {
-    settings.visibleProviderConfigurations()
+    settings.panelOrderedProviderConfigurations()
   }
 
   private var resultAreaMaximumHeight: CGFloat? {

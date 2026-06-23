@@ -227,6 +227,15 @@ final class SettingsStore: ObservableObject {
     }
   }
 
+  /// Visible providers ordered for the floating panel: enabled providers first,
+  /// disabled ("Off") providers sink to the bottom. Relative order within each
+  /// group is preserved (stable), and the user's saved provider order in
+  /// Settings is left untouched.
+  func panelOrderedProviderConfigurations() -> [ProviderConfiguration] {
+    let visible = visibleProviderConfigurations()
+    return visible.filter(\.isEnabled) + visible.filter { !$0.isEnabled }
+  }
+
   func enabledProviderConfigurations() -> [ProviderConfiguration] {
     visibleProviderConfigurations()
       .filter(\.isEnabled)
@@ -778,5 +787,11 @@ final class SettingsStore: ObservableObject {
     static var openAIAPIKey: String {
       "openAIAPIKey"
     }
+  }
+
+  // MARK: - Test Helpers
+
+  func setFloatingPanelLastSizeForTesting(_ size: FloatingPanelSavedSize?) {
+    floatingPanelLastSize = size
   }
 }

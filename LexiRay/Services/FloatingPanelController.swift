@@ -597,6 +597,10 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   }
 
   private static func contentWidth(for controller: LexiRayController, automaticWidth: CGFloat) -> CGFloat {
+    // Width is fully manual: use the saved drag-width exactly (so a narrower
+    // manual width sticks and is never snapped back up by content changes),
+    // otherwise fall back to the fixed default. Outer clamping keeps it within
+    // the supported min/max bounds.
     guard let savedSize = controller.settings.floatingPanelLastSize else {
       return automaticWidth
     }
@@ -604,9 +608,9 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     let savedWidth = CGFloat(savedSize.width)
     switch controller.panelState {
     case .idle:
-      return min(idleMaximumContentWidth, max(automaticWidth, savedWidth))
+      return min(idleMaximumContentWidth, savedWidth)
     case .loading, .error, .batch, .result:
-      return max(automaticWidth, savedWidth)
+      return savedWidth
     }
   }
 

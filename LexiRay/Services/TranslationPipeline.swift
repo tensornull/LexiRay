@@ -52,7 +52,7 @@ final class TranslationPipeline: @unchecked Sendable {
       selectionSource: selectionSource
     )
 
-    let configurations = settings.visibleProviderConfigurations()
+    let configurations = settings.panelOrderedProviderConfigurations()
 
     return TranslationBatch(
       request: request,

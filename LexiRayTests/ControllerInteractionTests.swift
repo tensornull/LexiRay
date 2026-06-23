@@ -127,6 +127,38 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(controller.panelSourceText, "")
   }
 
+  func testReSummonAfterClearingInputShowsBlankComposer() async {
+    let selectionReader = SequencedSelectionReader(results: [
+      SelectionReadResult(text: "你好世界", source: .accessibility, failureReason: nil),
+      SelectionReadResult(text: nil, source: .unavailable, failureReason: .copyFailed)
+    ])
+    let panel = MockFloatingPanelPresenter()
+    let controller = makeController(selectionReader: selectionReader, panel: panel)
+
+    // First summon: translate "你好世界"
+    controller.translateCurrentSelection()
+    await waitUntil {
+      if case .batch = controller.panelState { return true }
+      return false
+    }
+    XCTAssertEqual(controller.panelSourceText, "你好世界")
+
+    // User clears the input box before dismissing (simulates backspace to empty).
+    controller.panelSourceText = ""
+
+    let eventsBefore = panel.events.count
+
+    // Second summon: no selection, and the input was cleared. Should open blank,
+    // not restore the previous batch — retention follows the dismissal state
+    // (input empty → no content to restore).
+    controller.translateCurrentSelection()
+    await waitUntil { panel.events.count > eventsBefore }
+
+    XCTAssertEqual(controller.panelState, .idle)
+    XCTAssertEqual(controller.panelSourceText, "")
+    XCTAssertEqual(panel.events.last, .show(activating: true, repositioning: false))
+  }
+
   func testUnstableAppIdentityBlocksSelectionBeforeReadingText() async {
     let selectionReader = BlockingSelectionReader()
     let panel = MockFloatingPanelPresenter()
@@ -385,6 +417,25 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(shortSize.width, 660)
     XCTAssertEqual(longSize.width, 660)
     XCTAssertGreaterThan(longSize.height, shortSize.height)
+  }
+
+  func testManualNarrowWidthIsPreservedAcrossContentChanges() {
+    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: MockFloatingPanelPresenter())
+    // Simulate a manual drag-resize to 560 (the minimum allowed width).
+    controller.settings.setFloatingPanelLastSizeForTesting(FloatingPanelSavedSize(width: 560, height: 400))
+
+    controller.panelState = .result(makeTranslationResult(text: "你好"))
+    let size1 = FloatingPanelController.contentSize(for: controller)
+
+    // Change content: many lines to push height above the idle baseline.
+    controller.panelState = .result(makeTranslationResult(text: String(repeating: "longer line of content\n", count: 25)))
+    let size2 = FloatingPanelController.contentSize(for: controller)
+
+    // The manual width (560) must stay exactly as-is, not snap back to the
+    // default 660. Only height adjusts to fit the content.
+    XCTAssertEqual(size1.width, 560)
+    XCTAssertEqual(size2.width, 560)
+    XCTAssertGreaterThan(size2.height, size1.height)
   }
 
   func testBatchHeightGrowsWithProviderContent() {
