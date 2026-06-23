@@ -73,6 +73,60 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertTrue(permissions.promptRequests.isEmpty)
   }
 
+  func testReSummonWithoutSelectionRestoresRecentPanelContent() async {
+    let selectionReader = SequencedSelectionReader(results: [
+      SelectionReadResult(text: "你好世界", source: .accessibility, failureReason: nil),
+      SelectionReadResult(text: nil, source: .unavailable, failureReason: .copyFailed)
+    ])
+    let panel = MockFloatingPanelPresenter()
+    let controller = makeController(selectionReader: selectionReader, panel: panel)
+
+    // First summon: real selection produces a batch with content.
+    controller.translateCurrentSelection()
+    await waitUntil {
+      if case .batch = controller.panelState { return true }
+      return false
+    }
+    XCTAssertEqual(controller.panelSourceText, "你好世界")
+
+    let eventsBefore = panel.events.count
+
+    // Second summon: no selection. Recent content should be restored, not wiped.
+    controller.translateCurrentSelection()
+    await waitUntil { panel.events.count > eventsBefore }
+
+    XCTAssertEqual(controller.panelSourceText, "你好世界")
+    if case .batch = controller.panelState {} else {
+      XCTFail("Expected retained batch content, got \(controller.panelState)")
+    }
+    XCTAssertEqual(panel.events.last, .show(activating: true, repositioning: false))
+  }
+
+  func testReSummonWithoutSelectionAfterRetentionWindowShowsBlankComposer() async {
+    let selectionReader = SequencedSelectionReader(results: [
+      SelectionReadResult(text: "你好世界", source: .accessibility, failureReason: nil),
+      SelectionReadResult(text: nil, source: .unavailable, failureReason: .copyFailed)
+    ])
+    let panel = MockFloatingPanelPresenter()
+    let controller = makeController(selectionReader: selectionReader, panel: panel)
+
+    controller.translateCurrentSelection()
+    await waitUntil {
+      if case .batch = controller.panelState { return true }
+      return false
+    }
+
+    // Simulate the retention window having elapsed.
+    controller.expirePanelContentRetentionForTesting()
+
+    let eventsBefore = panel.events.count
+    controller.translateCurrentSelection()
+    await waitUntil { panel.events.count > eventsBefore }
+
+    XCTAssertEqual(controller.panelState, .idle)
+    XCTAssertEqual(controller.panelSourceText, "")
+  }
+
   func testUnstableAppIdentityBlocksSelectionBeforeReadingText() async {
     let selectionReader = BlockingSelectionReader()
     let panel = MockFloatingPanelPresenter()
@@ -315,6 +369,22 @@ final class ControllerInteractionTests: XCTestCase {
 
     XCTAssertGreaterThan(longHeight, shortHeight)
     XCTAssertLessThanOrEqual(longHeight, FloatingPanelController.maximumContentHeight(isExpanded: false))
+  }
+
+  func testFloatingPanelWidthStaysFixedAsContentGrows() {
+    let shortController = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: MockFloatingPanelPresenter())
+    shortController.panelState = .result(makeTranslationResult(text: "你好"))
+
+    let longController = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: MockFloatingPanelPresenter())
+    longController.panelState = .result(makeTranslationResult(text: String(repeating: "This is a very long single line of translated content that previously widened the panel. ", count: 6)))
+
+    let shortSize = FloatingPanelController.contentSize(for: shortController)
+    let longSize = FloatingPanelController.contentSize(for: longController)
+
+    // Width is fixed across content length; only height grows (vertical-only growth).
+    XCTAssertEqual(shortSize.width, 660)
+    XCTAssertEqual(longSize.width, 660)
+    XCTAssertGreaterThan(longSize.height, shortSize.height)
   }
 
   func testBatchHeightGrowsWithProviderContent() {
@@ -1740,6 +1810,25 @@ private final class ImmediateSelectionReader: TextSelectionReading {
 
   func readSelectedText() async -> SelectionReadResult {
     result
+  }
+}
+
+@MainActor
+private final class SequencedSelectionReader: TextSelectionReading {
+  private var results: [SelectionReadResult]
+  private let last: SelectionReadResult
+
+  init(results: [SelectionReadResult]) {
+    precondition(!results.isEmpty)
+    self.results = results
+    last = results[results.count - 1]
+  }
+
+  func readSelectedText() async -> SelectionReadResult {
+    if results.isEmpty {
+      return last
+    }
+    return results.removeFirst()
   }
 }
 

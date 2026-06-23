@@ -11,6 +11,9 @@ final class LexiRayController: ObservableObject {
   @Published var isExpanded = false
   @Published var panelSourceText = "" {
     didSet {
+      if panelSourceText.nonEmptyTrimmed != nil {
+        markPanelContentActivity()
+      }
       updateHistoryNavigationForSourceChange()
       floatingPanel?.refreshContentLayout()
     }
@@ -59,6 +62,13 @@ final class LexiRayController: ObservableObject {
 
   private var isRestoringHistorySource = false
   private var settingsCancellables: Set<AnyCancellable> = []
+
+  /// Timestamp of the last time the panel held meaningful content (source text
+  /// or a translation result). Used to restore the previous panel contents when
+  /// the user re-summons the panel shortly after dismissing it without making a
+  /// new text selection.
+  private var lastPanelContentAt: Date?
+  private static let panelContentRetention: TimeInterval = 300
 
   private struct RecordedHistoryMetadata {
     let itemID: UUID
@@ -118,6 +128,15 @@ final class LexiRayController: ObservableObject {
   func startForTesting() {
     registerHotKeys()
     observeSettings()
+  }
+
+  /// Test hook: force the panel content-retention window to be considered
+  /// expired so the next no-selection summon falls back to a blank composer.
+  func expirePanelContentRetentionForTesting() {
+    guard lastPanelContentAt != nil else {
+      return
+    }
+    lastPanelContentAt = Date().addingTimeInterval(-(Self.panelContentRetention + 1))
   }
 
   func selectDashboard() {
@@ -436,7 +455,48 @@ final class LexiRayController: ObservableObject {
       return
     }
 
+    // No current text selection: if the panel still holds recent content from a
+    // previous translation (within the retention window), restore it instead of
+    // clearing to a blank composer.
+    if shouldRestoreRetainedPanelContent {
+      showRetainedPanel()
+      return
+    }
+
     showBlankComposer()
+  }
+
+  /// Whether the panel currently holds recent, non-empty content that should be
+  /// restored on re-summon rather than wiped.
+  private var shouldRestoreRetainedPanelContent: Bool {
+    guard let lastPanelContentAt,
+          Date().timeIntervalSince(lastPanelContentAt) <= Self.panelContentRetention
+    else {
+      return false
+    }
+
+    if panelSourceText.nonEmptyTrimmed != nil {
+      return true
+    }
+
+    switch panelState {
+    case .batch, .result:
+      return true
+    case .idle, .loading, .error:
+      return false
+    }
+  }
+
+  /// Re-show the panel with its existing contents untouched, refreshing the
+  /// retention timestamp so the content keeps living while the user interacts.
+  private func showRetainedPanel() {
+    markPanelContentActivity()
+    floatingPanel.show(activating: true, repositioning: false)
+  }
+
+  /// Record that the panel is holding meaningful content right now.
+  private func markPanelContentActivity() {
+    lastPanelContentAt = Date()
   }
 
   private func preparePermissionSensitiveWorkflow() -> Bool {
@@ -477,6 +537,7 @@ final class LexiRayController: ObservableObject {
     isRestoringHistorySource = false
     lastSelectionSource = .unavailable
     panelState = .idle
+    lastPanelContentAt = nil
     floatingPanel.show(activating: true, repositioning: false)
   }
 
@@ -553,6 +614,7 @@ final class LexiRayController: ObservableObject {
       panelSourceText = batch.request.text
       activeBatchID = batch.id
       panelState = .batch(batch)
+      markPanelContentActivity()
       floatingPanel.show(activating: false, repositioning: false)
 
       let batchID = batch.id
@@ -782,6 +844,7 @@ final class LexiRayController: ObservableObject {
     isRestoringHistorySource = false
     lastSelectionSource = item.request.selectionSource
     panelState = .batch(item.restoredBatch())
+    markPanelContentActivity()
     floatingPanel.refreshContentLayout()
   }
 
