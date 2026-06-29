@@ -159,6 +159,62 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(panel.events.last, .show(activating: true, repositioning: false))
   }
 
+  func testSwapPanelDirectionFlipsTargetAndRetranslates() async {
+    let selectionReader = ImmediateSelectionReader(
+      result: SelectionReadResult(text: "你好世界", source: .accessibility, failureReason: nil)
+    )
+    let panel = MockFloatingPanelPresenter()
+    let controller = makeController(selectionReader: selectionReader, panel: panel)
+
+    // Chinese source auto-detects as zh-Hans -> en.
+    controller.translateCurrentSelection()
+    await waitUntil {
+      if case let .batch(batch) = controller.panelState {
+        return batch.request.targetLanguage == "en"
+      }
+      return false
+    }
+    XCTAssertNil(controller.panelDirectionOverride)
+
+    // Tapping the direction badge swaps to the opposite direction and retranslates.
+    controller.swapPanelDirection()
+    await waitUntil {
+      if case let .batch(batch) = controller.panelState {
+        return batch.request.sourceLanguage == "en" && batch.request.targetLanguage == "zh-Hans"
+      }
+      return false
+    }
+    XCTAssertEqual(controller.panelDirectionOverride?.source, "en")
+    XCTAssertEqual(controller.panelDirectionOverride?.target, "zh-Hans")
+  }
+
+  func testSwapPanelDirectionResetsToAutomaticOnFreshTranslation() async {
+    let selectionReader = SequencedSelectionReader(results: [
+      SelectionReadResult(text: "你好世界", source: .accessibility, failureReason: nil),
+      SelectionReadResult(text: "你好世界", source: .accessibility, failureReason: nil)
+    ])
+    let panel = MockFloatingPanelPresenter()
+    let controller = makeController(selectionReader: selectionReader, panel: panel)
+
+    controller.translateCurrentSelection()
+    await waitUntil {
+      if case .batch = controller.panelState { return true }
+      return false
+    }
+    controller.swapPanelDirection()
+    await waitUntil { controller.panelDirectionOverride != nil }
+
+    // A brand-new translation must clear the manual override and re-detect.
+    controller.translateCurrentSelection()
+    await waitUntil {
+      if case let .batch(batch) = controller.panelState {
+        return batch.request.targetLanguage == "en"
+      }
+      return false
+    }
+    XCTAssertNil(controller.panelDirectionOverride)
+  }
+
   func testUnstableAppIdentityBlocksSelectionBeforeReadingText() async {
     let selectionReader = BlockingSelectionReader()
     let panel = MockFloatingPanelPresenter()

@@ -1,5 +1,12 @@
 import Foundation
 
+/// Explicit translation direction that overrides automatic source detection,
+/// e.g. when the user taps the panel direction badge to swap languages.
+struct PanelDirectionOverride: Equatable {
+  let source: String?
+  let target: String
+}
+
 struct TranslationRequest: Equatable, Hashable {
   let text: String
   let llmInputText: String

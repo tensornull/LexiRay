@@ -20,6 +20,7 @@ final class LexiRayController: ObservableObject {
   }
 
   @Published var lastSelectionSource: SelectionSource = .unavailable
+  @Published private(set) var panelDirectionOverride: PanelDirectionOverride?
   @Published var lastOCRText = ""
   @Published var selectedMainSection: MainSection = .dashboard
   @Published private(set) var appIdentity: AppIdentitySnapshot
@@ -206,6 +207,42 @@ final class LexiRayController: ObservableObject {
   func clearPanelSourceText() {
     historyNavigationIndex = nil
     panelSourceText = ""
+  }
+
+  /// Manually swaps the translation direction for the current source text and retranslates.
+  /// Acts as an escape hatch when automatic language detection picks the wrong direction.
+  func swapPanelDirection() {
+    guard let text = panelSourceText.nonEmptyTrimmed else {
+      return
+    }
+
+    let current = currentDisplayedDirection()
+    let newTarget = LanguageDetector.otherLanguage(
+      of: current.target,
+      language1: settings.language1,
+      language2: settings.language2
+    )
+    let override = PanelDirectionOverride(source: current.target, target: newTarget)
+    let source: SelectionSource = lastSelectionSource == .unavailable ? .manual : lastSelectionSource
+    startBatchTranslation(text: text, source: source, bypassCache: true, directionOverride: override)
+  }
+
+  private func currentDisplayedDirection() -> (source: String?, target: String) {
+    switch panelState {
+    case let .batch(batch):
+      (batch.request.sourceLanguage, batch.request.targetLanguage)
+    case let .result(result):
+      (result.request.sourceLanguage, result.request.targetLanguage)
+    case .idle, .loading, .error:
+      currentPreviewDirection()
+    }
+  }
+
+  private func currentPreviewDirection() -> (source: String?, target: String) {
+    let source = panelSourceText.nonEmptyTrimmed.flatMap {
+      LanguageDetector.sourceLanguageCode(for: $0, language1: settings.language1, language2: settings.language2)
+    }
+    return (source, settings.resolvedTargetLanguage(for: source))
   }
 
   func translateOCRRegion() {
@@ -598,12 +635,13 @@ final class LexiRayController: ObservableObject {
       .store(in: &settingsCancellables)
   }
 
-  private func startBatchTranslation(text: String, source: SelectionSource, bypassCache: Bool) {
+  private func startBatchTranslation(text: String, source: SelectionSource, bypassCache: Bool, directionOverride: PanelDirectionOverride? = nil) {
     cancelProviderTranslationTasks()
     recordedHistoryMetadataByBatchID.removeAll(keepingCapacity: true)
+    panelDirectionOverride = directionOverride
 
     do {
-      let batch = try pipeline.makeBatch(text: text, selectionSource: source)
+      let batch = try pipeline.makeBatch(text: text, selectionSource: source, directionOverride: directionOverride)
       panelSourceText = batch.request.text
       activeBatchID = batch.id
       panelState = .batch(batch)

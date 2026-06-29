@@ -98,7 +98,16 @@ struct FloatingPanelView: View {
           .font(.caption.weight(.semibold))
           .foregroundStyle(.secondary)
 
-        PanelPill(title: directionLabel, systemName: "arrow.left.arrow.right", color: .secondary)
+        Button {
+          controller.swapPanelDirection()
+        } label: {
+          Label(directionLabel, systemImage: "arrow.left.arrow.right")
+            .font(.caption.weight(.medium))
+        }
+        .controlSize(.small)
+        .directionSwapButtonStyle(isManual: controller.panelDirectionOverride != nil)
+        .disabled(controller.panelSourceText.nonEmptyTrimmed == nil)
+        .help("Swap translation direction")
         if controller.lastSelectionSource != .unavailable {
           PanelPill(title: controller.lastSelectionSource.displayName, systemName: sourceIcon, color: sourceColor)
         }

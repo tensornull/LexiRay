@@ -32,6 +32,38 @@ final class TranslationPipelineTests: XCTestCase {
     XCTAssertEqual(result.request.targetLanguage, "en")
   }
 
+  func testPipelineRoutesMixedChineseWithEnglishQuoteToEnglish() throws {
+    let defaults = makeScratchDefaults()
+    let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
+    settings.language1 = "en"
+    settings.language2 = "zh-Hans"
+    let pipeline = TranslationPipeline(settings: settings)
+    let text = "对此我们非常抱歉。昨晚凌晨出现的类似 \"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.\" 的提示，主要是受到 Claude 官方资源波动的影响。"
+
+    let batch = try pipeline.makeBatch(text: text, selectionSource: .manual)
+
+    XCTAssertEqual(batch.request.sourceLanguage, "zh-Hans")
+    XCTAssertEqual(batch.request.targetLanguage, "en")
+  }
+
+  func testMakeBatchUsesDirectionOverride() throws {
+    let defaults = makeScratchDefaults()
+    let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
+    settings.language1 = "en"
+    settings.language2 = "zh-Hans"
+    let pipeline = TranslationPipeline(settings: settings)
+
+    // "你好" auto-detects as Chinese, but the override forces the opposite direction.
+    let batch = try pipeline.makeBatch(
+      text: "你好",
+      selectionSource: .manual,
+      directionOverride: PanelDirectionOverride(source: "zh-Hans", target: "zh-Hant")
+    )
+
+    XCTAssertEqual(batch.request.sourceLanguage, "zh-Hans")
+    XCTAssertEqual(batch.request.targetLanguage, "zh-Hant")
+  }
+
   func testPipelineTreatsShortEnglishTextAsEnglishSource() throws {
     let defaults = makeScratchDefaults()
     let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)

@@ -31,17 +31,24 @@ final class TranslationPipeline: @unchecked Sendable {
   }
 
   @MainActor
-  func makeBatch(text rawText: String, selectionSource: SelectionSource) throws -> TranslationBatch {
+  func makeBatch(text rawText: String, selectionSource: SelectionSource, directionOverride: PanelDirectionOverride? = nil) throws -> TranslationBatch {
     guard let text = rawText.nonEmptyTrimmed else {
       throw TranslationError.emptyInput
     }
 
-    let sourceLanguage = LanguageDetector.sourceLanguageCode(
-      for: text,
-      language1: settings.language1,
-      language2: settings.language2
-    )
-    let targetLanguage = settings.resolvedTargetLanguage(for: sourceLanguage)
+    let sourceLanguage: String?
+    let targetLanguage: String
+    if let directionOverride {
+      sourceLanguage = directionOverride.source
+      targetLanguage = directionOverride.target
+    } else {
+      sourceLanguage = LanguageDetector.sourceLanguageCode(
+        for: text,
+        language1: settings.language1,
+        language2: settings.language2
+      )
+      targetLanguage = settings.resolvedTargetLanguage(for: sourceLanguage)
+    }
     let llmInputText = SourceMarkdownPreparer.prepare(text)
 
     let request = TranslationRequest(
