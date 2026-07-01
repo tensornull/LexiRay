@@ -642,8 +642,8 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
       return 0
     }
 
-    // Each row: 48pt intrinsic + 8pt vertical padding = 56pt total.
-    let rowHeight: CGFloat = 56
+    // Row intrinsic height (matches ProviderStandbyRow.frame(minHeight:)).
+    let rowHeight: CGFloat = 40
     let dividerHeight: CGFloat = 1
     return CGFloat(providerCount) * rowHeight + CGFloat(max(0, providerCount - 1)) * dividerHeight
   }

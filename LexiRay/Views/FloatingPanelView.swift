@@ -193,7 +193,6 @@ struct FloatingPanelView: View {
       VStack(alignment: .leading, spacing: 0) {
         ForEach(Array(standbyProviderConfigurations.enumerated()), id: \.element.id) { index, configuration in
           ProviderStandbyRow(settings: settings, configuration: configuration)
-            .padding(.vertical, 4)
 
           if index < standbyProviderConfigurations.count - 1 {
             Divider()
@@ -503,7 +502,7 @@ private struct ProviderStandbyRow: View {
 
       PanelPill(title: status.title, systemName: status.systemName, color: status.color)
     }
-    .frame(minHeight: 48, alignment: .center)
+    .frame(minHeight: 40, alignment: .center)
     .accessibilityElement(children: .combine)
     .accessibilityLabel("\(configuration.effectiveDisplayName), \(status.title)")
   }

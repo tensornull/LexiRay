@@ -464,7 +464,7 @@ final class ControllerInteractionTests: XCTestCase {
     shortController.panelState = .result(makeTranslationResult(text: "你好"))
 
     let longController = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: MockFloatingPanelPresenter())
-    longController.panelState = .result(makeTranslationResult(text: String(repeating: "This is a very long single line of translated content that previously widened the panel. ", count: 6)))
+    longController.panelState = .result(makeTranslationResult(text: String(repeating: "This is a very long single line of translated content that previously widened the panel.\n", count: 20)))
 
     let shortSize = FloatingPanelController.contentSize(for: shortController)
     let longSize = FloatingPanelController.contentSize(for: longController)
