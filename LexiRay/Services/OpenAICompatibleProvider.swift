@@ -45,7 +45,7 @@ struct OpenAIChatCompletionsProvider: TranslationProvider {
       model: configuration.model,
       messages: [
         .init(role: "system", content: TranslationPrompt.instructions(targetLanguage: request.targetLanguage)),
-        .init(role: "user", content: text)
+        .init(role: "user", content: TranslationPrompt.userContent(text: text, targetLanguage: request.targetLanguage))
       ],
       temperature: 0.2
     )
@@ -75,7 +75,7 @@ struct OpenAIChatCompletionsProvider: TranslationProvider {
       model: configuration.model,
       messages: [
         .init(role: "system", content: TranslationPrompt.instructions(targetLanguage: request.targetLanguage)),
-        .init(role: "user", content: text)
+        .init(role: "user", content: TranslationPrompt.userContent(text: text, targetLanguage: request.targetLanguage))
       ],
       temperature: 0.2,
       stream: true
@@ -191,7 +191,7 @@ struct AnthropicMessagesProvider: TranslationProvider {
       model: configuration.model,
       maxTokens: 2048,
       system: TranslationPrompt.instructions(targetLanguage: request.targetLanguage),
-      messages: [.init(role: "user", content: AnthropicTranslationPrompt.userContent(text: text, targetLanguage: request.targetLanguage))]
+      messages: [.init(role: "user", content: TranslationPrompt.userContent(text: text, targetLanguage: request.targetLanguage))]
     )
 
     var urlRequest = try jsonRequest(endpoint: endpoint, body: body)
@@ -222,7 +222,7 @@ struct AnthropicMessagesProvider: TranslationProvider {
       model: configuration.model,
       maxTokens: 2048,
       system: TranslationPrompt.instructions(targetLanguage: request.targetLanguage),
-      messages: [.init(role: "user", content: AnthropicTranslationPrompt.userContent(text: text, targetLanguage: request.targetLanguage))],
+      messages: [.init(role: "user", content: TranslationPrompt.userContent(text: text, targetLanguage: request.targetLanguage))],
       stream: true
     )
 
@@ -338,9 +338,12 @@ enum TranslationPrompt {
     Do not merge separate paragraphs. Do not add explanations.
     """
   }
-}
 
-private enum AnthropicTranslationPrompt {
+  /// User-turn wrapper that restates the translate instruction around the source
+  /// text. Chat models otherwise treat a bare message (e.g. "你好") as a
+  /// conversational turn and reply to it instead of translating; restating the
+  /// task in the user message keeps them on task. Used by every message-based
+  /// provider (chat completions, Anthropic).
   static func userContent(text: String, targetLanguage: String) -> String {
     """
     Translate the following source text into \(targetLanguage). Return only the translation.

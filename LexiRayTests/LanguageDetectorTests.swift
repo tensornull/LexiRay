@@ -6,6 +6,79 @@ final class LanguageDetectorTests: XCTestCase {
     XCTAssertEqual(LanguageDetector.dominantLanguageCode(for: "A clean translation app for macOS"), "en")
   }
 
+  func testMixedChineseWithLongEnglishQuoteDetectsChinese() {
+    let text = "对此我们非常抱歉。昨晚凌晨出现的类似 \"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.\" 的提示，主要是受到 Claude 官方资源波动的影响。"
+    XCTAssertEqual(
+      LanguageDetector.sourceLanguageCode(for: text, language1: "en", language2: "zh-Hans"),
+      "zh-Hans"
+    )
+  }
+
+  func testMixedChineseQuoteRoutesToEnglishTarget() {
+    let text = "对此我们非常抱歉，类似 \"Your credit balance is too low to access the Anthropic API.\" 的提示，受到 Claude 资源波动影响。"
+    let source = LanguageDetector.sourceLanguageCode(for: text, language1: "en", language2: "zh-Hans")
+    XCTAssertEqual(
+      LanguageDetector.targetLanguage(for: source, language1: "en", language2: "zh-Hans", autoSwitch: true),
+      "en"
+    )
+  }
+
+  func testCJKOverrideHonorsConfiguredTraditionalVariant() {
+    let text = "對此我們非常抱歉，類似 \"too low to access the Anthropic API\" 的提示。"
+    XCTAssertEqual(
+      LanguageDetector.sourceLanguageCode(for: text, language1: "en", language2: "zh-Hant"),
+      "zh-Hant"
+    )
+  }
+
+  func testCodeHeavyTextWithFewChineseCommentsStaysEnglish() {
+    let text = "let user = fetchCurrentUser() // 获取用户 and return the active session token immediately to the caller"
+    XCTAssertEqual(
+      LanguageDetector.sourceLanguageCode(for: text, language1: "en", language2: "zh-Hans"),
+      LanguageDetector.dominantLanguageCode(for: text)
+    )
+  }
+
+  func testSingleChineseCharacterDefersToNaturalLanguage() {
+    XCTAssertEqual(
+      LanguageDetector.sourceLanguageCode(for: "好", language1: "en", language2: "zh-Hans"),
+      LanguageDetector.dominantLanguageCode(for: "好")
+    )
+  }
+
+  func testAccentedLatinTextDoesNotTriggerCJKOverride() {
+    let text = "Café résumé naïve coördinate jalapeño"
+    XCTAssertEqual(
+      LanguageDetector.sourceLanguageCode(for: text, language1: "en", language2: "zh-Hans"),
+      LanguageDetector.dominantLanguageCode(for: text)
+    )
+  }
+
+  func testJapaneseWithEmbeddedEnglishDetectsJapanese() {
+    let text = "申し訳ございません。\"Your credit balance is too low\" というエラーが表示されました。"
+    XCTAssertEqual(
+      LanguageDetector.sourceLanguageCode(for: text, language1: "en", language2: "zh-Hans"),
+      "ja"
+    )
+  }
+
+  func testKoreanWithEmbeddedEnglishDetectsKorean() {
+    let text = "죄송합니다. \"Your credit balance is too low\" 오류가 표시되었습니다."
+    XCTAssertEqual(
+      LanguageDetector.sourceLanguageCode(for: text, language1: "en", language2: "zh-Hans"),
+      "ko"
+    )
+  }
+
+  func testOtherLanguageReturnsOppositePairMember() {
+    XCTAssertEqual(LanguageDetector.otherLanguage(of: "zh-Hans", language1: "en", language2: "zh-Hans"), "en")
+    XCTAssertEqual(LanguageDetector.otherLanguage(of: "en", language1: "en", language2: "zh-Hans"), "zh-Hans")
+    // Chinese variants are treated as the same side of the pair.
+    XCTAssertEqual(LanguageDetector.otherLanguage(of: "zh-Hant", language1: "en", language2: "zh-Hans"), "en")
+    // Unknown language falls back to language1.
+    XCTAssertEqual(LanguageDetector.otherLanguage(of: "fr", language1: "en", language2: "zh-Hans"), "en")
+  }
+
   func testShortEnglishSourceLanguageUsesConfiguredEnglish() {
     for text in ["hi", "Hi", "hi!", "ok", "hi2"] {
       XCTAssertEqual(

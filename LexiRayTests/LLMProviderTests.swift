@@ -16,6 +16,13 @@ final class LLMProviderTests: XCTestCase {
     XCTAssertEqual(client.request?.url?.absoluteString, "https://api.example.test/v1/chat/completions")
     XCTAssertEqual(client.request?.value(forHTTPHeaderField: "Authorization"), "Bearer test-key")
     XCTAssertEqual(try client.stringBodyValue("model"), "test-model")
+    // The user turn must restate the translate task so chat models translate the
+    // text instead of replying to it conversationally.
+    let messages = try XCTUnwrap(try client.jsonBody()["messages"] as? [[String: Any]])
+    XCTAssertEqual(messages.first?["role"] as? String, "system")
+    let userContent = try XCTUnwrap(messages.last?["content"] as? String)
+    XCTAssertTrue(userContent.contains("Translate the following source text into zh-Hans."))
+    XCTAssertTrue(userContent.contains("Source text:\nhello"))
   }
 
   func testOpenAIChatCompletionsStreamsDeltas() async throws {

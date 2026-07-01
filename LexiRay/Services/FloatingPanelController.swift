@@ -37,6 +37,11 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
 
   private static let idleMaximumContentWidth: CGFloat = 680
   private static let resizeThreshold: CGFloat = 6
+  /// Slack around the panel frame when deciding whether a click is "outside".
+  /// A borderless resizable window's edge/corner resize grab band lands right on
+  /// (or a hair past) the frame boundary, so an exact `frame.contains` treats the
+  /// resize mouseDown as an outside click and dismisses the panel.
+  private static let dismissEdgeTolerance: CGFloat = 4
 
   /// Shared minimum content height for every panel state so the footprint stays
   /// consistent before / during / after a translation. Content longer than this
@@ -52,6 +57,7 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   private var pendingResizeTask: Task<Void, Never>?
   private var isMovingProgrammatically = false
   private var isSizingProgrammatically = false
+  private var isLiveResizing = false
   private var userContentSizeOverride: NSSize?
 
   init(controller: LexiRayController) {
@@ -253,9 +259,13 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
       matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
     ) { [weak self] event in
       let screenLocation = event.window?.convertPoint(toScreen: event.locationInWindow) ?? NSEvent.mouseLocation
-      let windowNumber = event.window?.windowNumber
+      // A resize-grab mouseDown on a borderless window often arrives with no
+      // owning window (it's handled by the window frame, not the contentView),
+      // so a windowNumber check misfires. Treat "belongs to the panel" as: the
+      // event is the panel's, or it has no window and lands within the panel.
+      let isPanelWindowEvent = event.window == nil || event.window === self?.panel
       Task { @MainActor in
-        self?.hideAfterLocalMouseEvent(windowNumber: windowNumber, screenLocation: screenLocation)
+        self?.hideAfterLocalMouseEvent(isPanelWindowEvent: isPanelWindowEvent, screenLocation: screenLocation)
       }
       return event
     }
@@ -300,27 +310,39 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   }
 
   private func hideAfterOutsideClick(at screenLocation: NSPoint) {
-    guard panel?.isVisible == true, controller?.isPanelPinned == false else {
+    guard panel?.isVisible == true, controller?.isPanelPinned == false, !isLiveResizing else {
       return
     }
 
-    if panel?.frame.contains(screenLocation) == false {
+    if let panel, !expandedDismissFrame(panel).contains(screenLocation) {
       hide()
     }
   }
 
-  private func hideAfterLocalMouseEvent(windowNumber: Int?, screenLocation: NSPoint) {
-    guard panel?.isVisible == true, controller?.isPanelPinned == false else {
+  private func hideAfterLocalMouseEvent(isPanelWindowEvent: Bool, screenLocation: NSPoint) {
+    guard panel?.isVisible == true, controller?.isPanelPinned == false, !isLiveResizing else {
       return
     }
 
-    guard let panel, windowNumber != panel.windowNumber else {
+    guard let panel else {
       return
     }
 
-    if !panel.frame.contains(screenLocation) {
+    let insidePanel = expandedDismissFrame(panel).contains(screenLocation)
+    // The panel's own event (including its edge/corner resize grab) never
+    // dismisses; anything landing outside the panel does.
+    if isPanelWindowEvent, insidePanel {
+      return
+    }
+    if !insidePanel {
       hide()
     }
+  }
+
+  /// Panel frame grown by the edge tolerance so resize-grab clicks on the
+  /// boundary count as "inside".
+  private func expandedDismissFrame(_ panel: NSPanel) -> NSRect {
+    panel.frame.insetBy(dx: -Self.dismissEdgeTolerance, dy: -Self.dismissEdgeTolerance)
   }
 
   private func position(_ panel: NSPanel) {
@@ -620,7 +642,8 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
       return 0
     }
 
-    let rowHeight: CGFloat = 36
+    // Row intrinsic height (matches ProviderStandbyRow.frame(minHeight:)).
+    let rowHeight: CGFloat = 40
     let dividerHeight: CGFloat = 1
     return CGFloat(providerCount) * rowHeight + CGFloat(max(0, providerCount - 1)) * dividerHeight
   }
@@ -652,6 +675,8 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     let outerPadding: CGFloat = 28
     let headerHeight: CGFloat = 28
     let headerToSourceSpacing: CGFloat = 10
+    // sourceComposer chrome (non-editor): inner padding (10+10) + the single
+    // header row (30) + spacing (8) before the editor.
     let sourceChromeHeight: CGFloat = 20 + 30 + 8
     return outerPadding
       + headerHeight
@@ -818,6 +843,14 @@ private enum HistoryNavigationDirection {
 }
 
 extension FloatingPanelController: NSWindowDelegate {
+  func windowWillStartLiveResize(_: Notification) {
+    isLiveResizing = true
+  }
+
+  func windowDidEndLiveResize(_: Notification) {
+    isLiveResizing = false
+  }
+
   func windowDidResize(_ notification: Notification) {
     guard !isSizingProgrammatically,
           let panel = notification.object as? NSPanel,
@@ -861,44 +894,18 @@ extension FloatingPanelController: NSWindowDelegate {
 
 @available(macOS 26.0, *)
 private final class FloatingPanelGlassEffectView: NSGlassEffectView {
-  private let panelCornerRadius: CGFloat
-  private var lastMaskSize: NSSize = .zero
-  private let shapeMask = CAShapeLayer()
-
+  /// Trust NSGlassEffectView's own cornerRadius for the rounded shape: it renders
+  /// the glass with correct Retina anti-aliasing. Stacking layer.cornerRadius +
+  /// masksToBounds + a CAShapeLayer mask (whose contentsScale defaulted to 1×)
+  /// re-clipped the corners at 1× on 2× displays, producing the jagged edge.
   init(cornerRadius: CGFloat) {
-    panelCornerRadius = cornerRadius
     super.init(frame: .zero)
     self.cornerRadius = cornerRadius
-    wantsLayer = true
-    layer?.cornerRadius = cornerRadius
-    layer?.masksToBounds = true
-    shapeMask.fillColor = NSColor.black.cgColor
-    layer?.mask = shapeMask
   }
 
   @available(*, unavailable)
   required init?(coder _: NSCoder) {
     fatalError("init(coder:) has not been implemented")
-  }
-
-  override func layout() {
-    super.layout()
-    updateShapeMask()
-  }
-
-  private func updateShapeMask() {
-    guard bounds.width > 0, bounds.height > 0, bounds.size != lastMaskSize else {
-      return
-    }
-
-    lastMaskSize = bounds.size
-    shapeMask.frame = bounds
-    shapeMask.path = CGPath(
-      roundedRect: bounds,
-      cornerWidth: panelCornerRadius,
-      cornerHeight: panelCornerRadius,
-      transform: nil
-    )
   }
 }
 
