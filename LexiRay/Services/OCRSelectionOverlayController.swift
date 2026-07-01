@@ -8,56 +8,69 @@ protocol OCRRegionSelecting: AnyObject {
 
 @MainActor
 final class OCRSelectionOverlayController: OCRRegionSelecting {
-  private var panel: OCRSelectionPanel?
+  private var panels: [OCRSelectionPanel] = []
   private var escapeMonitor: Any?
+  private var completion: ((CGRect?) -> Void)?
+  private var didComplete = false
 
   func beginSelection(onComplete: @escaping (CGRect?) -> Void) {
     close()
 
-    let screenFrame = NSScreen.screens
-      .map(\.frame)
-      .reduce(NSRect.null) { partialResult, frame in
-        partialResult.union(frame)
+    completion = onComplete
+    didComplete = false
+
+    // One borderless overlay per physical screen. A single window spanning the
+    // union of all screens only renders on the main display when "Displays have
+    // separate Spaces" is on (the macOS default), so the secondary screen never
+    // gets a dim layer or crosshair and cannot be selected. Per-screen panels
+    // each render on their own display; cross-screen drags still work because
+    // AppKit keeps delivering dragged/up events to the view that received the
+    // mouseDown, even after the cursor leaves that window.
+    panels = NSScreen.screens.map { screen in
+      let panel = OCRSelectionPanel(
+        contentRect: screen.frame,
+        styleMask: [.borderless, .nonactivatingPanel],
+        backing: .buffered,
+        defer: false
+      )
+      let selectionView = OCRSelectionView(
+        frame: NSRect(origin: .zero, size: screen.frame.size),
+        screen: screen
+      )
+      selectionView.onComplete = { [weak self] rect in
+        self?.complete(rect)
       }
 
-    let panel = OCRSelectionPanel(
-      contentRect: screenFrame,
-      styleMask: [.borderless, .nonactivatingPanel],
-      backing: .buffered,
-      defer: false
-    )
-    let selectionView = OCRSelectionView(frame: NSRect(origin: .zero, size: screenFrame.size), screenFrame: screenFrame)
-
-    selectionView.onComplete = { [weak self] rect in
-      self?.close()
-      onComplete(rect)
+      panel.contentView = selectionView
+      panel.backgroundColor = .clear
+      panel.isOpaque = false
+      panel.hasShadow = false
+      panel.hidesOnDeactivate = false
+      panel.level = .screenSaver
+      panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+      panel.ignoresMouseEvents = false
+      panel.orderFrontRegardless()
+      // A borderless clear panel ordered front from a hotkey callout may never
+      // get a display pass, so its layer tree stays unattached and the overlay
+      // is invisible until the first drag; force one so dim and prompt show now.
+      panel.display()
+      return panel
     }
 
-    panel.contentView = selectionView
-    panel.backgroundColor = .clear
-    panel.isOpaque = false
-    panel.hasShadow = false
-    panel.hidesOnDeactivate = false
-    panel.level = .screenSaver
-    panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-    panel.ignoresMouseEvents = false
-    panel.orderFrontRegardless()
-    panel.makeKey()
+    // Make the panel under the cursor key so it reliably receives the first
+    // mouseDown and owns the drag.
+    let mouse = NSEvent.mouseLocation
+    let keyPanel = panels.first { $0.frame.contains(mouse) } ?? panels.first
+    keyPanel?.makeKey()
     NSCursor.crosshair.set()
-    // A borderless clear panel ordered front from a hotkey callout may never
-    // get a display pass, so its layer tree stays unattached and the overlay
-    // is invisible until the first drag; force one so dim and prompt show now.
-    panel.display()
 
-    escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak selectionView] event in
+    escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
       if event.keyCode == 53 {
-        selectionView?.cancelSelection()
+        self?.complete(nil)
         return nil
       }
       return event
     }
-
-    self.panel = panel
   }
 
   func close() {
@@ -65,9 +78,24 @@ final class OCRSelectionOverlayController: OCRRegionSelecting {
       NSEvent.removeMonitor(escapeMonitor)
       self.escapeMonitor = nil
     }
-    panel?.orderOut(nil)
-    panel = nil
+    panels.forEach { $0.orderOut(nil) }
+    panels = []
+    completion = nil
+    didComplete = false
     NSCursor.arrow.set()
+  }
+
+  /// Reports the selected global-screen rect (or nil for cancel) exactly once,
+  /// then tears down every overlay. Drags started on any screen funnel here.
+  private func complete(_ rect: CGRect?) {
+    guard !didComplete else {
+      return
+    }
+
+    didComplete = true
+    let completion = completion
+    close()
+    completion?(rect)
   }
 }
 
@@ -80,7 +108,10 @@ private final class OCRSelectionPanel: NSPanel {
 private final class OCRSelectionView: NSView {
   var onComplete: ((CGRect?) -> Void)?
 
-  private let screenFrame: NSRect
+  /// The screen this overlay covers. All selection math is done in global
+  /// screen coordinates and converted to this view's local space only for
+  /// drawing, so a selection that spans displays renders continuously.
+  private let screen: NSScreen
   private var startPoint: CGPoint?
   private var currentPoint: CGPoint?
   private var didComplete = false
@@ -92,17 +123,17 @@ private final class OCRSelectionView: NSView {
   private let sizeLabelLayer = CATextLayer()
   private let promptLayer = CALayer()
 
-  init(frame frameRect: NSRect, screenFrame: NSRect) {
-    self.screenFrame = screenFrame
+  init(frame frameRect: NSRect, screen: NSScreen) {
+    self.screen = screen
     super.init(frame: frameRect)
     wantsLayer = true
     layerContentsRedrawPolicy = .never
     setUpLayers()
   }
 
-  /// Layers are mutated per mouse event instead of redrawing the multi-screen
-  /// backing store; compositing happens in the render server so dragging stays
-  /// smooth on Retina and multi-display unions.
+  /// Layers are mutated per mouse event instead of redrawing the backing store;
+  /// compositing happens in the render server so dragging stays smooth on
+  /// Retina and across displays.
   private func setUpLayers() {
     guard let layer else {
       return
@@ -143,7 +174,7 @@ private final class OCRSelectionView: NSView {
       ]
     )
     let size = text.size()
-    let scale = NSScreen.screens.map(\.backingScaleFactor).max() ?? 2
+    let scale = screen.backingScaleFactor
     let width = Int((size.width * scale).rounded(.up))
     let height = Int((size.height * scale).rounded(.up))
     guard width > 0, height > 0,
@@ -167,19 +198,15 @@ private final class OCRSelectionView: NSView {
     NSGraphicsContext.restoreGraphicsState()
 
     promptLayer.contents = context.makeImage()
-    // Center on the screen holding the cursor: the view spans the union of
-    // all screens, so bounds.mid* can land far off-center on any one display.
-    let mouse = NSEvent.mouseLocation
-    let target = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.screens.first
-    let center = target.map { screen in
-      CGPoint(x: screen.frame.midX - screenFrame.minX, y: screen.frame.midY - screenFrame.minY)
-    } ?? CGPoint(x: bounds.midX, y: bounds.midY)
+    // Center the prompt on this screen, and only show it on the screen holding
+    // the cursor so the other displays stay quietly dimmed.
     promptLayer.frame = CGRect(
-      x: center.x - size.width / 2,
-      y: center.y - size.height / 2,
+      x: bounds.midX - size.width / 2,
+      y: bounds.midY - size.height / 2,
       width: size.width,
       height: size.height
     )
+    promptLayer.isHidden = !NSMouseInRect(NSEvent.mouseLocation, screen.frame, false)
   }
 
   @available(*, unavailable)
@@ -205,13 +232,8 @@ private final class OCRSelectionView: NSView {
     updateContentsScale()
   }
 
-  /// The panel spans the union of all screens, so use the largest backing
-  /// scale; the size label's CATextLayer otherwise rasterizes at 1x and looks
-  /// blurry on Retina. The prompt layer carries pre-rendered image contents
-  /// and does not depend on contentsScale.
   private func updateContentsScale() {
-    let scale = NSScreen.screens.map(\.backingScaleFactor).max() ?? 2
-    sizeLabelLayer.contentsScale = scale
+    sizeLabelLayer.contentsScale = window?.backingScaleFactor ?? screen.backingScaleFactor
   }
 
   override func mouseDown(with event: NSEvent) {
@@ -252,6 +274,8 @@ private final class OCRSelectionView: NSView {
     complete(nil)
   }
 
+  /// Selection in global screen coordinates — fed straight to SCScreenshotManager
+  /// capture, which expects global AppKit coordinates.
   private var selectedScreenRect: CGRect? {
     guard let startPoint, let currentPoint else {
       return nil
@@ -265,8 +289,11 @@ private final class OCRSelectionView: NSView {
     )
   }
 
-  private var selectionRect: CGRect? {
-    selectedScreenRect?.offsetBy(dx: -screenFrame.minX, dy: -screenFrame.minY)
+  /// The selection in this view's local space (not clipped). Portions that fall
+  /// on another display land off-bounds and the window clips them, so the cut-out
+  /// and border stay continuous across screens with no seam line at the edge.
+  private var localSelectionRect: CGRect? {
+    selectedScreenRect?.offsetBy(dx: -screen.frame.minX, dy: -screen.frame.minY)
   }
 
   private func screenPoint(from event: NSEvent) -> CGPoint {
@@ -285,7 +312,9 @@ private final class OCRSelectionView: NSView {
   }
 
   private func updateSelectionLayers() {
-    guard let rect = selectionRect else {
+    promptLayer.isHidden = true
+
+    guard let rect = localSelectionRect, let selectedScreenRect, let currentPoint else {
       return
     }
 
@@ -300,14 +329,18 @@ private final class OCRSelectionView: NSView {
     borderLayer.path = CGPath(rect: rect, transform: nil)
     borderLayer.isHidden = false
 
-    sizeLabelLayer.string = "\(Int(rect.width)) x \(Int(rect.height))"
-    sizeLabelLayer.frame = CGRect(
-      origin: CGPoint(x: rect.minX + 8, y: rect.maxY + 8),
-      size: Self.sizeLabelSize
-    )
-    sizeLabelLayer.isHidden = false
-
-    promptLayer.isHidden = true
+    // Show the full selection size, but only on the screen holding the active
+    // corner so a cross-screen drag doesn't print the dimensions twice.
+    if NSMouseInRect(currentPoint, screen.frame, false) {
+      sizeLabelLayer.string = "\(Int(selectedScreenRect.width)) x \(Int(selectedScreenRect.height))"
+      sizeLabelLayer.frame = CGRect(
+        origin: CGPoint(x: rect.minX + 8, y: rect.maxY + 8),
+        size: Self.sizeLabelSize
+      )
+      sizeLabelLayer.isHidden = false
+    } else {
+      sizeLabelLayer.isHidden = true
+    }
 
     CATransaction.commit()
   }

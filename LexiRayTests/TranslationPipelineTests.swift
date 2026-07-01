@@ -203,6 +203,119 @@ final class TranslationPipelineTests: XCTestCase {
     }
   }
 
+  func testMakeBatchPinnedTargetOverridesAutoResolution() throws {
+    let defaults = makeScratchDefaults()
+    let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
+    settings.language1 = "en"
+    settings.language2 = "zh-Hans"
+    // "Always: Japanese" target — auto would resolve English → zh-Hans.
+    settings.pinnedTargetLanguage = "ja"
+    let pipeline = TranslationPipeline(settings: settings)
+
+    let batch = try pipeline.makeBatch(text: "hello", selectionSource: .manual)
+
+    XCTAssertEqual(batch.request.sourceLanguage, "en")
+    XCTAssertEqual(batch.request.targetLanguage, "ja")
+  }
+
+  func testMakeBatchPinnedSourceOverridesDetection() throws {
+    let defaults = makeScratchDefaults()
+    let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
+    settings.language1 = "en"
+    settings.language2 = "zh-Hans"
+    // Force the source to French even though the text is English.
+    settings.pinnedSourceLanguage = "fr"
+    let pipeline = TranslationPipeline(settings: settings)
+
+    let batch = try pipeline.makeBatch(text: "hello", selectionSource: .manual)
+
+    XCTAssertEqual(batch.request.sourceLanguage, "fr")
+  }
+
+  func testMakeBatchOnceOverrideWinsOverPinned() throws {
+    let defaults = makeScratchDefaults()
+    let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
+    settings.language1 = "en"
+    settings.language2 = "zh-Hans"
+    settings.pinnedTargetLanguage = "ja"
+    let pipeline = TranslationPipeline(settings: settings)
+
+    // Once override (target only) beats the pinned "ja"; nil source still
+    // falls back to detection.
+    let batch = try pipeline.makeBatch(
+      text: "hello",
+      selectionSource: .manual,
+      directionOverride: PanelDirectionOverride.make(source: nil, target: "ko")
+    )
+
+    XCTAssertEqual(batch.request.sourceLanguage, "en")
+    XCTAssertEqual(batch.request.targetLanguage, "ko")
+  }
+
+  func testMakeBatchOnceSourceOnlyFallsBackToPinnedTarget() throws {
+    let defaults = makeScratchDefaults()
+    let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
+    settings.language1 = "en"
+    settings.language2 = "zh-Hans"
+    settings.pinnedTargetLanguage = "de"
+    let pipeline = TranslationPipeline(settings: settings)
+
+    // Once pins only the source; the target side falls through to pinned "de".
+    let batch = try pipeline.makeBatch(
+      text: "你好",
+      selectionSource: .manual,
+      directionOverride: PanelDirectionOverride.make(source: "ja", target: nil)
+    )
+
+    XCTAssertEqual(batch.request.sourceLanguage, "ja")
+    XCTAssertEqual(batch.request.targetLanguage, "de")
+  }
+
+  func testResolvedDirectionChineseVariantPinnedTarget() {
+    let defaults = makeScratchDefaults()
+    let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
+    settings.language1 = "en"
+    settings.language2 = "zh-Hans"
+    // Pin Traditional Chinese as the target for a Simplified Chinese source.
+    settings.pinnedTargetLanguage = "zh-Hant"
+
+    let direction = settings.resolvedDirection(for: "你好，今天天气不错。")
+
+    XCTAssertEqual(direction.source, "zh-Hans")
+    XCTAssertEqual(direction.target, "zh-Hant")
+  }
+
+  func testResolvedDirectionAutoMatchesLegacyBehavior() {
+    let defaults = makeScratchDefaults()
+    let settings = SettingsStore(defaults: defaults, providerFileStore: makeProviderFileStore(), allowsMockProvider: true)
+    settings.language1 = "en"
+    settings.language2 = "zh-Hans"
+
+    // No pins, no override: identical to the old detect + pair resolution.
+    let direction = settings.resolvedDirection(for: "hello")
+
+    XCTAssertEqual(direction.source, "en")
+    XCTAssertEqual(direction.target, "zh-Hans")
+  }
+
+  func testPinnedLanguagesPersistAcrossReload() {
+    let defaults = makeScratchDefaults()
+    let providerFileStore = makeProviderFileStore()
+    let settings = SettingsStore(defaults: defaults, providerFileStore: providerFileStore, allowsMockProvider: true)
+    settings.pinnedSourceLanguage = "fr"
+    settings.pinnedTargetLanguage = "de"
+
+    let reloaded = SettingsStore(defaults: defaults, providerFileStore: providerFileStore, allowsMockProvider: true)
+    XCTAssertEqual(reloaded.pinnedSourceLanguage, "fr")
+    XCTAssertEqual(reloaded.pinnedTargetLanguage, "de")
+
+    // Clearing back to Auto removes the persisted value.
+    reloaded.pinnedSourceLanguage = nil
+    let recleared = SettingsStore(defaults: defaults, providerFileStore: providerFileStore, allowsMockProvider: true)
+    XCTAssertNil(recleared.pinnedSourceLanguage)
+    XCTAssertEqual(recleared.pinnedTargetLanguage, "de")
+  }
+
   private func makeProviderFileStore() -> ProviderSettingsFileStore {
     let fileURL = makeScratchDirectory().appendingPathComponent("providers.json", isDirectory: false)
     return ProviderSettingsFileStore(fileURL: fileURL)

@@ -36,19 +36,12 @@ final class TranslationPipeline: @unchecked Sendable {
       throw TranslationError.emptyInput
     }
 
-    let sourceLanguage: String?
-    let targetLanguage: String
-    if let directionOverride {
-      sourceLanguage = directionOverride.source
-      targetLanguage = directionOverride.target
-    } else {
-      sourceLanguage = LanguageDetector.sourceLanguageCode(
-        for: text,
-        language1: settings.language1,
-        language2: settings.language2
-      )
-      targetLanguage = settings.resolvedTargetLanguage(for: sourceLanguage)
-    }
+    // Three-layer resolution lives in SettingsStore.resolvedDirection so the
+    // pipeline, the panel preview, and the picker button titles all agree.
+    let (sourceLanguage, targetLanguage) = settings.resolvedDirection(
+      for: text,
+      override: directionOverride
+    )
     let llmInputText = SourceMarkdownPreparer.prepare(text)
 
     let request = TranslationRequest(

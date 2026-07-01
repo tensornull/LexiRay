@@ -201,7 +201,9 @@ final class LexiRayController: ObservableObject {
     }
 
     historyNavigationIndex = nil
-    translate(text: text, source: .manual)
+    // Carry the current Once/pinned picks so manually typed text honors the
+    // user's language selection (a fresh OCR/selection capture still resets it).
+    translate(text: text, source: .manual, directionOverride: panelDirectionOverride)
   }
 
   func clearPanelSourceText() {
@@ -239,10 +241,75 @@ final class LexiRayController: ObservableObject {
   }
 
   private func currentPreviewDirection() -> (source: String?, target: String) {
-    let source = panelSourceText.nonEmptyTrimmed.flatMap {
-      LanguageDetector.sourceLanguageCode(for: $0, language1: settings.language1, language2: settings.language2)
+    settings.resolvedDirection(for: panelSourceText, override: panelDirectionOverride)
+  }
+
+  /// Effective source/target language shown by the panel's pickers. A transient
+  /// "Once" override wins over the pinned "Always" language; `nil` means Auto.
+  var panelSourceSelection: String? {
+    panelDirectionOverride?.source ?? settings.pinnedSourceLanguage
+  }
+
+  var panelTargetSelection: String? {
+    panelDirectionOverride?.target ?? settings.pinnedTargetLanguage
+  }
+
+  /// Source/target the panel will actually translate with right now (Auto
+  /// resolved to a concrete language), for showing under an "Auto" button.
+  func resolvedPanelDirection() -> (source: String?, target: String) {
+    currentDisplayedDirection()
+  }
+
+  func selectPanelSourceLanguage(_ code: String?, mode: LanguageSelectionMode) {
+    applyLanguageSelection(code, mode: mode, isSource: true)
+  }
+
+  func selectPanelTargetLanguage(_ code: String?, mode: LanguageSelectionMode) {
+    applyLanguageSelection(code, mode: mode, isSource: false)
+  }
+
+  /// Applies a picker choice. `code == nil` is Auto (clears both the pinned and
+  /// the transient override for that side); a language with `.always` pins it in
+  /// settings; with `.once` sets a transient override that reverts on the next
+  /// fresh capture. Retranslates the current text if there is any.
+  private func applyLanguageSelection(_ code: String?, mode: LanguageSelectionMode, isSource: Bool) {
+    var onceSource = panelDirectionOverride?.source
+    var onceTarget = panelDirectionOverride?.target
+
+    if isSource {
+      switch (code, mode) {
+      case (nil, _):
+        settings.pinnedSourceLanguage = nil
+        onceSource = nil
+      case let (language?, .always):
+        settings.pinnedSourceLanguage = language
+        onceSource = nil
+      case let (language?, .once):
+        onceSource = language
+      }
+    } else {
+      switch (code, mode) {
+      case (nil, _):
+        settings.pinnedTargetLanguage = nil
+        onceTarget = nil
+      case let (language?, .always):
+        settings.pinnedTargetLanguage = language
+        onceTarget = nil
+      case let (language?, .once):
+        onceTarget = language
+      }
     }
-    return (source, settings.resolvedTargetLanguage(for: source))
+
+    let override = PanelDirectionOverride.make(source: onceSource, target: onceTarget)
+    guard let text = panelSourceText.nonEmptyTrimmed else {
+      // No text yet: hold the transient override so the picker buttons reflect
+      // it; pinned ("Always") changes are already persisted in settings.
+      panelDirectionOverride = override
+      return
+    }
+
+    let selectionSource: SelectionSource = lastSelectionSource == .unavailable ? .manual : lastSelectionSource
+    startBatchTranslation(text: text, source: selectionSource, bypassCache: true, directionOverride: override)
   }
 
   func translateOCRRegion() {
@@ -318,7 +385,7 @@ final class LexiRayController: ObservableObject {
     startBatchTranslation(text: text, source: .ocr, bypassCache: true)
   }
 
-  private func translate(text: String, source: SelectionSource) {
+  private func translate(text: String, source: SelectionSource, directionOverride: PanelDirectionOverride? = nil) {
     guard let text = text.nonEmptyTrimmed else {
       return
     }
@@ -330,7 +397,7 @@ final class LexiRayController: ObservableObject {
     lastSelectionSource = source
     floatingPanel.show(activating: false, repositioning: false)
 
-    startBatchTranslation(text: text, source: source, bypassCache: true)
+    startBatchTranslation(text: text, source: source, bypassCache: true, directionOverride: directionOverride)
   }
 
   func copyResultToClipboard() {

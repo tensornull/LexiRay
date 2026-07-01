@@ -93,45 +93,7 @@ struct FloatingPanelView: View {
 
   private var sourceComposer: some View {
     VStack(alignment: .leading, spacing: 8) {
-      HStack(spacing: 8) {
-        Text("Source")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.secondary)
-
-        Button {
-          controller.swapPanelDirection()
-        } label: {
-          Label(directionLabel, systemImage: "arrow.left.arrow.right")
-            .font(.caption.weight(.medium))
-        }
-        .controlSize(.small)
-        .directionSwapButtonStyle(isManual: controller.panelDirectionOverride != nil)
-        .disabled(controller.panelSourceText.nonEmptyTrimmed == nil)
-        .help("Swap translation direction")
-        if controller.lastSelectionSource != .unavailable {
-          PanelPill(title: controller.lastSelectionSource.displayName, systemName: sourceIcon, color: sourceColor)
-        }
-
-        Spacer()
-
-        panelButton(systemName: "xmark.circle.fill", help: "Clear Source", action: controller.clearPanelSourceText)
-          .opacity(controller.panelSourceText.isEmpty ? 0 : 1)
-          .disabled(controller.panelSourceText.isEmpty)
-          .accessibilityHidden(controller.panelSourceText.isEmpty)
-
-        Button {
-          controller.submitPanelSourceText()
-        } label: {
-          Label(translateButtonTitle, systemImage: "arrow.right.circle.fill")
-        }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.small)
-        .frame(width: 132, height: 30)
-        .keyboardShortcut(.return, modifiers: [.command])
-        .disabled(controller.panelSourceText.nonEmptyTrimmed == nil)
-        .help("Translate")
-      }
-      .frame(height: 30)
+      sourceHeaderRow
 
       SourceTextEditor(
         text: $controller.panelSourceText,
@@ -156,6 +118,65 @@ struct FloatingPanelView: View {
     }
   }
 
+  /// Compact single-row header: source ⇄ target language pickers plus the
+  /// clear / translate actions, matching the original tight footprint.
+  private var sourceHeaderRow: some View {
+    HStack(spacing: 8) {
+      Text("Source")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+
+      LanguagePickerButton(
+        title: sourcePickerTitle,
+        selection: controller.panelSourceSelection,
+        onSelect: { code, mode in controller.selectPanelSourceLanguage(code, mode: mode) }
+      )
+
+      Button {
+        controller.swapPanelDirection()
+      } label: {
+        Image(systemName: "arrow.left.arrow.right")
+          .font(.system(size: 12, weight: .semibold))
+          .foregroundStyle(.secondary)
+          .frame(width: 24, height: 26)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .disabled(controller.panelSourceText.nonEmptyTrimmed == nil)
+      .help("Swap translation direction")
+
+      LanguagePickerButton(
+        title: targetPickerTitle,
+        selection: controller.panelTargetSelection,
+        onSelect: { code, mode in controller.selectPanelTargetLanguage(code, mode: mode) }
+      )
+
+      if controller.lastSelectionSource != .unavailable {
+        PanelPill(title: controller.lastSelectionSource.displayName, systemName: sourceIcon, color: sourceColor)
+      }
+
+      Spacer(minLength: 8)
+
+      panelButton(systemName: "xmark.circle.fill", help: "Clear Source", action: controller.clearPanelSourceText)
+        .opacity(controller.panelSourceText.isEmpty ? 0 : 1)
+        .disabled(controller.panelSourceText.isEmpty)
+        .accessibilityHidden(controller.panelSourceText.isEmpty)
+
+      Button {
+        controller.submitPanelSourceText()
+      } label: {
+        Label(translateButtonTitle, systemImage: "arrow.right.circle.fill")
+      }
+      .buttonStyle(.borderedProminent)
+      .controlSize(.small)
+      .frame(width: 132, height: 30)
+      .keyboardShortcut(.return, modifiers: [.command])
+      .disabled(controller.panelSourceText.nonEmptyTrimmed == nil)
+      .help("Translate")
+    }
+    .frame(height: 30)
+  }
+
   private var resultArea: some View {
     resultContent
       .padding(10)
@@ -172,6 +193,7 @@ struct FloatingPanelView: View {
       VStack(alignment: .leading, spacing: 0) {
         ForEach(Array(standbyProviderConfigurations.enumerated()), id: \.element.id) { index, configuration in
           ProviderStandbyRow(settings: settings, configuration: configuration)
+            .padding(.vertical, 4)
 
           if index < standbyProviderConfigurations.count - 1 {
             Divider()
@@ -327,21 +349,26 @@ struct FloatingPanelView: View {
     }
   }
 
-  private var directionLabel: String {
-    switch controller.panelState {
-    case let .batch(batch):
-      LanguageDetector.directionLabel(
-        sourceLanguage: batch.request.sourceLanguage,
-        targetLanguage: batch.request.targetLanguage
-      )
-    case let .result(result):
-      LanguageDetector.directionLabel(
-        sourceLanguage: result.request.sourceLanguage,
-        targetLanguage: result.request.targetLanguage
-      )
-    case .idle, .loading, .error:
-      controller.settings.previewLanguageDirectionLabel(for: controller.panelSourceText)
+  /// Auto mode shows the resolved language ("Auto: English") and refreshes as the
+  /// detected/translated direction updates, matching HapiGo; a pinned language
+  /// shows its own name. Reads panelState/panelSourceText so SwiftUI re-renders
+  /// the titles the moment a translation lands.
+  private var sourcePickerTitle: String {
+    languagePickerTitle(selection: controller.panelSourceSelection, resolved: controller.resolvedPanelDirection().source)
+  }
+
+  private var targetPickerTitle: String {
+    languagePickerTitle(selection: controller.panelTargetSelection, resolved: controller.resolvedPanelDirection().target)
+  }
+
+  private func languagePickerTitle(selection: String?, resolved: String?) -> String {
+    if let selection {
+      return LanguageCatalog.displayName(for: selection)
     }
+    if let resolved {
+      return "Auto: \(LanguageCatalog.displayName(for: resolved))"
+    }
+    return "Auto"
   }
 
   private var sourceIcon: String {
@@ -459,7 +486,7 @@ private struct ProviderStandbyRow: View {
     HStack(alignment: .center, spacing: 10) {
       ProviderIconView(providerID: configuration.providerID)
 
-      VStack(alignment: .leading, spacing: 2) {
+      VStack(alignment: .leading, spacing: 3) {
         Text(configuration.effectiveDisplayName)
           .font(.callout.weight(.semibold))
           .lineLimit(1)
@@ -476,7 +503,7 @@ private struct ProviderStandbyRow: View {
 
       PanelPill(title: status.title, systemName: status.systemName, color: status.color)
     }
-    .frame(minHeight: 36, alignment: .center)
+    .frame(minHeight: 48, alignment: .center)
     .accessibilityElement(children: .combine)
     .accessibilityLabel("\(configuration.effectiveDisplayName), \(status.title)")
   }
