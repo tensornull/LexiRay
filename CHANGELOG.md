@@ -7,6 +7,34 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-01
+
+### Added
+
+- HapiGo-style language selector: the floating panel now shows dual source/target
+  language pickers with Auto/Once/Always modes. "Auto" detects the source language
+  and resolves the target from your pair; "Once" pins a language for the current
+  translation only; "Always" saves it as the persistent default. The pickers display
+  the resolved language (e.g., "Auto: English") after translation.
+- OCR now works on secondary displays: each screen gets its own overlay window for
+  region selection, fixing the issue where OCR was only available on the main display.
+
+### Fixed
+
+- The floating panel no longer dismisses when you click its right-edge or bottom-edge
+  resize handle. A resize-grab mouseDown now correctly counts as an "inside the panel"
+  event instead of triggering the outside-click dismiss.
+- The floating panel's rounded corners are now smooth on Retina displays (no more
+  jagged edges). The macOS 26+ `NSGlassEffectView` path now trusts the view's own
+  anti-aliased corner rendering instead of stacking redundant layer masks.
+- ChatCompletions provider (and compatible endpoints) now translate correctly instead
+  of treating input as conversational chat. The user message now restates the
+  translation instruction around the source text, matching the Anthropic Messages
+  provider's behavior.
+- Provider rows in the idle panel are no longer cramped: row height increased from
+  36pt to 48pt with better vertical spacing, making the layout more breathable and
+  matching HapiGo's visual density.
+
 ## [0.2.3] - 2026-06-23
 
 ### Fixed

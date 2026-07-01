@@ -1,5 +1,45 @@
 import SwiftUI
 
+/// Applies the platform-native capsule button style to the panel's direction control.
+/// Uses Liquid Glass on macOS 26+ and the bordered capsule on earlier releases, and
+/// only tints the active (manual) state — matching Apple's "tint the primary action only"
+/// guidance so the control reads as neutral chrome until the user pins a direction.
+struct DirectionSwapButtonStyleModifier: ViewModifier {
+  let isManual: Bool
+
+  func body(content: Content) -> some View {
+    if #available(macOS 26.0, *) {
+      if isManual {
+        content
+          .buttonStyle(.glassProminent)
+          .buttonBorderShape(.capsule)
+          .tint(.accentColor)
+      } else {
+        content
+          .buttonStyle(.glass)
+          .buttonBorderShape(.capsule)
+      }
+    } else {
+      if isManual {
+        content
+          .buttonStyle(.borderedProminent)
+          .buttonBorderShape(.capsule)
+          .tint(.accentColor)
+      } else {
+        content
+          .buttonStyle(.bordered)
+          .buttonBorderShape(.capsule)
+      }
+    }
+  }
+}
+
+extension View {
+  func directionSwapButtonStyle(isManual: Bool) -> some View {
+    modifier(DirectionSwapButtonStyleModifier(isManual: isManual))
+  }
+}
+
 struct FloatingPanelIconButtonStyle: ButtonStyle {
   var isActive = false
 

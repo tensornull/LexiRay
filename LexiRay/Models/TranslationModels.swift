@@ -1,5 +1,20 @@
 import Foundation
 
+/// Explicit translation direction that overrides automatic source detection,
+/// e.g. when the user picks a source/target language or swaps the direction in
+/// the panel. A `nil` side keeps that direction's automatic behavior (detected
+/// source / pinned-or-resolved target), so the user can pin just one side.
+struct PanelDirectionOverride: Equatable {
+  let source: String?
+  let target: String?
+
+  /// Collapses an all-`nil` override to `nil` so callers can treat "no override"
+  /// uniformly (e.g. the swap button's manual-state styling, cache bypass).
+  static func make(source: String?, target: String?) -> PanelDirectionOverride? {
+    (source == nil && target == nil) ? nil : PanelDirectionOverride(source: source, target: target)
+  }
+}
+
 struct TranslationRequest: Equatable, Hashable {
   let text: String
   let llmInputText: String

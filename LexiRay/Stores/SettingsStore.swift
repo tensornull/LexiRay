@@ -68,6 +68,40 @@ final class SettingsStore: ObservableObject {
     didSet { defaults.set(autoSwitchLanguages, forKey: Keys.autoSwitchLanguages) }
   }
 
+  /// User-pinned "Always" source language (nil = automatic detection). Layered on
+  /// top of the language1/language2 auto-switch pair; never written back to the
+  /// pair so it cannot fight the language2/targetLanguage mirroring didSets.
+  @Published var pinnedSourceLanguage: String? {
+    didSet {
+      let normalized = pinnedSourceLanguage?.nonEmptyTrimmed
+      if normalized != pinnedSourceLanguage {
+        pinnedSourceLanguage = normalized
+        return
+      }
+      if let normalized {
+        defaults.set(normalized, forKey: Keys.pinnedSourceLanguage)
+      } else {
+        defaults.removeObject(forKey: Keys.pinnedSourceLanguage)
+      }
+    }
+  }
+
+  /// User-pinned "Always" target language (nil = automatic resolution).
+  @Published var pinnedTargetLanguage: String? {
+    didSet {
+      let normalized = pinnedTargetLanguage?.nonEmptyTrimmed
+      if normalized != pinnedTargetLanguage {
+        pinnedTargetLanguage = normalized
+        return
+      }
+      if let normalized {
+        defaults.set(normalized, forKey: Keys.pinnedTargetLanguage)
+      } else {
+        defaults.removeObject(forKey: Keys.pinnedTargetLanguage)
+      }
+    }
+  }
+
   @Published var autoCopyMode: AutoCopyMode {
     didSet { defaults.set(autoCopyMode.rawValue, forKey: Keys.autoCopyMode) }
   }
@@ -151,6 +185,8 @@ final class SettingsStore: ObservableObject {
     language2 = initialLanguage2
     targetLanguage = initialLanguage2
     autoSwitchLanguages = defaults.object(forKey: Keys.autoSwitchLanguages) as? Bool ?? true
+    pinnedSourceLanguage = defaults.string(forKey: Keys.pinnedSourceLanguage)?.nonEmptyTrimmed
+    pinnedTargetLanguage = defaults.string(forKey: Keys.pinnedTargetLanguage)?.nonEmptyTrimmed
     autoCopyMode = AutoCopyMode(rawValue: defaults.string(forKey: Keys.autoCopyMode) ?? "") ?? .off
     showsMenuBarIcon = defaults.object(forKey: Keys.showsMenuBarIcon) as? Bool ?? true
     translateHotKey = Self.loadHotKey(
@@ -187,6 +223,8 @@ final class SettingsStore: ObservableObject {
     language2 = LanguageDetector.defaultLanguage2
     targetLanguage = language2
     autoSwitchLanguages = true
+    pinnedSourceLanguage = nil
+    pinnedTargetLanguage = nil
     providerConfigurations = Self.defaultProviderConfigurations()
     apiKeyRevision = UUID()
     persistProviderSettingsFile()
@@ -307,21 +345,31 @@ final class SettingsStore: ObservableObject {
     )
   }
 
+  /// Resolves the effective (source, target) for a translation using the
+  /// three-layer priority: transient `override` (HapiGo "Once") > pinned
+  /// "Always" language > automatic detection / pair resolution. Each side falls
+  /// back independently, so the user can pin only one direction.
+  func resolvedDirection(
+    for text: String?,
+    override: PanelDirectionOverride? = nil
+  ) -> (source: String?, target: String) {
+    let detected = text?.nonEmptyTrimmed.flatMap {
+      LanguageDetector.sourceLanguageCode(for: $0, language1: language1, language2: language2)
+    }
+    let source = override?.source ?? pinnedSourceLanguage ?? detected
+    let target = override?.target ?? pinnedTargetLanguage ?? resolvedTargetLanguage(for: source)
+    return (source, target)
+  }
+
   func languageDirectionLabel(sourceLanguage: String?, targetLanguage: String) -> String {
     LanguageDetector.directionLabel(sourceLanguage: sourceLanguage, targetLanguage: targetLanguage)
   }
 
   func previewLanguageDirectionLabel(for text: String?) -> String {
-    let sourceLanguage = text?.nonEmptyTrimmed.flatMap {
-      LanguageDetector.sourceLanguageCode(
-        for: $0,
-        language1: language1,
-        language2: language2
-      )
-    }
+    let direction = resolvedDirection(for: text)
     return languageDirectionLabel(
-      sourceLanguage: sourceLanguage,
-      targetLanguage: resolvedTargetLanguage(for: sourceLanguage)
+      sourceLanguage: direction.source,
+      targetLanguage: direction.target
     )
   }
 
@@ -734,6 +782,14 @@ final class SettingsStore: ObservableObject {
 
     static var autoSwitchLanguages: String {
       "autoSwitchLanguages"
+    }
+
+    static var pinnedSourceLanguage: String {
+      "pinnedSourceLanguage"
+    }
+
+    static var pinnedTargetLanguage: String {
+      "pinnedTargetLanguage"
     }
 
     static var autoCopyMode: String {

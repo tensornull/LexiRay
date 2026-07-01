@@ -31,17 +31,17 @@ final class TranslationPipeline: @unchecked Sendable {
   }
 
   @MainActor
-  func makeBatch(text rawText: String, selectionSource: SelectionSource) throws -> TranslationBatch {
+  func makeBatch(text rawText: String, selectionSource: SelectionSource, directionOverride: PanelDirectionOverride? = nil) throws -> TranslationBatch {
     guard let text = rawText.nonEmptyTrimmed else {
       throw TranslationError.emptyInput
     }
 
-    let sourceLanguage = LanguageDetector.sourceLanguageCode(
+    // Three-layer resolution lives in SettingsStore.resolvedDirection so the
+    // pipeline, the panel preview, and the picker button titles all agree.
+    let (sourceLanguage, targetLanguage) = settings.resolvedDirection(
       for: text,
-      language1: settings.language1,
-      language2: settings.language2
+      override: directionOverride
     )
-    let targetLanguage = settings.resolvedTargetLanguage(for: sourceLanguage)
     let llmInputText = SourceMarkdownPreparer.prepare(text)
 
     let request = TranslationRequest(
