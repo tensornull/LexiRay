@@ -38,7 +38,7 @@ struct SourceTextEditor: View {
         onMoveDown: onMoveDown
       )
 
-      if text.isEmpty {
+      if text.isEmpty && !isFocused {
         Text(placeholder)
           .font(.body)
           .foregroundStyle(.tertiary)
