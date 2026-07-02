@@ -1,0 +1,55 @@
+name: Release Build
+
+# Fallback release builder: builds, signs, packages, and uploads the release DMG
+# from a macOS runner using the repository's self-signed release certificate
+# secrets. The normal path is local `./script/publish_release.sh`; this workflow
+# exists for when the signing material is not available on a local machine.
+# The separate "Release Asset Check" workflow still validates published assets.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version without leading v, for example 0.3.0"
+        required: true
+        type: string
+
+jobs:
+  build-sign-upload:
+    runs-on: macos-26
+    permissions:
+      contents: write
+    steps:
+      - name: Resolve tag
+        id: resolve
+        shell: bash
+        run: |
+          version="${{ inputs.version }}"
+          version="${version#v}"
+          if [[ -z "$version" ]]; then
+            echo "version input is required" >&2
+            exit 1
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "tag=v$version" >>"$GITHUB_OUTPUT"
+
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.resolve.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+
+      - name: Install tools
+        run: brew install xcodegen
+
+      - name: Build, sign, package, and upload release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEXIRAY_RELEASE_CERT_P12_BASE64: ${{ secrets.LEXIRAY_RELEASE_CERT_P12_BASE64 }}
+          LEXIRAY_RELEASE_CERT_PASSWORD: ${{ secrets.LEXIRAY_RELEASE_CERT_PASSWORD }}
+        run: ./script/publish_release.sh "${{ steps.resolve.outputs.version }}"
