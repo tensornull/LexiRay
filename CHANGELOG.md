@@ -7,6 +7,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-02
+
+### Fixed
+
+- Fixed code signing consistency issue that caused "invalid signature (-67034)" errors
+  when upgrading from previous versions. All releases now use a unified signing
+  certificate to ensure smooth upgrades.
+
 ## [0.3.0] - 2026-07-01
 
 ### Added
