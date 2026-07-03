@@ -24,12 +24,14 @@ struct SourceTextEditor: View {
 
   @State private var isFocused = false
   @State private var measuredTextHeight: CGFloat = 0
+  @State private var hasMarkedText = false
 
   var body: some View {
     ZStack(alignment: .topLeading) {
       SourceTextView(
         text: $text,
         isFocused: $isFocused,
+        hasMarkedText: $hasMarkedText,
         textInset: Self.textInset,
         lineFragmentPadding: Self.lineFragmentPadding,
         accessibilityIdentifier: accessibilityIdentifier,
@@ -38,7 +40,7 @@ struct SourceTextEditor: View {
         onMoveDown: onMoveDown
       )
 
-      if text.isEmpty && !isFocused {
+      if text.isEmpty && !hasMarkedText {
         Text(placeholder)
           .font(.body)
           .foregroundStyle(.tertiary)
@@ -78,6 +80,7 @@ struct SourceTextEditor: View {
 private struct SourceTextView: NSViewRepresentable {
   @Binding var text: String
   @Binding var isFocused: Bool
+  @Binding var hasMarkedText: Bool
   let textInset: CGSize
   let lineFragmentPadding: CGFloat
   let accessibilityIdentifier: String
@@ -217,6 +220,10 @@ private struct SourceTextView: NSViewRepresentable {
         return
       }
       parent.text = textView.string
+
+      // Update marked text state (for IME composition)
+      parent.hasMarkedText = textView.markedRange().location != NSNotFound
+
       let editedText = textView.string
       Task { @MainActor [weak self, weak textView] in
         guard let self, let textView, textView.string == editedText else {
@@ -227,15 +234,16 @@ private struct SourceTextView: NSViewRepresentable {
       scheduleHeightRefresh(for: textView)
     }
 
-    func textDidBeginEditing(_: Notification) {
+    func textDidBeginEditing(_ notification: Notification) {
       DispatchQueue.main.async { [weak self] in
         self?.parent.isFocused = true
       }
     }
 
-    func textDidEndEditing(_: Notification) {
+    func textDidEndEditing(_ notification: Notification) {
       DispatchQueue.main.async { [weak self] in
         self?.parent.isFocused = false
+        self?.parent.hasMarkedText = false
       }
     }
 
