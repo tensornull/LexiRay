@@ -7,6 +7,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-04
+
+### Fixed
+
+- Fixed source text editor placeholder behavior with input method (IME) composition. The placeholder now correctly hides when typing begins and shows when the input is empty, matching HapiGo's behavior.
+- Fixed inline pinyin preview visibility during Chinese input. Users can now see real-time composition text (e.g., "zuixin zhuangtai") in the input box as they type, instead of only seeing the candidate window.
+- Improved IME transaction handling to prevent SwiftUI render cycles from interrupting active input composition.
+
+## [0.3.1] - 2026-07-02
+
+### Fixed
+
+- Fixed code signing consistency issue that caused "invalid signature (-67034)" errors when upgrading from previous versions. All releases now use a unified signing certificate to ensure smooth upgrades.
+
 ## [0.3.0] - 2026-07-01
 
 ### Added
