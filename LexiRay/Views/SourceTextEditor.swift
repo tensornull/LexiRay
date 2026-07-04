@@ -28,6 +28,17 @@ struct SourceTextEditor: View {
 
   var body: some View {
     ZStack(alignment: .topLeading) {
+      // Placeholder sits *behind* the transparent text view so the insertion
+      // point and IME marked text always draw above it, like HapiGo.
+      if text.isEmpty && !hasMarkedText {
+        Text(placeholder)
+          .font(.body)
+          .foregroundStyle(.tertiary)
+          .padding(.leading, Self.textInset.width)
+          .padding(.top, Self.textInset.height)
+          .allowsHitTesting(false)
+      }
+
       SourceTextView(
         text: $text,
         isFocused: $isFocused,
@@ -39,15 +50,6 @@ struct SourceTextEditor: View {
         onMoveUp: onMoveUp,
         onMoveDown: onMoveDown
       )
-
-      if text.isEmpty && !hasMarkedText {
-        Text(placeholder)
-          .font(.body)
-          .foregroundStyle(.tertiary)
-          .padding(.leading, Self.textInset.width)
-          .padding(.top, Self.textInset.height)
-          .allowsHitTesting(false)
-      }
     }
     .frame(minHeight: editorHeight, maxHeight: editorHeight)
     .background(.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -104,6 +106,9 @@ private struct SourceTextView: NSViewRepresentable {
     textView.historyNavigationHandler = { [coordinator = context.coordinator] direction in
       coordinator.handleHistoryNavigation(direction)
     }
+    textView.markedTextStateDidChange = { [coordinator = context.coordinator] hasMarkedText in
+      coordinator.updateHasMarkedText(hasMarkedText)
+    }
     textView.appearanceDidChange = { [coordinator = context.coordinator] textView in
       coordinator.applyTextAttributes(to: textView)
     }
@@ -130,7 +135,17 @@ private struct SourceTextView: NSViewRepresentable {
       return
     }
 
+    // While IME composition is in progress the text view is the source of
+    // truth: the storage holds the inline marked text (pinyin preview), and
+    // reconfiguring fonts/typing attributes or replacing `string` mid-
+    // composition aborts the IME transaction. Leave the view untouched; the
+    // binding re-syncs from textDidChange once the composition commits.
+    guard !textView.hasMarkedText() else {
+      return
+    }
+
     configure(textView)
+
     if textView.string != text {
       context.coordinator.isProgrammaticUpdate = true
       textView.string = text
@@ -220,9 +235,7 @@ private struct SourceTextView: NSViewRepresentable {
         return
       }
       parent.text = textView.string
-
-      // Update marked text state (for IME composition)
-      parent.hasMarkedText = textView.markedRange().location != NSNotFound
+      updateHasMarkedText(textView.hasMarkedText())
 
       let editedText = textView.string
       Task { @MainActor [weak self, weak textView] in
@@ -243,8 +256,15 @@ private struct SourceTextView: NSViewRepresentable {
     func textDidEndEditing(_ notification: Notification) {
       DispatchQueue.main.async { [weak self] in
         self?.parent.isFocused = false
-        self?.parent.hasMarkedText = false
+        self?.updateHasMarkedText(false)
       }
+    }
+
+    func updateHasMarkedText(_ newValue: Bool) {
+      guard parent.hasMarkedText != newValue else {
+        return
+      }
+      parent.hasMarkedText = newValue
     }
 
     @MainActor
@@ -292,6 +312,39 @@ private final class SourceTextNSTextView: NSTextView {
   var historyNavigationHandler: ((SourceTextHistoryDirection) -> Bool)?
   var contentHeightDidChange: (() -> Void)?
   var appearanceDidChange: ((SourceTextNSTextView) -> Void)?
+  var markedTextStateDidChange: ((Bool) -> Void)?
+
+  // IME composition hooks: `textDidChange` is not a reliable signal for
+  // marked-text transitions, so report state from the NSTextInputClient
+  // entry points directly.
+  //
+  // The notification is deferred to the next runloop turn: mutating SwiftUI
+  // state synchronously from inside the text input system re-enters
+  // updateNSView while the IME transaction is still open, which aborts the
+  // inline composition (the pinyin preview never reaches the screen).
+  override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+    super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+    notifyMarkedTextStateChange()
+  }
+
+  override func unmarkText() {
+    super.unmarkText()
+    notifyMarkedTextStateChange()
+  }
+
+  override func insertText(_ string: Any, replacementRange: NSRange) {
+    super.insertText(string, replacementRange: replacementRange)
+    notifyMarkedTextStateChange()
+  }
+
+  private func notifyMarkedTextStateChange() {
+    DispatchQueue.main.async { [weak self] in
+      guard let self else {
+        return
+      }
+      self.markedTextStateDidChange?(self.hasMarkedText())
+    }
+  }
 
   override func layout() {
     super.layout()
