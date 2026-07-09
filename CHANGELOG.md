@@ -7,6 +7,30 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-08
+
+### Added
+
+- Speak the floating panel's source text: a speaker button in the source
+  composer reads the input aloud, choosing a voice from the locally detected
+  language. Source and translated-text speech are mutually exclusive.
+
+### Fixed
+
+- Fixed the floating panel opening too short for Chinese (and other CJK) results,
+  which clipped content or forced scrolling. Panel height is now driven by the
+  view's real measured layout instead of a per-character estimate.
+- Fixed the panel's rounded corners rendering with a jagged / uneven edge on
+  Retina displays, caused by the corner mask being sampled at 1x.
+
+### Changed
+
+- Reworked floating panel sizing to grow from SwiftUI's measured content height,
+  removing the hand-tuned layout estimator. The panel keeps its manual
+  drag-width and vertical-only growth.
+- Focus handling, event-monitor cleanup, resize persistence, and
+  keyboard-shortcut routing in the floating panel were hardened for correctness.
+
 ## [0.3.2] - 2026-07-04
 
 ### Fixed

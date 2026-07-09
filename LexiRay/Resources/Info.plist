@@ -2,33 +2,33 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleDevelopmentRegion</key>
-  <string>$(DEVELOPMENT_LANGUAGE)</string>
-  <key>CFBundleExecutable</key>
-  <string>$(EXECUTABLE_NAME)</string>
-  <key>CFBundleIdentifier</key>
-  <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-  <key>CFBundleInfoDictionaryVersion</key>
-  <string>6.0</string>
-  <key>CFBundleName</key>
-  <string>LexiRay</string>
-  <key>CFBundlePackageType</key>
-  <string>APPL</string>
-  <key>CFBundleShortVersionString</key>
-  <string>0.3.2</string>
-  <key>CFBundleVersion</key>
-  <string>12</string>
-  <key>LSMinimumSystemVersion</key>
-  <string>15.0</string>
-  <key>LSUIElement</key>
-  <true/>
-  <key>NSAppleEventsUsageDescription</key>
-  <string>LexiRay uses browser automation only to read the currently selected text when Accessibility cannot provide it.</string>
-  <key>NSAccessibilityUsageDescription</key>
-  <string>LexiRay needs Accessibility access to read selected text and show a translation near your current work.</string>
-  <key>NSScreenCaptureUsageDescription</key>
-  <string>LexiRay uses screen capture only for the OCR region you select.</string>
-  <key>NSSupportsAutomaticGraphicsSwitching</key>
-  <true/>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>LexiRay</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.4.0</string>
+	<key>CFBundleVersion</key>
+	<string>13</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>15.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAccessibilityUsageDescription</key>
+	<string>LexiRay needs Accessibility access to read selected text and show a translation near your current work.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>LexiRay uses browser automation only to read the currently selected text when Accessibility cannot provide it.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>LexiRay uses screen capture only for the OCR region you select.</string>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
+	<true/>
 </dict>
 </plist>

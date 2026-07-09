@@ -13,8 +13,9 @@ near your current work.
   simulated copy.
 - Local OCR through ScreenCaptureKit and Vision.
 - Floating translation panel with provider-by-provider results.
-- Translation history, retranslation, speech, copy formats, and optional
-  auto-copy of the first provider-ordered successful result.
+- Translation history, retranslation, speech for both source and translated
+  text, copy formats, and optional auto-copy of the first provider-ordered
+  successful result.
 - Provider support for the system dictionary, OpenAI Chat Completions, OpenAI
   Responses, Anthropic Messages, and Gemini GenerateContent. The mock provider is
   reserved for tests.

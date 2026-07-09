@@ -361,68 +361,85 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(panel.updateLayoutCount, 1)
   }
 
-  func testShortResultMatchesIdleBaselineHeight() {
-    let panel = MockFloatingPanelPresenter()
-    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
+  // Panel sizing is now driven by heights SwiftUI measures at runtime (reported
+  // via preference keys), so these tests exercise the pure composition/width
+  // functions with injected measurements rather than re-deriving text layout.
 
-    let idleHeight = FloatingPanelController.contentSize(for: controller).height
+  private static let testMaxHeight: CGFloat = 680
 
-    controller.panelState = .result(makeTranslationResult(text: "你好"))
-    let resultSize = FloatingPanelController.contentSize(for: controller)
+  func testMeasuredHeightGrowsWithResultContent() {
+    let chrome: CGFloat = 200
+    let idle = FloatingPanelController.panelContentHeight(
+      chrome: chrome, resultContent: 0, fallbackChrome: 180, maximum: Self.testMaxHeight
+    )
+    let short = FloatingPanelController.panelContentHeight(
+      chrome: chrome, resultContent: 40, fallbackChrome: 180, maximum: Self.testMaxHeight
+    )
+    let tall = FloatingPanelController.panelContentHeight(
+      chrome: chrome, resultContent: 300, fallbackChrome: 180, maximum: Self.testMaxHeight
+    )
 
-    XCTAssertEqual(resultSize.width, 660)
-    // A short translation keeps the idle footprint instead of shrinking below it,
-    // so the panel stays consistent before / during / after a translation.
-    XCTAssertEqual(resultSize.height, idleHeight)
-    XCTAssertLessThanOrEqual(resultSize.height, 460)
+    // More measured result content => taller panel (until the ceiling).
+    XCTAssertGreaterThan(tall, short)
+    XCTAssertGreaterThanOrEqual(short, idle)
   }
 
-  func testIdlePanelUsesCompactProviderPreviewHeight() {
-    let panel = MockFloatingPanelPresenter()
-    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
+  func testMeasuredHeightHonorsMinimumFloorAndCeiling() {
+    // A tiny measurement is floored to the shared baseline minimum.
+    let floored = FloatingPanelController.panelContentHeight(
+      chrome: 10, resultContent: 0, fallbackChrome: 10, maximum: Self.testMaxHeight
+    )
+    XCTAssertGreaterThanOrEqual(floored, 300)
 
-    let size = FloatingPanelController.contentSize(for: controller)
-
-    XCTAssertLessThanOrEqual(size.width, 680)
-    XCTAssertGreaterThanOrEqual(size.height, 360)
-    XCTAssertLessThanOrEqual(size.height, 460)
+    // An oversized measurement is clamped to the ceiling (content then scrolls).
+    let clamped = FloatingPanelController.panelContentHeight(
+      chrome: 400, resultContent: 2000, fallbackChrome: 180, maximum: Self.testMaxHeight
+    )
+    XCTAssertEqual(clamped, Self.testMaxHeight)
   }
 
-  func testSavedFloatingPanelSizeUsesWidthButIgnoresHeight() {
-    let panel = MockFloatingPanelPresenter()
-    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
-    controller.panelState = .result(makeTranslationResult(text: "你好"))
-
-    controller.settings.recordFloatingPanelSize(width: 760, height: 520)
-
-    let size = FloatingPanelController.contentSize(for: controller)
-
-    XCTAssertEqual(size.width, 760)
-    XCTAssertLessThan(size.height, 520)
+  func testMeasuredHeightUsesFallbackChromeBeforeMeasurement() {
+    // With no measurement yet (chrome == 0) the fallback chrome height is used.
+    let usingFallback = FloatingPanelController.panelContentHeight(
+      chrome: 0, resultContent: 0, fallbackChrome: 260, maximum: Self.testMaxHeight
+    )
+    let usingMeasured = FloatingPanelController.panelContentHeight(
+      chrome: 260, resultContent: 0, fallbackChrome: 999, maximum: Self.testMaxHeight
+    )
+    XCTAssertEqual(usingFallback, usingMeasured)
   }
 
-  func testOversizedSavedFloatingPanelWidthIsIgnoredForIdlePanel() {
-    let panel = MockFloatingPanelPresenter()
-    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
-
-    controller.settings.recordFloatingPanelSize(width: 900, height: 700)
-
-    let size = FloatingPanelController.contentSize(for: controller)
-
-    XCTAssertLessThanOrEqual(size.width, 680)
-    XCTAssertLessThanOrEqual(size.height, 460)
+  func testDefaultPanelWidthWhenNoManualSize() {
+    let width = FloatingPanelController.panelContentWidth(
+      savedWidth: nil, isIdle: false, maximum: 980
+    )
+    XCTAssertEqual(width, 660)
   }
 
-  func testSavedFloatingPanelSizeIsClampedToSupportedWidth() {
-    let panel = MockFloatingPanelPresenter()
-    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
+  func testManualWidthIsUsedExactlyWhenNotIdle() {
+    let width = FloatingPanelController.panelContentWidth(
+      savedWidth: 760, isIdle: false, maximum: 980
+    )
+    XCTAssertEqual(width, 760)
+  }
 
-    controller.settings.recordFloatingPanelSize(width: 120, height: 520)
+  func testManualNarrowWidthIsPreservedAndClampedToMinimum() {
+    let tooNarrow = FloatingPanelController.panelContentWidth(
+      savedWidth: 120, isIdle: false, maximum: 980
+    )
+    XCTAssertEqual(tooNarrow, FloatingPanelController.minimumContentSize.width)
+  }
 
-    let size = FloatingPanelController.contentSize(for: controller)
-
-    XCTAssertGreaterThanOrEqual(size.width, FloatingPanelController.minimumContentSize.width)
-    XCTAssertLessThan(size.height, 520)
+  func testOversizedManualWidthIsCappedForIdlePanel() {
+    // Idle caps the manual width at the idle maximum (680); non-idle keeps it.
+    let idleWidth = FloatingPanelController.panelContentWidth(
+      savedWidth: 900, isIdle: true, maximum: 980
+    )
+    let activeWidth = FloatingPanelController.panelContentWidth(
+      savedWidth: 900, isIdle: false, maximum: 980
+    )
+    XCTAssertLessThanOrEqual(idleWidth, 680)
+    XCTAssertEqual(activeWidth, 900)
   }
 
   func testManualContentSizeOverridePreventsAutomaticShrink() {
@@ -447,78 +464,17 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(size.height, 680)
   }
 
-  func testLongResultUsesTallerFloatingPanelHeight() {
-    let panel = MockFloatingPanelPresenter()
-    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
-    controller.panelState = .result(makeTranslationResult(text: String(repeating: "这是一段较长的翻译结果，用于验证悬浮窗会按内容增加高度。\n", count: 10)))
+  func testMaximumContentHeightUsesScreenHeightNotCursor() {
+    // Deterministic ceiling derived from an injected screen height.
+    let compact = FloatingPanelController.maximumContentHeight(isExpanded: false, visibleHeight: 900)
+    let expanded = FloatingPanelController.maximumContentHeight(isExpanded: true, visibleHeight: 900)
+    let tinyScreen = FloatingPanelController.maximumContentHeight(isExpanded: false, visibleHeight: 300)
 
-    let shortHeight = FloatingPanelController.contentSize(for: makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: MockFloatingPanelPresenter())).height
-    let longHeight = FloatingPanelController.contentSize(for: controller).height
-
-    XCTAssertGreaterThan(longHeight, shortHeight)
-    XCTAssertLessThanOrEqual(longHeight, FloatingPanelController.maximumContentHeight(isExpanded: false))
-  }
-
-  func testFloatingPanelWidthStaysFixedAsContentGrows() {
-    let shortController = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: MockFloatingPanelPresenter())
-    shortController.panelState = .result(makeTranslationResult(text: "你好"))
-
-    let longController = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: MockFloatingPanelPresenter())
-    longController.panelState = .result(makeTranslationResult(text: String(repeating: "This is a very long single line of translated content that previously widened the panel.\n", count: 20)))
-
-    let shortSize = FloatingPanelController.contentSize(for: shortController)
-    let longSize = FloatingPanelController.contentSize(for: longController)
-
-    // Width is fixed across content length; only height grows (vertical-only growth).
-    XCTAssertEqual(shortSize.width, 660)
-    XCTAssertEqual(longSize.width, 660)
-    XCTAssertGreaterThan(longSize.height, shortSize.height)
-  }
-
-  func testManualNarrowWidthIsPreservedAcrossContentChanges() {
-    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: MockFloatingPanelPresenter())
-    // Simulate a manual drag-resize to 560 (the minimum allowed width).
-    controller.settings.setFloatingPanelLastSizeForTesting(FloatingPanelSavedSize(width: 560, height: 400))
-
-    controller.panelState = .result(makeTranslationResult(text: "你好"))
-    let size1 = FloatingPanelController.contentSize(for: controller)
-
-    // Change content: many lines to push height above the idle baseline.
-    controller.panelState = .result(makeTranslationResult(text: String(repeating: "longer line of content\n", count: 25)))
-    let size2 = FloatingPanelController.contentSize(for: controller)
-
-    // The manual width (560) must stay exactly as-is, not snap back to the
-    // default 660. Only height adjusts to fit the content.
-    XCTAssertEqual(size1.width, 560)
-    XCTAssertEqual(size2.width, 560)
-    XCTAssertGreaterThan(size2.height, size1.height)
-  }
-
-  func testBatchHeightGrowsWithProviderContent() {
-    let panel = MockFloatingPanelPresenter()
-    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
-    let request = TranslationRequest(text: "hello", sourceLanguage: "en", targetLanguage: "zh-Hans", selectionSource: .manual)
-    let shortBatch = TranslationBatch(
-      request: request,
-      entries: [
-        ProviderTranslationEntry(providerConfigurationID: "short", providerID: .mock, providerName: "Short", status: .success(makeTranslationResult(text: "短句")))
-      ]
-    )
-    let longBatch = TranslationBatch(
-      request: request,
-      entries: [
-        ProviderTranslationEntry(providerConfigurationID: "short", providerID: .mock, providerName: "Short", status: .success(makeTranslationResult(text: "短句"))),
-        ProviderTranslationEntry(providerConfigurationID: "long", providerID: .systemDictionary, providerName: "Long", status: .success(makeTranslationResult(text: String(repeating: "Long translated content wraps across multiple visible lines. ", count: 18))))
-      ]
-    )
-
-    controller.panelState = .batch(shortBatch)
-    let shortHeight = FloatingPanelController.contentSize(for: controller).height
-    controller.panelState = .batch(longBatch)
-    let longHeight = FloatingPanelController.contentSize(for: controller).height
-
-    XCTAssertGreaterThan(longHeight, shortHeight)
-    XCTAssertLessThanOrEqual(longHeight, FloatingPanelController.maximumContentHeight(isExpanded: false))
+    XCTAssertEqual(compact, 680)
+    XCTAssertEqual(expanded, 760)
+    // Small screens shrink the ceiling but never below the hard floor.
+    XCTAssertGreaterThanOrEqual(tinyScreen, 320)
+    XCTAssertLessThanOrEqual(tinyScreen, 680)
   }
 
   func testEmptyPanelSourceSubmitDoesNotStartTranslation() {
@@ -1343,6 +1299,71 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertTrue(speech.speakRequests.isEmpty)
   }
 
+  func testToggleSpeakSourceSpeaksDetectedLanguageAndStops() {
+    let panel = MockFloatingPanelPresenter()
+    let speech = MockSpeechService()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      speechService: speech
+    )
+    controller.panelSourceText = "This is the source text to read aloud."
+
+    controller.toggleSpeakSource()
+
+    XCTAssertTrue(controller.isSpeakingSource)
+    XCTAssertEqual(speech.speakRequests.first?.text, "This is the source text to read aloud.")
+    XCTAssertEqual(speech.speakRequests.first?.languageCode, "en")
+
+    controller.toggleSpeakSource()
+
+    XCTAssertFalse(controller.isSpeakingSource)
+    XCTAssertEqual(speech.stopCount, 1)
+  }
+
+  func testEmptySourceSpeechDoesNotStart() {
+    let panel = MockFloatingPanelPresenter()
+    let speech = MockSpeechService()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      speechService: speech
+    )
+    controller.panelSourceText = "   "
+
+    controller.toggleSpeakSource()
+
+    XCTAssertFalse(controller.isSpeakingSource)
+    XCTAssertTrue(speech.speakRequests.isEmpty)
+  }
+
+  func testSourceSpeechAndResultSpeechAreMutuallyExclusive() {
+    let panel = MockFloatingPanelPresenter()
+    let speech = MockSpeechService()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      speechService: speech
+    )
+    let result = TranslationResult(
+      request: TranslationRequest(text: "hello", sourceLanguage: "en", targetLanguage: "zh-Hans", selectionSource: .manual),
+      providerID: .mock,
+      providerName: "Mock",
+      translatedText: "你好"
+    )
+    controller.panelSourceText = "hello there"
+
+    controller.toggleSpeak(result)
+    XCTAssertTrue(controller.isSpeaking(result))
+    XCTAssertFalse(controller.isSpeakingSource)
+
+    // Starting source speech stops the in-flight result speech.
+    controller.toggleSpeakSource()
+    XCTAssertTrue(controller.isSpeakingSource)
+    XCTAssertFalse(controller.isSpeaking(result))
+    XCTAssertGreaterThanOrEqual(speech.stopCount, 1)
+  }
+
   func testProviderToggleDisablesStreamingProvider() async {
     let panel = MockFloatingPanelPresenter()
     let defaults = makeScratchDefaults()
@@ -1947,9 +1968,14 @@ private final class MockFloatingPanelPresenter: FloatingPanelPresenting {
   private(set) var hideIfNeededCount = 0
   private(set) var updateLayoutCount = 0
   private(set) var refreshContentLayoutCount = 0
+  private(set) var reportedMeasuredHeights: [(chrome: CGFloat, resultContent: CGFloat)] = []
 
   func show(activating: Bool, repositioning: Bool) {
     events.append(.show(activating: activating, repositioning: repositioning))
+  }
+
+  func reportMeasuredContentHeights(chrome: CGFloat, resultContent: CGFloat) {
+    reportedMeasuredHeights.append((chrome: chrome, resultContent: resultContent))
   }
 
   func hide() {

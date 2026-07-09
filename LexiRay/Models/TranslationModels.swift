@@ -190,4 +190,11 @@ enum PanelState: Equatable {
   case batch(TranslationBatch)
   case result(TranslationResult)
   case error(String)
+
+  var isIdle: Bool {
+    if case .idle = self {
+      return true
+    }
+    return false
+  }
 }

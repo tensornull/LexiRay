@@ -30,7 +30,7 @@ struct SourceTextEditor: View {
     ZStack(alignment: .topLeading) {
       // Placeholder sits *behind* the transparent text view so the insertion
       // point and IME marked text always draw above it, like HapiGo.
-      if text.isEmpty && !hasMarkedText {
+      if text.isEmpty, !hasMarkedText {
         Text(placeholder)
           .font(.body)
           .foregroundStyle(.tertiary)
@@ -247,13 +247,13 @@ private struct SourceTextView: NSViewRepresentable {
       scheduleHeightRefresh(for: textView)
     }
 
-    func textDidBeginEditing(_ notification: Notification) {
+    func textDidBeginEditing(_: Notification) {
       DispatchQueue.main.async { [weak self] in
         self?.parent.isFocused = true
       }
     }
 
-    func textDidEndEditing(_ notification: Notification) {
+    func textDidEndEditing(_: Notification) {
       DispatchQueue.main.async { [weak self] in
         self?.parent.isFocused = false
         self?.updateHasMarkedText(false)
@@ -314,14 +314,14 @@ private final class SourceTextNSTextView: NSTextView {
   var appearanceDidChange: ((SourceTextNSTextView) -> Void)?
   var markedTextStateDidChange: ((Bool) -> Void)?
 
-  // IME composition hooks: `textDidChange` is not a reliable signal for
-  // marked-text transitions, so report state from the NSTextInputClient
-  // entry points directly.
-  //
-  // The notification is deferred to the next runloop turn: mutating SwiftUI
-  // state synchronously from inside the text input system re-enters
-  // updateNSView while the IME transaction is still open, which aborts the
-  // inline composition (the pinyin preview never reaches the screen).
+  /// IME composition hooks: `textDidChange` is not a reliable signal for
+  /// marked-text transitions, so report state from the NSTextInputClient
+  /// entry points directly.
+  ///
+  /// The notification is deferred to the next runloop turn: mutating SwiftUI
+  /// state synchronously from inside the text input system re-enters
+  /// updateNSView while the IME transaction is still open, which aborts the
+  /// inline composition (the pinyin preview never reaches the screen).
   override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
     super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
     notifyMarkedTextStateChange()
@@ -342,7 +342,7 @@ private final class SourceTextNSTextView: NSTextView {
       guard let self else {
         return
       }
-      self.markedTextStateDidChange?(self.hasMarkedText())
+      markedTextStateDidChange?(hasMarkedText())
     }
   }
 
