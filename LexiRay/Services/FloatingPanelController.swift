@@ -221,31 +221,52 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   private static func makeContentView(controller: LexiRayController) -> NSView {
     let hostingView = NSHostingView(rootView: FloatingPanelView(controller: controller))
 
+    // Clip ONLY the hosting content to the rounded shape. NSHostingView turns
+    // its backing opaque (white) when the panel becomes key, and that square
+    // backing painted over the rounded glass corners — which is why the white
+    // corners only showed while the panel was selected. This clip container is
+    // ours (not the SwiftUI-managed hosting layer), so the radius survives
+    // relayout and holds in both key and non-key states.
+    //
+    // Crucially the clip lives *inside* the glass / effect view, wrapping only
+    // the content. Masking the glass view's own parent forces it to composite
+    // offscreen and stop sampling the live backdrop, which flattened the
+    // translucency; keeping the glass unmasked preserves the see-through look.
+    let clipView = FloatingPanelClipView(cornerRadius: cornerRadius)
+    hostingView.translatesAutoresizingMaskIntoConstraints = false
+    clipView.addSubview(hostingView)
+    NSLayoutConstraint.activate([
+      hostingView.leadingAnchor.constraint(equalTo: clipView.leadingAnchor),
+      hostingView.trailingAnchor.constraint(equalTo: clipView.trailingAnchor),
+      hostingView.topAnchor.constraint(equalTo: clipView.topAnchor),
+      hostingView.bottomAnchor.constraint(equalTo: clipView.bottomAnchor)
+    ])
+
     if #available(macOS 26.0, *) {
       let glassView = FloatingPanelGlassEffectView(cornerRadius: cornerRadius)
       glassView.style = .regular
-      hostingView.translatesAutoresizingMaskIntoConstraints = false
-      glassView.contentView = hostingView
+      clipView.translatesAutoresizingMaskIntoConstraints = false
+      glassView.contentView = clipView
       NSLayoutConstraint.activate([
-        hostingView.leadingAnchor.constraint(equalTo: glassView.leadingAnchor),
-        hostingView.trailingAnchor.constraint(equalTo: glassView.trailingAnchor),
-        hostingView.topAnchor.constraint(equalTo: glassView.topAnchor),
-        hostingView.bottomAnchor.constraint(equalTo: glassView.bottomAnchor)
+        clipView.leadingAnchor.constraint(equalTo: glassView.leadingAnchor),
+        clipView.trailingAnchor.constraint(equalTo: glassView.trailingAnchor),
+        clipView.topAnchor.constraint(equalTo: glassView.topAnchor),
+        clipView.bottomAnchor.constraint(equalTo: glassView.bottomAnchor)
       ])
       return glassView
     }
 
-    hostingView.translatesAutoresizingMaskIntoConstraints = false
     let effectView = FloatingPanelVisualEffectView(cornerRadius: cornerRadius)
     effectView.material = .hudWindow
     effectView.blendingMode = .behindWindow
     effectView.state = .active
-    effectView.addSubview(hostingView)
+    clipView.translatesAutoresizingMaskIntoConstraints = false
+    effectView.addSubview(clipView)
     NSLayoutConstraint.activate([
-      hostingView.leadingAnchor.constraint(equalTo: effectView.leadingAnchor),
-      hostingView.trailingAnchor.constraint(equalTo: effectView.trailingAnchor),
-      hostingView.topAnchor.constraint(equalTo: effectView.topAnchor),
-      hostingView.bottomAnchor.constraint(equalTo: effectView.bottomAnchor)
+      clipView.leadingAnchor.constraint(equalTo: effectView.leadingAnchor),
+      clipView.trailingAnchor.constraint(equalTo: effectView.trailingAnchor),
+      clipView.topAnchor.constraint(equalTo: effectView.topAnchor),
+      clipView.bottomAnchor.constraint(equalTo: effectView.bottomAnchor)
     ])
     return effectView
   }
@@ -831,6 +852,26 @@ extension FloatingPanelController: NSWindowDelegate {
       x: panel.frame.origin.x,
       y: panel.frame.origin.y
     )
+  }
+}
+
+/// A plain container whose layer clips its subviews to the panel's rounded
+/// shape. Because it is an ordinary view we own (not the SwiftUI-managed
+/// NSHostingView, whose layer SwiftUI resets on relayout), the corner radius is
+/// stable across focus changes and clips the hosting view's opaque key-state
+/// backing that otherwise showed square white corners.
+private final class FloatingPanelClipView: NSView {
+  init(cornerRadius: CGFloat) {
+    super.init(frame: .zero)
+    wantsLayer = true
+    layer?.cornerRadius = cornerRadius
+    layer?.cornerCurve = .continuous
+    layer?.masksToBounds = true
+  }
+
+  @available(*, unavailable)
+  required init?(coder _: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
   }
 }
 

@@ -20,8 +20,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Fixed the floating panel opening too short for Chinese (and other CJK) results,
   which clipped content or forced scrolling. Panel height is now driven by the
   view's real measured layout instead of a per-character estimate.
-- Fixed the panel's rounded corners rendering with a jagged / uneven edge on
-  Retina displays, caused by the corner mask being sampled at 1x.
+- Fixed the floating panel showing square white corners over its rounded glass
+  background while selected (key). The hosting content is now clipped to the
+  rounded shape by a container inside the glass view, so the corners stay clean
+  in both key and non-key states while the glass keeps its live translucency.
 
 ### Changed
 
