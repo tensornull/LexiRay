@@ -24,21 +24,13 @@ struct SourceTextEditor: View {
 
   @State private var isFocused = false
   @State private var measuredTextHeight: CGFloat = 0
+  @State private var hasMarkedText = false
 
   var body: some View {
     ZStack(alignment: .topLeading) {
-      SourceTextView(
-        text: $text,
-        isFocused: $isFocused,
-        textInset: Self.textInset,
-        lineFragmentPadding: Self.lineFragmentPadding,
-        accessibilityIdentifier: accessibilityIdentifier,
-        onMeasuredHeightChange: handleMeasuredHeightChange,
-        onMoveUp: onMoveUp,
-        onMoveDown: onMoveDown
-      )
-
-      if text.isEmpty {
+      // Placeholder sits *behind* the transparent text view so the insertion
+      // point and IME marked text always draw above it, like HapiGo.
+      if text.isEmpty, !hasMarkedText {
         Text(placeholder)
           .font(.body)
           .foregroundStyle(.tertiary)
@@ -46,6 +38,18 @@ struct SourceTextEditor: View {
           .padding(.top, Self.textInset.height)
           .allowsHitTesting(false)
       }
+
+      SourceTextView(
+        text: $text,
+        isFocused: $isFocused,
+        hasMarkedText: $hasMarkedText,
+        textInset: Self.textInset,
+        lineFragmentPadding: Self.lineFragmentPadding,
+        accessibilityIdentifier: accessibilityIdentifier,
+        onMeasuredHeightChange: handleMeasuredHeightChange,
+        onMoveUp: onMoveUp,
+        onMoveDown: onMoveDown
+      )
     }
     .frame(minHeight: editorHeight, maxHeight: editorHeight)
     .background(.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -78,6 +82,7 @@ struct SourceTextEditor: View {
 private struct SourceTextView: NSViewRepresentable {
   @Binding var text: String
   @Binding var isFocused: Bool
+  @Binding var hasMarkedText: Bool
   let textInset: CGSize
   let lineFragmentPadding: CGFloat
   let accessibilityIdentifier: String
@@ -100,6 +105,9 @@ private struct SourceTextView: NSViewRepresentable {
     let textView = SourceTextNSTextView()
     textView.historyNavigationHandler = { [coordinator = context.coordinator] direction in
       coordinator.handleHistoryNavigation(direction)
+    }
+    textView.markedTextStateDidChange = { [coordinator = context.coordinator] hasMarkedText in
+      coordinator.updateHasMarkedText(hasMarkedText)
     }
     textView.appearanceDidChange = { [coordinator = context.coordinator] textView in
       coordinator.applyTextAttributes(to: textView)
@@ -127,7 +135,17 @@ private struct SourceTextView: NSViewRepresentable {
       return
     }
 
+    // While IME composition is in progress the text view is the source of
+    // truth: the storage holds the inline marked text (pinyin preview), and
+    // reconfiguring fonts/typing attributes or replacing `string` mid-
+    // composition aborts the IME transaction. Leave the view untouched; the
+    // binding re-syncs from textDidChange once the composition commits.
+    guard !textView.hasMarkedText() else {
+      return
+    }
+
     configure(textView)
+
     if textView.string != text {
       context.coordinator.isProgrammaticUpdate = true
       textView.string = text
@@ -217,6 +235,8 @@ private struct SourceTextView: NSViewRepresentable {
         return
       }
       parent.text = textView.string
+      updateHasMarkedText(textView.hasMarkedText())
+
       let editedText = textView.string
       Task { @MainActor [weak self, weak textView] in
         guard let self, let textView, textView.string == editedText else {
@@ -236,7 +256,15 @@ private struct SourceTextView: NSViewRepresentable {
     func textDidEndEditing(_: Notification) {
       DispatchQueue.main.async { [weak self] in
         self?.parent.isFocused = false
+        self?.updateHasMarkedText(false)
       }
+    }
+
+    func updateHasMarkedText(_ newValue: Bool) {
+      guard parent.hasMarkedText != newValue else {
+        return
+      }
+      parent.hasMarkedText = newValue
     }
 
     @MainActor
@@ -284,6 +312,39 @@ private final class SourceTextNSTextView: NSTextView {
   var historyNavigationHandler: ((SourceTextHistoryDirection) -> Bool)?
   var contentHeightDidChange: (() -> Void)?
   var appearanceDidChange: ((SourceTextNSTextView) -> Void)?
+  var markedTextStateDidChange: ((Bool) -> Void)?
+
+  /// IME composition hooks: `textDidChange` is not a reliable signal for
+  /// marked-text transitions, so report state from the NSTextInputClient
+  /// entry points directly.
+  ///
+  /// The notification is deferred to the next runloop turn: mutating SwiftUI
+  /// state synchronously from inside the text input system re-enters
+  /// updateNSView while the IME transaction is still open, which aborts the
+  /// inline composition (the pinyin preview never reaches the screen).
+  override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+    super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+    notifyMarkedTextStateChange()
+  }
+
+  override func unmarkText() {
+    super.unmarkText()
+    notifyMarkedTextStateChange()
+  }
+
+  override func insertText(_ string: Any, replacementRange: NSRange) {
+    super.insertText(string, replacementRange: replacementRange)
+    notifyMarkedTextStateChange()
+  }
+
+  private func notifyMarkedTextStateChange() {
+    DispatchQueue.main.async { [weak self] in
+      guard let self else {
+        return
+      }
+      markedTextStateDidChange?(hasMarkedText())
+    }
+  }
 
   override func layout() {
     super.layout()

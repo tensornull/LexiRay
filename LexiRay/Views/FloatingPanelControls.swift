@@ -48,23 +48,25 @@ struct FloatingPanelIconButtonStyle: ButtonStyle {
   }
 }
 
-private struct FloatingPanelIconButtonBody: View {
-  @Environment(\.isEnabled) private var isEnabled
-  let configuration: ButtonStyle.Configuration
+/// The shared 28×28 rounded hover-chip that backs every floating-panel icon
+/// control, so the button style and the menu label render identically.
+private struct FloatingPanelIconChip<Label: View>: View {
   let isActive: Bool
-  @State private var isHovered = false
+  let isPressed: Bool
+  let isEnabled: Bool
+  let isHovered: Bool
+  @ViewBuilder let label: Label
 
   var body: some View {
-    configuration.label
+    label
       .font(.system(size: 15, weight: .medium))
       .foregroundStyle(foregroundColor)
       .frame(width: 28, height: 28)
       .background(backgroundColor, in: RoundedRectangle(cornerRadius: 6))
       .contentShape(RoundedRectangle(cornerRadius: 6))
-      .scaleEffect(configuration.isPressed ? 0.96 : 1)
-      .onHover { isHovered = $0 }
+      .scaleEffect(isPressed ? 0.96 : 1)
       .animation(.easeOut(duration: 0.12), value: isHovered)
-      .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+      .animation(.easeOut(duration: 0.08), value: isPressed)
   }
 
   private var foregroundColor: Color {
@@ -78,7 +80,7 @@ private struct FloatingPanelIconButtonBody: View {
     guard isEnabled else {
       return .clear
     }
-    if configuration.isPressed {
+    if isPressed {
       return Color.primary.opacity(0.16)
     }
     if isHovered || isActive {
@@ -88,24 +90,40 @@ private struct FloatingPanelIconButtonBody: View {
   }
 }
 
+private struct FloatingPanelIconButtonBody: View {
+  @Environment(\.isEnabled) private var isEnabled
+  let configuration: ButtonStyle.Configuration
+  let isActive: Bool
+  @State private var isHovered = false
+
+  var body: some View {
+    FloatingPanelIconChip(
+      isActive: isActive,
+      isPressed: configuration.isPressed,
+      isEnabled: isEnabled,
+      isHovered: isHovered
+    ) {
+      configuration.label
+    }
+    .onHover { isHovered = $0 }
+  }
+}
+
 struct FloatingPanelIconMenuLabel: View {
   let systemName: String
   var isActive = false
   @State private var isHovered = false
 
   var body: some View {
-    Image(systemName: systemName)
-      .font(.system(size: 15, weight: .medium))
-      .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
-      .frame(width: 28, height: 28)
-      .background(backgroundColor, in: RoundedRectangle(cornerRadius: 6))
-      .contentShape(RoundedRectangle(cornerRadius: 6))
-      .onHover { isHovered = $0 }
-      .animation(.easeOut(duration: 0.12), value: isHovered)
-  }
-
-  private var backgroundColor: Color {
-    isHovered || isActive ? Color.primary.opacity(isActive ? 0.11 : 0.08) : .clear
+    FloatingPanelIconChip(
+      isActive: isActive,
+      isPressed: false,
+      isEnabled: true,
+      isHovered: isHovered
+    ) {
+      Image(systemName: systemName)
+    }
+    .onHover { isHovered = $0 }
   }
 }
 

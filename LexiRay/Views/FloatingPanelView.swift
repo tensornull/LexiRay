@@ -5,6 +5,9 @@ struct FloatingPanelView: View {
   @ObservedObject private var settings: SettingsStore
   @Environment(\.openWindow) private var openWindow
 
+  @State private var chromeHeight: CGFloat = 0
+  @State private var resultContentHeight: CGFloat = 0
+
   init(controller: LexiRayController) {
     _controller = ObservedObject(wrappedValue: controller)
     _settings = ObservedObject(wrappedValue: controller.settings)
@@ -13,15 +16,23 @@ struct FloatingPanelView: View {
   var body: some View {
     ZStack(alignment: .top) {
       VStack(alignment: .leading, spacing: 10) {
-        header
-        sourceComposer
+        // Header + source composer stay pinned and are measured together as the
+        // panel "chrome": their natural height (independent of the panel frame)
+        // is reported so the controller can size the window without estimating
+        // text layout by hand.
+        VStack(alignment: .leading, spacing: 10) {
+          header
+          sourceComposer
+        }
+        .background(heightReader(FloatingPanelChromeHeightKey.self))
+
         if showsResultArea {
           resultArea
             .transition(.opacity.combined(with: .move(edge: .top)))
         }
       }
       .padding(14)
-      .frame(maxWidth: .infinity, alignment: .topLeading)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
       if let toast = controller.copyToast, toast.surface == .floatingPanel {
         CopyToastView(toast: toast)
@@ -34,11 +45,37 @@ struct FloatingPanelView: View {
     .background(Color.clear)
     .animation(.easeInOut(duration: 0.16), value: showsResultArea)
     .animation(.easeInOut(duration: 0.16), value: controller.copyToast?.id)
+    .onPreferenceChange(FloatingPanelChromeHeightKey.self) { height in
+      chromeHeight = height
+      reportMeasuredHeights()
+    }
+    .onPreferenceChange(FloatingPanelResultContentHeightKey.self) { height in
+      resultContentHeight = height
+      reportMeasuredHeights()
+    }
     .onReceive(settings.$providerConfigurations) { _ in
       refreshLayoutForStandbyProviderChanges()
     }
     .onReceive(settings.$apiKeyRevision) { _ in
       refreshLayoutForStandbyProviderChanges()
+    }
+  }
+
+  /// Reports the freshly measured chrome / result-content heights to the
+  /// controller, which drives the panel window size from them instead of
+  /// estimating text layout numerically.
+  private func reportMeasuredHeights() {
+    controller.reportFloatingPanelMeasuredHeights(
+      chrome: chromeHeight,
+      resultContent: showsResultArea ? resultContentHeight : 0
+    )
+  }
+
+  private func heightReader<Key: PreferenceKey>(_: Key.Type) -> some View
+    where Key.Value == CGFloat
+  {
+    GeometryReader { proxy in
+      Color.clear.preference(key: Key.self, value: proxy.size.height)
     }
   }
 
@@ -157,20 +194,34 @@ struct FloatingPanelView: View {
 
       Spacer(minLength: 8)
 
+      panelButton(
+        systemName: controller.isSpeakingSource ? "stop.fill" : "speaker.wave.2",
+        help: controller.isSpeakingSource ? "Stop" : "Speak source text",
+        isActive: controller.isSpeakingSource,
+        action: controller.toggleSpeakSource
+      )
+      .opacity(controller.panelSourceText.nonEmptyTrimmed == nil ? 0 : 1)
+      .disabled(controller.panelSourceText.nonEmptyTrimmed == nil)
+      .accessibilityHidden(controller.panelSourceText.nonEmptyTrimmed == nil)
+
       panelButton(systemName: "xmark.circle.fill", help: "Clear Source", action: controller.clearPanelSourceText)
         .opacity(controller.panelSourceText.isEmpty ? 0 : 1)
         .disabled(controller.panelSourceText.isEmpty)
         .accessibilityHidden(controller.panelSourceText.isEmpty)
 
+      // ⌘Return is handled by the panel's NSEvent key monitor
+      // (shouldSwallowLocalKeyEvent → submitPanelSourceText) so it works
+      // regardless of first responder; the button intentionally carries no
+      // .keyboardShortcut to avoid a second, competing submit path.
       Button {
         controller.submitPanelSourceText()
       } label: {
         Label(translateButtonTitle, systemImage: "arrow.right.circle.fill")
+          .frame(minWidth: 96)
       }
       .buttonStyle(.borderedProminent)
       .controlSize(.small)
-      .frame(width: 132, height: 30)
-      .keyboardShortcut(.return, modifiers: [.command])
+      .fixedSize()
       .disabled(controller.panelSourceText.nonEmptyTrimmed == nil)
       .help("Translate")
     }
@@ -178,33 +229,35 @@ struct FloatingPanelView: View {
   }
 
   private var resultArea: some View {
-    resultContent
-      .padding(10)
-      .frame(maxWidth: .infinity, maxHeight: resultAreaMaximumHeight, alignment: .topLeading)
-      .background(.black.opacity(0.055), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-      .overlay {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
-          .stroke(Color(nsColor: .separatorColor).opacity(0.3), lineWidth: 1)
-      }
+    ScrollView {
+      resultContent
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(heightReader(FloatingPanelResultContentHeightKey.self))
+    }
+    .scrollBounceBehavior(.basedOnSize)
+    .padding(10)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .background(.black.opacity(0.055), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: 14, style: .continuous)
+        .stroke(Color(nsColor: .separatorColor).opacity(0.3), lineWidth: 1)
+    }
   }
 
   private var idleView: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 0) {
-        ForEach(Array(standbyProviderConfigurations.enumerated()), id: \.element.id) { index, configuration in
-          ProviderStandbyRow(settings: settings, configuration: configuration)
+    VStack(alignment: .leading, spacing: 0) {
+      ForEach(Array(standbyProviderConfigurations.enumerated()), id: \.element.id) { index, configuration in
+        ProviderStandbyRow(settings: settings, configuration: configuration)
 
-          if index < standbyProviderConfigurations.count - 1 {
-            Divider()
-              .opacity(0.52)
-              .padding(.leading, 28)
-          }
+        if index < standbyProviderConfigurations.count - 1 {
+          Divider()
+            .opacity(0.52)
+            .padding(.leading, 28)
         }
       }
-      .padding(.vertical, 2)
-      .frame(maxWidth: .infinity, alignment: .topLeading)
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .padding(.vertical, 2)
+    .frame(maxWidth: .infinity, alignment: .topLeading)
   }
 
   private func loadingView(_ state: PanelLoadingState) -> some View {
@@ -224,7 +277,7 @@ struct FloatingPanelView: View {
           .textSelection(.enabled)
       }
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .frame(maxWidth: .infinity, alignment: .topLeading)
   }
 
   private func resultView(_ result: TranslationResult) -> some View {
@@ -244,21 +297,15 @@ struct FloatingPanelView: View {
   }
 
   private func batchView(_ batch: TranslationBatch) -> some View {
-    GeometryReader { proxy in
-      ScrollView {
-        TranslationBatchResultsView(
-          controller: controller,
-          batch: batch,
-          showsSourcePreview: false,
-          resultLineLimit: nil,
-          copyToastSurface: .floatingPanel
-        )
-        .padding(.trailing, 12)
-        .frame(width: max(0, proxy.size.width), alignment: .topLeading)
-      }
-      .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
-    }
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    TranslationBatchResultsView(
+      controller: controller,
+      batch: batch,
+      showsSourcePreview: false,
+      resultLineLimit: nil,
+      copyToastSurface: .floatingPanel
+    )
+    .padding(.trailing, 4)
+    .frame(maxWidth: .infinity, alignment: .topLeading)
   }
 
   private func errorView(_ message: String) -> some View {
@@ -275,7 +322,7 @@ struct FloatingPanelView: View {
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .frame(maxWidth: .infinity, alignment: .topLeading)
   }
 
   private func panelButton(
@@ -432,21 +479,12 @@ struct FloatingPanelView: View {
     settings.panelOrderedProviderConfigurations()
   }
 
-  private var resultAreaMaximumHeight: CGFloat? {
-    switch controller.panelState {
-    case .idle:
-      .infinity
-    case .loading, .batch, .result, .error:
-      .infinity
-    }
-  }
-
   private var sourceEditorMinimumHeight: CGFloat {
-    controller.isExpanded ? 80 : 56
+    FloatingPanelMetrics.sourceEditorMinimumHeight(isExpanded: controller.isExpanded)
   }
 
   private var sourceEditorMaximumHeight: CGFloat {
-    controller.isExpanded ? 240 : 150
+    FloatingPanelMetrics.sourceEditorMaximumHeight(isExpanded: controller.isExpanded)
   }
 
   private func refreshLayoutForStandbyProviderChanges() {
@@ -455,6 +493,37 @@ struct FloatingPanelView: View {
     }
 
     controller.refreshFloatingPanelLayout()
+  }
+}
+
+/// Layout constants shared between `FloatingPanelView` (which renders the source
+/// editor) and `FloatingPanelController` (which sizes the window), so the two
+/// stay in lockstep instead of duplicating literals.
+enum FloatingPanelMetrics {
+  static func sourceEditorMinimumHeight(isExpanded: Bool) -> CGFloat {
+    isExpanded ? 80 : 56
+  }
+
+  static func sourceEditorMaximumHeight(isExpanded: Bool) -> CGFloat {
+    isExpanded ? 240 : 150
+  }
+}
+
+/// Natural height of the pinned chrome (header + source composer), reported up
+/// from the layout so the controller can size the panel without estimating text.
+private struct FloatingPanelChromeHeightKey: PreferenceKey {
+  static let defaultValue: CGFloat = 0
+  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+    value = max(value, nextValue())
+  }
+}
+
+/// Natural height of the result area's inner content (before it is clipped by
+/// the scroll view), used to grow the panel up to the screen ceiling.
+private struct FloatingPanelResultContentHeightKey: PreferenceKey {
+  static let defaultValue: CGFloat = 0
+  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+    value = max(value, nextValue())
   }
 }
 

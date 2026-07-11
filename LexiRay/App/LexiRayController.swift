@@ -26,6 +26,7 @@ final class LexiRayController: ObservableObject {
   @Published private(set) var appIdentity: AppIdentitySnapshot
   @Published private(set) var copyToast: CopyToast?
   @Published private(set) var speakingResultID: UUID?
+  @Published private(set) var isSpeakingSource = false
   @Published private(set) var activeHistoryPositionText: String?
   @Published private(set) var hasTranslationHistory = false
 
@@ -109,6 +110,7 @@ final class LexiRayController: ObservableObject {
     self.speechService.onStateChange = { [weak self] isSpeaking in
       if !isSpeaking {
         self?.speakingResultID = nil
+        self?.isSpeakingSource = false
       }
     }
   }
@@ -477,10 +479,32 @@ final class LexiRayController: ObservableObject {
   func stopSpeaking() {
     speechService.stop()
     speakingResultID = nil
+    isSpeakingSource = false
   }
 
   func isSpeaking(_ result: TranslationResult) -> Bool {
     speakingResultID == result.id && speechService.isSpeaking
+  }
+
+  /// Speaks the current panel source text, choosing a voice from the language
+  /// detected locally (the Auto source may not be resolved yet). Mutually
+  /// exclusive with result speech: starting one stops the other, since the
+  /// speech synthesizer plays a single utterance at a time.
+  func toggleSpeakSource() {
+    if isSpeakingSource {
+      stopSpeaking()
+      return
+    }
+
+    guard let text = panelSourceText.nonEmptyTrimmed else {
+      return
+    }
+
+    stopSpeaking()
+    let languageCode = LanguageDetector.dominantLanguageCode(for: text)
+    if speechService.speak(text, languageCode: languageCode) {
+      isSpeakingSource = true
+    }
   }
 
   func isProviderEnabled(_ configurationID: String) -> Bool {
@@ -515,6 +539,13 @@ final class LexiRayController: ObservableObject {
 
   func refreshFloatingPanelLayout() {
     floatingPanel.refreshContentLayout()
+  }
+
+  /// Receives the natural heights measured by `FloatingPanelView` (chrome and,
+  /// when shown, the result content) and forwards them to the panel controller,
+  /// which drives the window size from the real layout rather than estimating.
+  func reportFloatingPanelMeasuredHeights(chrome: CGFloat, resultContent: CGFloat) {
+    floatingPanel.reportMeasuredContentHeights(chrome: chrome, resultContent: resultContent)
   }
 
   func showPreviousHistory() -> Bool {

@@ -6,6 +6,7 @@ import SwiftUI
 protocol FloatingPanelPresenting: AnyObject {
   func show(activating: Bool, repositioning: Bool)
   func refreshContentLayout()
+  func reportMeasuredContentHeights(chrome: CGFloat, resultContent: CGFloat)
   func hide()
   func hideIfNeeded()
   func updatePinnedState(isPinned: Bool)
@@ -47,7 +48,6 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   /// consistent before / during / after a translation. Content longer than this
   /// still grows the panel via the per-state height estimates below.
   private static let baselineMinimumContentHeight: CGFloat = 300
-  private static let idleMaximumContentHeight: CGFloat = 460
 
   private weak var controller: LexiRayController?
   private var panel: NSPanel?
@@ -60,9 +60,29 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   private var isLiveResizing = false
   private var userContentSizeOverride: NSSize?
 
+  /// Natural heights reported by `FloatingPanelView` via preference keys. The
+  /// panel height is derived from these instead of estimating text layout.
+  private var measuredChromeHeight: CGFloat = 0
+  private var measuredResultContentHeight: CGFloat = 0
+
+  /// Set when the panel is shown "activating": the source editor is focused as
+  /// soon as the panel becomes key (see `windowDidBecomeKey`).
+  private var wantsSourceFocusOnKey = false
+
   init(controller: LexiRayController) {
     self.controller = controller
     super.init()
+  }
+
+  isolated deinit {
+    // Event monitors are otherwise only removed in hide(); guarantee cleanup if
+    // the controller is deallocated while the panel is still on screen so the
+    // global/local monitors don't leak. NSEvent.removeMonitor is thread-safe.
+    for monitor in [globalMouseMonitor, localMouseMonitor, localKeyMonitor] {
+      if let monitor {
+        NSEvent.removeMonitor(monitor)
+      }
+    }
   }
 
   func show(activating: Bool = false, repositioning: Bool = true) {
@@ -94,12 +114,14 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     panel.orderFrontRegardless()
     startDismissMonitors()
     if activating {
+      // Request first-responder focus once the panel actually becomes key
+      // (handled in windowDidBecomeKey) instead of racing the show animation
+      // with a burst of timers.
+      wantsSourceFocusOnKey = true
       NSApp.activate()
       panel.makeKeyAndOrderFront(nil)
-      panel.makeKey()
-      panel.makeMain()
-      focusSourceEditor(in: panel)
-      scheduleSourceFocusRetries(in: panel)
+    } else {
+      wantsSourceFocusOnKey = false
     }
     AppLog.panel.info("Floating panel shown")
   }
@@ -135,6 +157,35 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     scheduleResize(panel, for: controller)
   }
 
+  func reportMeasuredContentHeights(chrome: CGFloat, resultContent: CGFloat) {
+    let chrome = max(0, chrome)
+    let resultContent = max(0, resultContent)
+    guard abs(chrome - measuredChromeHeight) > 0.5
+      || abs(resultContent - measuredResultContentHeight) > 0.5
+    else {
+      return
+    }
+
+    measuredChromeHeight = chrome
+    measuredResultContentHeight = resultContent
+
+    guard let controller, let panel, panel.isVisible else {
+      return
+    }
+    resize(panel, for: controller, preservingTopLeft: true, animated: panel.isVisible, force: false)
+  }
+
+  /// The screen the panel currently lives on, falling back to the screen under
+  /// the cursor and then the main screen. Used for the height ceiling so it does
+  /// not depend on where the mouse happens to be mid-translation.
+  private func activeScreen() -> NSScreen? {
+    if let panel, let screen = panel.screen {
+      return screen
+    }
+    let mouseLocation = NSEvent.mouseLocation
+    return NSScreen.screens.first { NSMouseInRect(mouseLocation, $0.frame, false) } ?? NSScreen.main
+  }
+
   func updateLayout() {
     guard let controller, let panel else {
       return
@@ -144,7 +195,7 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   }
 
   private func makePanel(controller: LexiRayController) -> NSPanel {
-    let contentSize = Self.contentSize(for: controller)
+    let contentSize = contentSize(for: controller)
     let panel = LexiRayFloatingPanel(
       contentRect: NSRect(origin: .zero, size: contentSize),
       styleMask: Self.panelStyleMask,
@@ -170,31 +221,52 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   private static func makeContentView(controller: LexiRayController) -> NSView {
     let hostingView = NSHostingView(rootView: FloatingPanelView(controller: controller))
 
+    // Clip ONLY the hosting content to the rounded shape. NSHostingView turns
+    // its backing opaque (white) when the panel becomes key, and that square
+    // backing painted over the rounded glass corners — which is why the white
+    // corners only showed while the panel was selected. This clip container is
+    // ours (not the SwiftUI-managed hosting layer), so the radius survives
+    // relayout and holds in both key and non-key states.
+    //
+    // Crucially the clip lives *inside* the glass / effect view, wrapping only
+    // the content. Masking the glass view's own parent forces it to composite
+    // offscreen and stop sampling the live backdrop, which flattened the
+    // translucency; keeping the glass unmasked preserves the see-through look.
+    let clipView = FloatingPanelClipView(cornerRadius: cornerRadius)
+    hostingView.translatesAutoresizingMaskIntoConstraints = false
+    clipView.addSubview(hostingView)
+    NSLayoutConstraint.activate([
+      hostingView.leadingAnchor.constraint(equalTo: clipView.leadingAnchor),
+      hostingView.trailingAnchor.constraint(equalTo: clipView.trailingAnchor),
+      hostingView.topAnchor.constraint(equalTo: clipView.topAnchor),
+      hostingView.bottomAnchor.constraint(equalTo: clipView.bottomAnchor)
+    ])
+
     if #available(macOS 26.0, *) {
       let glassView = FloatingPanelGlassEffectView(cornerRadius: cornerRadius)
       glassView.style = .regular
-      hostingView.translatesAutoresizingMaskIntoConstraints = false
-      glassView.contentView = hostingView
+      clipView.translatesAutoresizingMaskIntoConstraints = false
+      glassView.contentView = clipView
       NSLayoutConstraint.activate([
-        hostingView.leadingAnchor.constraint(equalTo: glassView.leadingAnchor),
-        hostingView.trailingAnchor.constraint(equalTo: glassView.trailingAnchor),
-        hostingView.topAnchor.constraint(equalTo: glassView.topAnchor),
-        hostingView.bottomAnchor.constraint(equalTo: glassView.bottomAnchor)
+        clipView.leadingAnchor.constraint(equalTo: glassView.leadingAnchor),
+        clipView.trailingAnchor.constraint(equalTo: glassView.trailingAnchor),
+        clipView.topAnchor.constraint(equalTo: glassView.topAnchor),
+        clipView.bottomAnchor.constraint(equalTo: glassView.bottomAnchor)
       ])
       return glassView
     }
 
-    hostingView.translatesAutoresizingMaskIntoConstraints = false
     let effectView = FloatingPanelVisualEffectView(cornerRadius: cornerRadius)
     effectView.material = .hudWindow
     effectView.blendingMode = .behindWindow
     effectView.state = .active
-    effectView.addSubview(hostingView)
+    clipView.translatesAutoresizingMaskIntoConstraints = false
+    effectView.addSubview(clipView)
     NSLayoutConstraint.activate([
-      hostingView.leadingAnchor.constraint(equalTo: effectView.leadingAnchor),
-      hostingView.trailingAnchor.constraint(equalTo: effectView.trailingAnchor),
-      hostingView.topAnchor.constraint(equalTo: effectView.topAnchor),
-      hostingView.bottomAnchor.constraint(equalTo: effectView.bottomAnchor)
+      clipView.leadingAnchor.constraint(equalTo: effectView.leadingAnchor),
+      clipView.trailingAnchor.constraint(equalTo: effectView.trailingAnchor),
+      clipView.topAnchor.constraint(equalTo: effectView.topAnchor),
+      clipView.bottomAnchor.constraint(equalTo: effectView.bottomAnchor)
     ])
     return effectView
   }
@@ -204,22 +276,7 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
       return
     }
 
-    panel.makeKeyAndOrderFront(nil)
-    panel.makeKey()
-    panel.makeMain()
     panel.makeFirstResponder(textView)
-    textView.window?.makeFirstResponder(textView)
-  }
-
-  private func scheduleSourceFocusRetries(in panel: NSPanel) {
-    for delay in [0.0, 0.05, 0.15, 0.3] {
-      DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak panel] in
-        guard let panel, panel.isVisible else {
-          return
-        }
-        self?.focusSourceEditor(in: panel)
-      }
-    }
   }
 
   private func findTextView(identifier: String, in view: NSView?) -> NSTextView? {
@@ -279,6 +336,11 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
       let keyCode = event.keyCode
       let modifierFlagsRawValue = event.modifierFlags.rawValue
       let eventWindowNumber = event.window?.windowNumber
+      // Local event monitors are always invoked on the main thread as part of
+      // the app's event dispatch, so main-actor isolation holds here. The
+      // monitor must decide synchronously whether to swallow the key (returning
+      // nil consumes it), which rules out an async hop — hence assumeIsolated
+      // rather than MainActor.run.
       let shouldSwallowEvent = MainActor.assumeIsolated {
         self.shouldSwallowLocalKeyEvent(
           keyCode: keyCode,
@@ -388,11 +450,11 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     force: Bool
   ) {
     applySizeLimits(panel, for: controller)
-    let automaticSize = Self.contentSize(for: controller)
+    let automaticSize = contentSize(for: controller)
     let targetSize = Self.contentSize(
       automaticSize,
       respectingUserOverride: userContentSizeOverride,
-      maximum: Self.maximumContentSize(for: controller)
+      maximum: maximumContentSize(for: controller)
     )
     setContentSize(
       targetSize,
@@ -405,7 +467,7 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
 
   private func applySizeLimits(_ panel: NSPanel, for controller: LexiRayController) {
     panel.contentMinSize = Self.minimumContentSize
-    panel.contentMaxSize = Self.maximumContentSize(for: controller)
+    panel.contentMaxSize = maximumContentSize(for: controller)
   }
 
   private func setContentSize(
@@ -482,17 +544,72 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     isMovingProgrammatically = false
   }
 
-  static func contentSize(for controller: LexiRayController) -> NSSize {
+  /// Panel content size derived from the heights SwiftUI measured for the
+  /// chrome and result content, instead of estimating text layout numerically.
+  private func contentSize(for controller: LexiRayController) -> NSSize {
     let maximum = maximumContentSize(for: controller)
-    let automaticWidth = automaticContentWidth(for: controller)
-    let width = clampedContentWidth(
-      contentWidth(for: controller, automaticWidth: automaticWidth),
+    let width = Self.panelContentWidth(
+      savedWidth: controller.settings.floatingPanelLastSize.map { CGFloat($0.width) },
+      isIdle: controller.panelState.isIdle,
       maximum: maximum.width
     )
-    return clampedContentSize(
-      NSSize(width: width, height: contentHeight(for: controller, width: width)),
-      maximum: maximum
+    let height = Self.panelContentHeight(
+      chrome: measuredChromeHeight,
+      resultContent: measuredResultContentHeight,
+      fallbackChrome: Self.fallbackChromeHeight(for: controller),
+      maximum: maximum.height
     )
+    return Self.clampedContentSize(NSSize(width: width, height: height), maximum: maximum)
+  }
+
+  /// Pure width resolution: honor a manual drag-width exactly (idle caps it at
+  /// `idleMaximumContentWidth`), otherwise fall back to the fixed default. The
+  /// panel grows only vertically as content arrives (like HapiGo).
+  static func panelContentWidth(savedWidth: CGFloat?, isIdle: Bool, maximum: CGFloat) -> CGFloat {
+    guard let savedWidth else {
+      return clampedContentWidth(defaultContentWidth, maximum: maximum)
+    }
+    let width = isIdle ? min(idleMaximumContentWidth, savedWidth) : savedWidth
+    return clampedContentWidth(width, maximum: maximum)
+  }
+
+  /// Pure height composition: sum of the measured chrome and (when present)
+  /// result-content heights plus the fixed paddings the views apply, clamped to
+  /// the shared minimum floor and the screen ceiling. Falls back to
+  /// `fallbackChrome` before SwiftUI has reported a measurement. When the
+  /// content exceeds the ceiling the result ScrollView scrolls.
+  static func panelContentHeight(
+    chrome: CGFloat,
+    resultContent: CGFloat,
+    fallbackChrome: CGFloat,
+    maximum: CGFloat
+  ) -> CGFloat {
+    // Outer VStack padding (14 top + 14 bottom) around all panel content.
+    let outerPadding: CGFloat = 28
+    // Spacing between chrome and result area, plus the result container's own
+    // inner padding (10 top + 10 bottom) — both fixed in FloatingPanelView.
+    let chromeToResultSpacing: CGFloat = 10
+    let resultContainerPadding: CGFloat = 20
+
+    let effectiveChrome = chrome > 0 ? chrome : fallbackChrome
+    var height = outerPadding + effectiveChrome
+    if resultContent > 0 {
+      height += chromeToResultSpacing + resultContainerPadding + resultContent
+    }
+
+    return clampedContentHeight(height, minimum: baselineMinimumContentHeight, maximum: maximum)
+  }
+
+  /// Height used before SwiftUI has reported a measurement (first frame), so the
+  /// panel opens at a sensible size rather than collapsing.
+  private static func fallbackChromeHeight(for controller: LexiRayController) -> CGFloat {
+    let headerHeight: CGFloat = 28
+    let headerToSourceSpacing: CGFloat = 10
+    let sourceChromeHeight: CGFloat = 20 + 30 + 8
+    return headerHeight
+      + headerToSourceSpacing
+      + sourceChromeHeight
+      + FloatingPanelMetrics.sourceEditorMinimumHeight(isExpanded: controller.isExpanded)
   }
 
   static func contentSize(
@@ -522,130 +639,14 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     panel.level = panelLevel(isPinned: isPinned)
   }
 
-  private static func contentHeight(for controller: LexiRayController, width: CGFloat) -> CGFloat {
-    let maximumHeight = maximumContentHeight(isExpanded: controller.isExpanded)
-    let baseHeight = panelBaseHeight(for: controller, width: width)
-    let resultContainerPadding: CGFloat = 20
-    let resultSpacing: CGFloat = 10
-    let resultCharsPerLine = resultCharsPerLine(for: width)
-
-    // The idle footprint (header + source composer + provider preview) is the
-    // baseline for every state, so the panel opens at one size and only grows —
-    // it never shrinks between "before / during / after" a translation.
-    let baseline = idleBaselineHeight(
-      baseHeight: baseHeight,
-      previewHeight: idleProviderPreviewHeight(for: controller),
-      resultSpacing: resultSpacing,
-      resultContainerPadding: resultContainerPadding,
-      maximumHeight: maximumHeight
+  private func maximumContentSize(for controller: LexiRayController) -> NSSize {
+    NSSize(
+      width: 980,
+      height: Self.maximumContentHeight(
+        isExpanded: controller.isExpanded,
+        visibleHeight: activeScreen()?.visibleFrame.height ?? 900
+      )
     )
-
-    switch controller.panelState {
-    case .idle:
-      return baseline
-    case let .loading(state):
-      let previewHeight = state.preview.map {
-        estimatedTextHeight(
-          $0,
-          charsPerLine: resultCharsPerLine,
-          maxLines: controller.isExpanded ? nil : 2
-        )
-      } ?? 0
-      let resultHeight = 28 + (previewHeight > 0 ? 10 + previewHeight : 0)
-      return clampedContentHeight(
-        baseHeight + resultSpacing + resultContainerPadding + resultHeight,
-        minimum: baseline,
-        maximum: maximumHeight
-      )
-    case let .error(message):
-      let resultHeight = 28 + 10 + estimatedTextHeight(message, charsPerLine: resultCharsPerLine)
-      return clampedContentHeight(
-        baseHeight + resultSpacing + resultContainerPadding + resultHeight,
-        minimum: baseline,
-        maximum: maximumHeight
-      )
-    case let .batch(batch):
-      let resultHeight = batch.entries.enumerated().reduce(CGFloat(0)) { height, pair in
-        let dividerHeight: CGFloat = pair.offset == 0 ? 0 : 1
-        return height + dividerHeight + estimatedEntryHeight(
-          pair.element,
-          charsPerLine: resultCharsPerLine
-        )
-      }
-      return clampedContentHeight(
-        baseHeight + resultSpacing + resultContainerPadding + resultHeight,
-        minimum: baseline,
-        maximum: maximumHeight
-      )
-    case let .result(result):
-      let resultHeight = 48 + estimatedTextHeight(result.translatedText, charsPerLine: resultCharsPerLine)
-      return clampedContentHeight(
-        baseHeight + resultSpacing + resultContainerPadding + resultHeight,
-        minimum: baseline,
-        maximum: maximumHeight
-      )
-    }
-  }
-
-  /// Idle-state content height, also used as the shared minimum floor for the
-  /// loading / error / batch / result states so the panel keeps a consistent
-  /// footprint across a translation.
-  private static func idleBaselineHeight(
-    baseHeight: CGFloat,
-    previewHeight: CGFloat,
-    resultSpacing: CGFloat,
-    resultContainerPadding: CGFloat,
-    maximumHeight: CGFloat
-  ) -> CGFloat {
-    let content = previewHeight > 0
-      ? baseHeight + resultSpacing + resultContainerPadding + previewHeight
-      : baseHeight + 8
-    return clampedContentHeight(
-      content,
-      minimum: baselineMinimumContentHeight,
-      maximum: min(idleMaximumContentHeight, maximumHeight)
-    )
-  }
-
-  private static func maximumContentSize(for controller: LexiRayController) -> NSSize {
-    NSSize(width: 980, height: maximumContentHeight(isExpanded: controller.isExpanded))
-  }
-
-  private static func automaticContentWidth(for _: LexiRayController) -> CGFloat {
-    // Fixed automatic width for every state: the panel grows only vertically as
-    // content arrives (like Hapigo). A manual drag-resize is still honored via
-    // contentWidth(for:automaticWidth:) below.
-    defaultContentWidth
-  }
-
-  private static func contentWidth(for controller: LexiRayController, automaticWidth: CGFloat) -> CGFloat {
-    // Width is fully manual: use the saved drag-width exactly (so a narrower
-    // manual width sticks and is never snapped back up by content changes),
-    // otherwise fall back to the fixed default. Outer clamping keeps it within
-    // the supported min/max bounds.
-    guard let savedSize = controller.settings.floatingPanelLastSize else {
-      return automaticWidth
-    }
-
-    let savedWidth = CGFloat(savedSize.width)
-    switch controller.panelState {
-    case .idle:
-      return min(idleMaximumContentWidth, savedWidth)
-    case .loading, .error, .batch, .result:
-      return savedWidth
-    }
-  }
-
-  private static func idleProviderPreviewHeight(for controller: LexiRayController) -> CGFloat {
-    let providerCount = controller.settings.visibleProviderConfigurations().count
-    guard providerCount > 0 else {
-      return 0
-    }
-
-    // Row intrinsic height (matches ProviderStandbyRow.frame(minHeight:)).
-    let rowHeight: CGFloat = 40
-    let dividerHeight: CGFloat = 1
-    return CGFloat(providerCount) * rowHeight + CGFloat(max(0, providerCount - 1)) * dividerHeight
   }
 
   private static func clampedContentSize(_ size: NSSize, maximum: NSSize) -> NSSize {
@@ -659,75 +660,16 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     min(maximum, max(minimumContentSize.width, width.rounded(.up)))
   }
 
-  static func maximumContentHeight(isExpanded: Bool) -> CGFloat {
-    let mouseLocation = NSEvent.mouseLocation
-    let screen = NSScreen.screens.first { NSMouseInRect(mouseLocation, $0.frame, false) } ?? NSScreen.main
-    let visibleHeight = screen?.visibleFrame.height ?? 900
+  /// Screen-aware height ceiling. Reads the panel's own screen height (resolved
+  /// via `activeScreen`) rather than the cursor location so the ceiling is
+  /// stable while a translation streams in.
+  static func maximumContentHeight(isExpanded: Bool, visibleHeight: CGFloat) -> CGFloat {
     let appMaximum: CGFloat = isExpanded ? 760 : 680
     return max(320, min(appMaximum, visibleHeight - 96))
   }
 
   private static func clampedContentHeight(_ height: CGFloat, minimum: CGFloat, maximum: CGFloat) -> CGFloat {
     min(maximum, max(minimum, height.rounded(.up)))
-  }
-
-  private static func panelBaseHeight(for controller: LexiRayController, width: CGFloat) -> CGFloat {
-    let outerPadding: CGFloat = 28
-    let headerHeight: CGFloat = 28
-    let headerToSourceSpacing: CGFloat = 10
-    // sourceComposer chrome (non-editor): inner padding (10+10) + the single
-    // header row (30) + spacing (8) before the editor.
-    let sourceChromeHeight: CGFloat = 20 + 30 + 8
-    return outerPadding
-      + headerHeight
-      + headerToSourceSpacing
-      + sourceChromeHeight
-      + sourceEditorHeight(for: controller, width: width)
-  }
-
-  private static func sourceEditorHeight(for controller: LexiRayController, width: CGFloat) -> CGFloat {
-    let minimumHeight: CGFloat = controller.isExpanded ? 80 : 56
-    let maximumHeight: CGFloat = controller.isExpanded ? 240 : 150
-    guard let text = controller.panelSourceText.nonEmptyTrimmed else {
-      return minimumHeight
-    }
-
-    let measuredHeight = estimatedTextHeight(text, charsPerLine: sourceCharsPerLine(for: width)) + 18
-    return min(maximumHeight, max(minimumHeight, measuredHeight))
-  }
-
-  private static func estimatedEntryHeight(_ entry: ProviderTranslationEntry, charsPerLine: Int) -> CGFloat {
-    switch entry.status {
-    case .disabled:
-      40
-    case .translating:
-      62
-    case let .streaming(text):
-      48 + estimatedTextHeight(text, charsPerLine: charsPerLine)
-    case let .success(result):
-      48 + estimatedTextHeight(result.translatedText, charsPerLine: charsPerLine)
-    case let .failure(message):
-      48 + estimatedTextHeight(message, charsPerLine: charsPerLine)
-    }
-  }
-
-  private static func estimatedTextHeight(_ text: String, charsPerLine: Int, maxLines: Int? = nil) -> CGFloat {
-    let lineCount = estimatedLineCount(text, charsPerLine: charsPerLine)
-    return CGFloat(maxLines.map { min($0, lineCount) } ?? lineCount) * 22
-  }
-
-  private static func estimatedLineCount(_ text: String, charsPerLine: Int) -> Int {
-    text.components(separatedBy: .newlines).reduce(0) { count, line in
-      count + max(1, Int(ceil(Double(max(1, line.count)) / Double(charsPerLine))))
-    }
-  }
-
-  private static func sourceCharsPerLine(for width: CGFloat) -> Int {
-    max(24, Int((width - 74) / 8.2))
-  }
-
-  private static func resultCharsPerLine(for width: CGFloat) -> Int {
-    max(24, Int((width - 86) / 8.2))
   }
 
   private static func shouldApplyResize(from currentFrame: NSRect, to targetFrame: NSRect) -> Bool {
@@ -843,12 +785,35 @@ private enum HistoryNavigationDirection {
 }
 
 extension FloatingPanelController: NSWindowDelegate {
+  func windowDidBecomeKey(_ notification: Notification) {
+    guard wantsSourceFocusOnKey,
+          let panel = notification.object as? NSPanel,
+          panel === self.panel
+    else {
+      return
+    }
+
+    wantsSourceFocusOnKey = false
+    focusSourceEditor(in: panel)
+  }
+
   func windowWillStartLiveResize(_: Notification) {
     isLiveResizing = true
   }
 
   func windowDidEndLiveResize(_: Notification) {
     isLiveResizing = false
+
+    // Persist the final drag size once, rather than on every intermediate
+    // windowDidResize notification (which fires dozens of times per drag).
+    guard let controller, let panel, panel === self.panel else {
+      return
+    }
+    let contentSize = panel.contentRect(forFrameRect: panel.frame).size
+    controller.settings.recordFloatingPanelSize(
+      width: contentSize.width,
+      height: contentSize.height
+    )
   }
 
   func windowDidResize(_ notification: Notification) {
@@ -864,15 +829,13 @@ extension FloatingPanelController: NSWindowDelegate {
       return
     }
 
+    // Track the drag in memory so content updates don't snap the panel back; the
+    // size is only written to settings when the live resize ends.
     let contentSize = panel.contentRect(forFrameRect: panel.frame).size
     userContentSizeOverride = Self.contentSize(
       contentSize,
       respectingUserOverride: nil,
-      maximum: Self.maximumContentSize(for: controller)
-    )
-    controller.settings.recordFloatingPanelSize(
-      width: contentSize.width,
-      height: contentSize.height
+      maximum: maximumContentSize(for: controller)
     )
   }
 
@@ -889,6 +852,26 @@ extension FloatingPanelController: NSWindowDelegate {
       x: panel.frame.origin.x,
       y: panel.frame.origin.y
     )
+  }
+}
+
+/// A plain container whose layer clips its subviews to the panel's rounded
+/// shape. Because it is an ordinary view we own (not the SwiftUI-managed
+/// NSHostingView, whose layer SwiftUI resets on relayout), the corner radius is
+/// stable across focus changes and clips the hosting view's opaque key-state
+/// backing that otherwise showed square white corners.
+private final class FloatingPanelClipView: NSView {
+  init(cornerRadius: CGFloat) {
+    super.init(frame: .zero)
+    wantsLayer = true
+    layer?.cornerRadius = cornerRadius
+    layer?.cornerCurve = .continuous
+    layer?.masksToBounds = true
+  }
+
+  @available(*, unavailable)
+  required init?(coder _: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
   }
 }
 
@@ -911,53 +894,49 @@ private final class FloatingPanelGlassEffectView: NSGlassEffectView {
 
 private final class FloatingPanelVisualEffectView: NSVisualEffectView {
   private let panelCornerRadius: CGFloat
-  private var lastMaskSize: NSSize = .zero
 
   init(cornerRadius: CGFloat) {
     panelCornerRadius = cornerRadius
     super.init(frame: .zero)
     wantsLayer = true
-    layer?.cornerRadius = cornerRadius
-    layer?.masksToBounds = true
+    // Clip the rounded shape solely through `maskImage` below. Previously this
+    // *also* set `layer.cornerRadius` + `masksToBounds`, so the corners were
+    // clipped twice — and the mask bitmap was rasterized at 1×, so on a 2×
+    // Retina display the second clip re-sampled the edge at half resolution and
+    // produced the jagged / uneven border. A single resolution-independent mask
+    // (Apple's recommended NSVisualEffectView route) renders cleanly.
+    maskImage = FloatingPanelCornerMask.image(cornerRadius: cornerRadius)
   }
 
   @available(*, unavailable)
   required init?(coder _: NSCoder) {
     nil
   }
-
-  override func layout() {
-    super.layout()
-    updateMaskImage()
-  }
-
-  private func updateMaskImage() {
-    guard bounds.width > 0, bounds.height > 0, bounds.size != lastMaskSize else {
-      return
-    }
-
-    lastMaskSize = bounds.size
-    maskImage = FloatingPanelCornerMask.image(size: bounds.size, cornerRadius: panelCornerRadius)
-  }
 }
 
 private enum FloatingPanelCornerMask {
-  static func image(size: NSSize, cornerRadius: CGFloat) -> NSImage {
-    let image = NSImage(size: size)
-    image.lockFocus()
-    NSColor.black.setFill()
-    NSBezierPath(
-      roundedRect: NSRect(origin: .zero, size: size),
-      xRadius: cornerRadius,
-      yRadius: cornerRadius
-    ).fill()
-    image.unlockFocus()
+  /// A small rounded-rect mask stretched by `capInsets`. Because it is drawn via
+  /// `NSImage(size:flipped:drawingHandler:)`, AppKit re-renders it at whatever
+  /// backing scale the destination needs (1×, 2×, …), so the corners stay smooth
+  /// on Retina instead of being sampled at 1×.
+  static func image(cornerRadius: CGFloat) -> NSImage {
+    // Just large enough to hold both rounded corners plus a 1pt stretchable
+    // middle strip; capInsets tile the center to any panel size.
+    let side = cornerRadius * 2 + 1
+    let size = NSSize(width: side, height: side)
+
+    let image = NSImage(size: size, flipped: false) { rect in
+      NSColor.black.setFill()
+      NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius).fill()
+      return true
+    }
     image.capInsets = NSEdgeInsets(
       top: cornerRadius,
       left: cornerRadius,
       bottom: cornerRadius,
       right: cornerRadius
     )
+    image.resizingMode = .stretch
     return image
   }
 }

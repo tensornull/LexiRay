@@ -7,7 +7,13 @@ BUNDLE_ID="io.github.tensornull.lexiray"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DERIVED_DATA="$ROOT_DIR/build/DerivedData"
 PROJECT="$ROOT_DIR/LexiRay.xcodeproj"
-APP_BUNDLE="$DERIVED_DATA/Build/Products/Debug/$APP_NAME.app"
+BUILT_APP_BUNDLE="$DERIVED_DATA/Build/Products/Debug/$APP_NAME.app"
+# The build product is installed into /Applications so local testing and any
+# later launch (Spotlight, Launchpad, after a reboot) always resolve to the
+# same app. Everything downstream — signature check, process management, open —
+# targets the installed copy, never the DerivedData build directory.
+INSTALLED_APP_BUNDLE="/Applications/$APP_NAME.app"
+APP_BUNDLE="$INSTALLED_APP_BUNDLE"
 APP_EXECUTABLE="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 CODE_SIGN_IDENTITY="${LEXIRAY_CODE_SIGN_IDENTITY:-LexiRay Local Development}"
 
@@ -21,6 +27,7 @@ fi
 is_development_process() {
   local process_path="$1"
   case "$process_path" in
+    "$INSTALLED_APP_BUNDLE"/Contents/MacOS/"$APP_NAME"*) return 0 ;;
     "$ROOT_DIR"/build/*/"$APP_NAME.app"/Contents/MacOS/"$APP_NAME"*) return 0 ;;
     "$HOME"/Library/Developer/Xcode/DerivedData/"$APP_NAME"-*/Build/Products/*/"$APP_NAME.app"/Contents/MacOS/"$APP_NAME"*) return 0 ;;
     *) return 1 ;;
@@ -88,20 +95,32 @@ canonical_app_is_running() {
 }
 
 verify_app_signature() {
+  local bundle="$1"
   local signature
-  signature="$(/usr/bin/codesign -dvvv "$APP_BUNDLE" 2>&1)"
+  signature="$(/usr/bin/codesign -dvvv "$bundle" 2>&1)"
 
   if /usr/bin/grep -F "Signature=adhoc" <<<"$signature" >/dev/null ||
     ! /usr/bin/grep -F "Authority=$CODE_SIGN_IDENTITY" <<<"$signature" >/dev/null; then
-    echo "Expected $APP_BUNDLE to be signed by \"$CODE_SIGN_IDENTITY\"." >&2
+    echo "Expected $bundle to be signed by \"$CODE_SIGN_IDENTITY\"." >&2
     echo "$signature" >&2
     exit 1
   fi
 }
 
+# Replace /Applications/LexiRay.app with the freshly built bundle so that every
+# subsequent launch — including from Spotlight/Launchpad after a reboot —
+# resolves to exactly what was just built and tested.
+install_to_applications() {
+  rm -rf "$INSTALLED_APP_BUNDLE"
+  /bin/cp -R "$BUILT_APP_BUNDLE" "$INSTALLED_APP_BUNDLE"
+  # Refresh Launch Services so the new bundle wins Spotlight/Launchpad lookups.
+  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+    -f "$INSTALLED_APP_BUNDLE" >/dev/null 2>&1 || true
+}
+
 kill_development_apps
 "$ROOT_DIR/script/clean_dev_apps.sh" --apply
-rm -rf "$APP_BUNDLE"
+rm -rf "$BUILT_APP_BUNDLE"
 "$ROOT_DIR/script/ensure_local_codesign_identity.sh" "$CODE_SIGN_IDENTITY"
 
 xcodegen generate
@@ -115,7 +134,12 @@ xcodebuild \
   DEVELOPMENT_TEAM= \
   ENABLE_DEBUG_DYLIB=NO \
   build
-verify_app_signature
+verify_app_signature "$BUILT_APP_BUNDLE"
+
+# Nothing may hold the installed bundle open while we replace it.
+kill_development_apps
+install_to_applications
+verify_app_signature "$INSTALLED_APP_BUNDLE"
 
 open_app() {
   if [[ -n "$(canonical_app_is_running)" ]]; then
