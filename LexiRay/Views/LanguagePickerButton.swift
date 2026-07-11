@@ -2,7 +2,7 @@ import SwiftUI
 
 /// HapiGo-style large language dropdown used for the panel's source and target
 /// pickers. Shows the effective language (or "Auto") in a tall, comfortable
-/// button; the menu offers Auto, an Once/Always mode switch, a common-language
+/// button; the menu offers Auto, a Once/Always mode switch, a common-language
 /// shortlist, and an "Others" submenu.
 struct LanguagePickerButton: View {
   let title: String
