@@ -1,79 +1,82 @@
 ---
 name: lexiray-install-applications
-description: Use after a verified LexiRay app/UI change when the user wants to preview it from `/Applications/LexiRay.app`, or when the user asks to compile, install, replace, update, or launch the local Applications copy of LexiRay.
+description: Install the current receipt-verified LexiRay candidate into `/Applications/LexiRay.app` and launch it with isolated acceptance data. Use automatically after app-binary changes pass candidate verification, or when the user asks to install, replace, update, launch, or preview the local Applications copy.
 ---
 
 # LexiRay Applications Install Skill
 
-This skill installs the current workspace-built LexiRay app over the local
-`/Applications/LexiRay.app` copy so the user can inspect the real installed app.
-It is for local preview only; it is not a release, notarization, tag, or commit
-workflow.
+Install only the app recorded by the current source fingerprint's candidate
+receipt. This is a local preview, not a release, tag, or notarization workflow.
 
 ## Safety Boundary
 
-- Do not replace `/Applications/LexiRay.app` unless the user explicitly asks or
-  explicitly approves the replacement after you remind them.
-- It is appropriate to remind the user after a meaningful app/UI change has
-  passed verification: "The app is ready to preview; I can replace
-  `/Applications/LexiRay.app` if you want to inspect the installed copy."
+- App-binary changes install automatically after `script/verify.sh candidate`
+  passes. Do not ask for an extra confirmation; docs/tests-only changes do not
+  install.
+- The candidate receipt must match the current source fingerprint. Never build
+  during installation or install an unverified/stale bundle.
 - Do not use `sudo` by default. If `/Applications` permissions block the
   replacement, report the exact permission error and ask the user how to proceed.
-- Do not reset TCC, delete `~/.lexiray`, modify provider secrets, or touch
-  release artifacts.
+- Never read, back up, reset, or modify `~/.lexiray`, the production defaults
+  domain, TCC, provider secrets, or release artifacts.
 - Do not claim this is a release build. The installed copy is a Debug build
   signed with `LexiRay Local Development`.
 - If another LexiRay build/test/CI command is currently running, wait for it to
   finish or report that it is blocking installation. Do not kill unrelated
   build processes.
 
-## Preconditions
-
-Run from `/Users/xmx/workspace/LexiRay`.
-
-Before installing:
-
-1. Verify you are in the LexiRay repo.
-2. Check for active LexiRay build/test processes:
-   ```bash
-   pgrep -fl 'xcodebuild|ci_local|LexiRay' || true
-   ```
-   A running installed LexiRay app is fine; the install helper will quit it.
-   A running `xcodebuild` or `script/ci_local.sh` should finish before install.
-3. Use the canonical workspace build path:
-   `build/DerivedData/Build/Products/Debug/LexiRay.app`.
-
 ## Install Workflow
 
-Use the helper script rather than hand-assembling copy commands:
+Run the sole `/Applications` writer from the repository root:
 
 ```bash
-.codex/skills/lexiray-install-applications/scripts/install_applications.sh
+./script/install_applications.sh
 ```
 
-The helper performs these steps:
+The helper rejects active builds and stale receipts, stages and verifies the
+candidate, uses identity-bound `RENAME_SWAP` or first-install `RENAME_EXCL`
+plus a recoverable transaction marker, registers Launch Services, verifies
+version/build/authority/CDHash/executable hash, and rolls back on failure. Its
+interprocess lock prevents concurrent installers. Installed acceptance roots
+and defaults suites are transaction-unique and are never deleted or reused by
+path alone.
+It launches the installed app with an ignored acceptance data root and
+independent defaults suite for Computer Use; it never launches the installed
+app against real user data during automated acceptance.
+Before returning, it also seals the `launch` capture from the automatically
+presented main window. Later `capture-computer-use launch` revalidates and
+returns that evidence; it cannot replace it with a manually opened window.
 
-1. Runs `./script/build_and_run.sh --verify`, which cleans stale development
-   app bundles, regenerates the Xcode project, builds the app, verifies the
-   `LexiRay Local Development` signature, and briefly launches the workspace
-   build.
-2. Copies the workspace app to `/Applications/LexiRay.app.codex-installing`.
-3. Verifies the staged app with:
-   `codesign --verify --deep --strict`.
-4. Verifies the staged app is signed by `LexiRay Local Development`.
-5. Quits running LexiRay copies whose executable path ends in
-   `LexiRay.app/Contents/MacOS/LexiRay`.
-6. Moves the previous `/Applications/LexiRay.app` aside to a temporary backup,
-   installs the staged app, and restores the backup if the install move fails.
-7. Registers the installed app with LaunchServices.
-8. Verifies the installed app signature.
-9. Opens `/Applications/LexiRay.app` and confirms the running process path.
+After installation, use Computer Use on `/Applications/LexiRay.app` to exercise
+every scenario in the canonical installed matrix. After placing the app in the
+required state for each scenario, capture only the receipt-bound PID-owned
+window through the repository helper (pass a CGWindow ID only when automatic
+selection is ambiguous):
+
+```bash
+./script/acceptance_receipt.sh computer-use-matrix
+./script/acceptance_receipt.sh capture-computer-use <scenario> [window-id]
+```
+
+While the acceptance PID is still running, generate the controlled contact
+sheet and source/app/process-bound manifest, inspect the contact sheet, then
+record the result:
+
+```bash
+manifest="$(./script/acceptance_receipt.sh write-computer-use-manifest)"
+./script/acceptance_receipt.sh mark-computer-use passed "$manifest"
+```
+
+Quit the acceptance-profile process when finished. Leave the installed app in
+place for the user. Arbitrary scenarios, external screenshot directories,
+external contact sheets, or free-form notes are not passing evidence; follow
+`.agents/runbooks/gui-acceptance.md` for the evidence contract.
 
 ## Handoff
 
 Report:
 
-- Whether the build succeeded.
+- The candidate receipt and source fingerprint.
 - Whether `/Applications/LexiRay.app` was replaced.
 - The installed app signing authority.
 - The running installed app path and PID.

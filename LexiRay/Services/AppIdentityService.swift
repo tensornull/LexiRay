@@ -107,7 +107,6 @@ struct AppIdentityService: AppIdentityChecking {
 
   private func duplicateExecutablePaths() -> [String] {
     let ownPID = ProcessInfo.processInfo.processIdentifier
-    let ownExecutablePath = Bundle.main.executableURL?.path
 
     return NSWorkspace.shared.runningApplications
       .filter { application in
@@ -116,12 +115,6 @@ struct AppIdentityService: AppIdentityChecking {
       }
       .compactMap { application in
         application.executableURL?.path ?? application.bundleURL?.path
-      }
-      .filter { path in
-        guard let ownExecutablePath else {
-          return true
-        }
-        return path != ownExecutablePath
       }
       .sorted()
   }

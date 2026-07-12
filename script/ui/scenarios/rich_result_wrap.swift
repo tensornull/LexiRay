@@ -1,6 +1,7 @@
 // Scenario: a history result with inline code chips and a long Chinese sentence
 // wraps inside the floating panel instead of clipping at the right edge.
 openBlankComposer()
+require(pressLexiRayButton(description: "Pin"), "rich wrap scenario could not pin its panel")
 require(focusFloatingSourceEditor(), "source editor did not accept focus before history navigation")
 
 press(126)
@@ -21,6 +22,11 @@ snapPanel("rich-result-wrap-default")
 if let defaultSize = floatingPanelSize(),
    setFloatingPanelSize(CGSize(width: 900, height: defaultSize.height))
 {
+  let axWidth = floatingPanelAXWindow().flatMap(axFrame)?.width ?? 0
+  print(
+    "UI_INFO[rich_result_wrap]: requested width=900 "
+      + "cg=\(floatingPanelSize()?.width ?? 0) ax=\(axWidth)"
+  )
   require(
     waitFor("wide panel resize") { (floatingPanelSize()?.width ?? 0) >= 880 },
     "floating panel did not resize wider"

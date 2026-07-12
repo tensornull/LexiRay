@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "preferredProvider": "mock",
+  "providerOrder": [
+    "mock"
+  ],
+  "providers": {
+    "mock": {
+      "providerID": "mock",
+      "displayName": "Computer Use Mock",
+      "baseURL": "",
+      "model": "",
+      "isEnabled": true,
+      "apiKey": ""
+    }
+  }
+}

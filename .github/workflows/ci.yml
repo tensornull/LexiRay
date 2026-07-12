@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
+      - dev
   pull_request:
     branches:
       - main
+      - dev
 
 jobs:
   build-test:
@@ -21,7 +23,10 @@ jobs:
           xcodebuild -version
 
       - name: Install tools
-        run: brew install xcodegen swiftformat
+        run: brew install ripgrep xcodegen swiftformat
+
+      - name: Context lint
+        run: ./script/context_lint.sh
 
       - name: Generate project
         run: xcodegen generate

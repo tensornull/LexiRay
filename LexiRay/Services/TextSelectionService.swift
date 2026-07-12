@@ -8,25 +8,71 @@ protocol TextSelectionReading {
   func readSelectedText() async -> SelectionReadResult
 }
 
+enum AcceptanceSelectionTargetPolicy {
+  static func allows(
+    bundleIdentifier: String?,
+    processIdentifier: pid_t?,
+    currentProcessIdentifier: pid_t,
+    fixtureProcessIdentifier: pid_t?
+  ) -> Bool {
+    guard let processIdentifier else {
+      return false
+    }
+
+    if bundleIdentifier == AppConstants.bundleID {
+      return processIdentifier == currentProcessIdentifier
+    }
+
+    return bundleIdentifier == "com.apple.TextEdit"
+      && processIdentifier == fixtureProcessIdentifier
+  }
+}
+
 final class TextSelectionService: TextSelectionReading {
   private let accessibilityReader = AccessibilitySelectionReader()
   private let browserReader = BrowserSelectionReader()
   private let clipboardReader = ClipboardSelectionReader()
+  private let allowsClipboardFallback: Bool
+  private let isAcceptanceProfile: Bool
+  private let acceptanceSelectionFixtureProcessIdentifier: pid_t?
+
+  init(allowsClipboardFallback: Bool = AppRuntime.acceptanceProfile == nil) {
+    let acceptanceProfile = AppRuntime.acceptanceProfile
+    self.allowsClipboardFallback = allowsClipboardFallback
+    isAcceptanceProfile = acceptanceProfile != nil
+    acceptanceSelectionFixtureProcessIdentifier = acceptanceProfile?.selectionFixtureProcessIdentifier
+  }
 
   func readSelectedText() async -> SelectionReadResult {
     let accessibilityTrusted = PermissionService.isAccessibilityTrusted
+    let frontmostApplication = NSWorkspace.shared.frontmostApplication
+    let frontmostBundleIdentifier = frontmostApplication?.bundleIdentifier
 
-    if let text = accessibilityReader.readSelectedText() {
+    if isAcceptanceProfile,
+       !AcceptanceSelectionTargetPolicy.allows(
+         bundleIdentifier: frontmostBundleIdentifier,
+         processIdentifier: frontmostApplication?.processIdentifier,
+         currentProcessIdentifier: ProcessInfo.processInfo.processIdentifier,
+         fixtureProcessIdentifier: acceptanceSelectionFixtureProcessIdentifier
+       )
+    {
+      AppLog.selection.warning("Acceptance profile refused selection data from a non-fixture app")
+      return SelectionReadResult(text: nil, source: .unavailable, failureReason: .copyFailed)
+    }
+
+    if let text = accessibilityReader.readSelectedText(
+      expectedProcessIdentifier: frontmostApplication?.processIdentifier
+    ) {
       logSelectionRead(source: .accessibility, text: text)
       return SelectionReadResult(text: text, source: .accessibility)
     }
 
-    if let text = browserReader.readSelectedTextFromFrontmostBrowser() {
+    if !isAcceptanceProfile, let text = browserReader.readSelectedTextFromFrontmostBrowser() {
       logSelectionRead(source: .browserAppleScript, text: text)
       return SelectionReadResult(text: text, source: .browserAppleScript)
     }
 
-    if let text = await clipboardReader.copyCurrentSelection() {
+    if allowsClipboardFallback, let text = await clipboardReader.copyCurrentSelection() {
       logSelectionRead(source: .simulatedCopy, text: text)
       return SelectionReadResult(text: text, source: .simulatedCopy)
     }
@@ -45,8 +91,11 @@ final class TextSelectionService: TextSelectionReading {
 
 @MainActor
 private final class AccessibilitySelectionReader {
-  func readSelectedText() -> String? {
+  func readSelectedText(expectedProcessIdentifier: pid_t?) -> String? {
     guard PermissionService.requestAccessibilityIfNeeded(prompt: false) else {
+      return nil
+    }
+    guard let expectedProcessIdentifier else {
       return nil
     }
 
@@ -65,6 +114,13 @@ private final class AccessibilitySelectionReader {
       return nil
     }
     let focusedElement = unsafeDowncast(focusedElementValue, to: AXUIElement.self)
+    var focusedProcessIdentifier = pid_t()
+    guard AXUIElementGetPid(focusedElement, &focusedProcessIdentifier) == .success,
+          focusedProcessIdentifier == expectedProcessIdentifier
+    else {
+      AppLog.selection.warning("Focused Accessibility element changed applications before selection read")
+      return nil
+    }
 
     var selectedValue: CFTypeRef?
     let selectedResult = AXUIElementCopyAttributeValue(

@@ -6,6 +6,7 @@ import SwiftUI
 /// shortlist, and an "Others" submenu.
 struct LanguagePickerButton: View {
   let title: String
+  let accessibilityIdentifier: String
   /// Effective selection code; `nil` shows the Auto checkmark.
   let selection: String?
   let onSelect: (String?, LanguageSelectionMode) -> Void
@@ -56,6 +57,7 @@ struct LanguagePickerButton: View {
     }
     .menuStyle(.borderlessButton)
     .menuIndicator(.hidden)
+    .accessibilityIdentifier(accessibilityIdentifier)
     // No width frame: the Menu sizes to its label's content and stays
     // compressible, so a long "Auto: Simplified Chinese" title truncates in the
     // tight single row instead of overflowing (and it never fills the row the

@@ -134,6 +134,7 @@ private struct ProviderTranslationResultRow: View {
         ) {
           controller.toggleSpeak(result)
         }
+        .accessibilityIdentifier("TranslationSpeech-\(entry.providerConfigurationID)")
 
         providerToggleButton
       }

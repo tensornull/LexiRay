@@ -1,30 +1,32 @@
-# LexiRay Copilot Instructions
+# LexiRay Copilot Review Instructions
 
-LexiRay is a clean-room macOS selection translation app. Keep changes Swift-only
-unless the maintainer explicitly approves another language. Use SwiftUI for app
-surfaces and narrow AppKit bridges for macOS-specific edges.
+Review for concrete P0/P1 user impact, not style churn. LexiRay is a clean-room,
+Swift-only macOS selection translation app using SwiftUI plus narrow AppKit
+bridges and an XcodeGen-owned project.
 
-Review priorities:
+Prioritize:
 
-- Flag broken CI, release, signing, packaging, XcodeGen, or generated-project
-  assumptions.
-- Flag SwiftUI state, identity, observation, lifecycle, or main-actor mistakes
-  that can cause stale UI, missed updates, or inconsistent app behavior.
-- Flag regressions in Accessibility, Screen Recording, TCC identity,
-  launch-at-login, hotkeys, floating panels, translation concurrency,
-  provider ordering, cancellation, copy behavior, and settings persistence.
-- Flag any clean-room concern: copied GPL source, assets, UI implementation,
-  Objective-C, private reverse-engineered behavior, or non-Swift project code.
-- Flag committed local `.codex/`, build products, DerivedData, xcresults,
-  release outputs, or hand-edited `LexiRay.xcodeproj`.
+- CI, XcodeGen, signing, TCC identity, installation, packaging, version/tag, or
+  release-state errors.
+- SwiftUI state/identity/observation/lifecycle and AppKit bridge bugs that cause
+  stale UI, lost focus, wrong panel/window behavior, or appearance regressions.
+- Main-actor, cancellation, provider ordering, streaming concurrency, copy,
+  history, and settings-persistence bugs.
+- Accessibility, Screen Recording, hotkey, selection, OCR, speech, launch at
+  login, and multi-display regressions.
+- Any path that lets automated acceptance read or modify real `~/.lexiray` or
+  the normal UserDefaults domain, including failure and SIGKILL.
+- Clean-room violations, Objective-C/non-Swift product code, hand-edited
+  `LexiRay.xcodeproj`, or committed `.codex`, build, DerivedData, xcresult, DMG,
+  or archive output.
 
-Required verification standards:
+Verification expectations:
 
-- Meaningful changes must pass `./script/ci_local.sh` before handoff.
-- Visible UI, floating-panel, hotkey, OCR, permission, or streaming behavior
-  needs real workspace app verification; unit tests and compile success alone
-  are not enough.
-- Public releases must update README, CHANGELOG, release notes, and version
-  metadata consistently, and must mention that current DMGs are unsigned.
+- PR-ready work runs `./script/verify.sh pr` on the same source fingerprint.
+- Visible behavior has scenario, inspected screenshot/contact-sheet, installed
+  app, and Computer Use evidence; compilation or mocks alone are insufficient.
+- Releases use a fixed self-signed, non-notarized DMG and matching checksum,
+  with local packaging preferred and GitHub Release Build as fallback.
 
-Prefer small, surgical fixes. Do not suggest unrelated refactors or style churn.
+State the failure mechanism and smallest correction for each finding. Do not
+suggest unrelated refactors or bypass a failing gate.
