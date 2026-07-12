@@ -22,8 +22,10 @@ var pathInfo = stat()
 var descriptorInfo = stat()
 guard lstat(lockPath, &pathInfo) == 0,
       (pathInfo.st_mode & S_IFMT) == S_IFREG,
+      pathInfo.st_nlink == 1,
       fstat(descriptor, &descriptorInfo) == 0,
       (descriptorInfo.st_mode & S_IFMT) == S_IFREG,
+      descriptorInfo.st_nlink == 1,
       pathInfo.st_dev == descriptorInfo.st_dev,
       pathInfo.st_ino == descriptorInfo.st_ino
 else {

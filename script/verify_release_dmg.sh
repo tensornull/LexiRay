@@ -69,8 +69,14 @@ if [[ -n "$EXPECTED_COMMIT" || -n "$EXPECTED_FINGERPRINT" ]]; then
   [[ -f "$ATTESTATION_PATH" ]] || { echo "Release source attestation is missing." >&2; exit 1; }
   attested_commit="$(/usr/libexec/PlistBuddy -c 'Print :source_commit' "$ATTESTATION_PATH")"
   attested_fingerprint="$(/usr/libexec/PlistBuddy -c 'Print :source_fingerprint' "$ATTESTATION_PATH")"
-  [[ "$attested_commit" == "$EXPECTED_COMMIT" ]] || { echo "Release source commit attestation mismatch." >&2; exit 1; }
-  [[ "$attested_fingerprint" == "$EXPECTED_FINGERPRINT" ]] || { echo "Release source fingerprint attestation mismatch." >&2; exit 1; }
+  if [[ -n "$EXPECTED_COMMIT" && "$attested_commit" != "$EXPECTED_COMMIT" ]]; then
+    echo "Release source commit attestation mismatch." >&2
+    exit 1
+  fi
+  if [[ -n "$EXPECTED_FINGERPRINT" && "$attested_fingerprint" != "$EXPECTED_FINGERPRINT" ]]; then
+    echo "Release source fingerprint attestation mismatch." >&2
+    exit 1
+  fi
 fi
 
 /usr/bin/codesign --verify --deep --strict --verbose=4 "$APP_PATH"

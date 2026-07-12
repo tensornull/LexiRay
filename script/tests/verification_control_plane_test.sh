@@ -15,7 +15,19 @@ bash -n \
   script/context_lint.sh \
   script/preflight.sh \
   script/release_check.sh \
+  script/verify_release_dmg.sh \
   script/verify.sh
+
+rg -F '[[ -n "$EXPECTED_COMMIT" && "$attested_commit" != "$EXPECTED_COMMIT" ]]' \
+  script/verify_release_dmg.sh >/dev/null || {
+  echo "DMG verifier does not independently gate the optional source commit expectation" >&2
+  exit 1
+}
+rg -F '[[ -n "$EXPECTED_FINGERPRINT" && "$attested_fingerprint" != "$EXPECTED_FINGERPRINT" ]]' \
+  script/verify_release_dmg.sh >/dev/null || {
+  echo "DMG verifier does not independently gate the optional source fingerprint expectation" >&2
+  exit 1
+}
 
 if rg -n '/usr/bin/plutil[[:space:]]+-lint|X{6}\.' script/acceptance_receipt.sh >/dev/null 2>&1; then
   echo "acceptance receipts must use JSON-capable validation and portable mktemp templates" >&2

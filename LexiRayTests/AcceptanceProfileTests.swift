@@ -224,6 +224,24 @@ final class AcceptanceProfileTests: XCTestCase {
     }
   }
 
+  func testProfileRejectsProductionDataRootSymlinkToAcceptanceRoot() throws {
+    let paths = try makeAcceptanceRoot(name: "production-link")
+    let home = paths.container.appending(path: "home", directoryHint: .isDirectory)
+    let production = home.appending(path: ".lexiray", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(at: production, withDestinationURL: paths.dataRoot)
+
+    XCTAssertThrowsError(
+      try AcceptanceProfile.resolve(
+        environment: acceptanceEnvironment(paths: paths),
+        arguments: [],
+        homeDirectory: home
+      )
+    ) { error in
+      XCTAssertEqual(error as? AcceptanceProfile.ConfigurationError, .unsafeDataRoot)
+    }
+  }
+
   func testProfileCanBeConfiguredWithLaunchArguments() throws {
     let paths = try makeAcceptanceRoot(name: "installed")
     let profile = try XCTUnwrap(
@@ -337,6 +355,14 @@ final class AcceptanceProfileTests: XCTestCase {
     XCTAssertEqual(profile.selectionFixtureProcessIdentifier, 4321)
 
     environment[AcceptanceProfile.selectionFixturePIDEnvironmentKey] = "0"
+    XCTAssertThrowsError(try AcceptanceProfile.resolve(environment: environment, arguments: [])) { error in
+      XCTAssertEqual(
+        error as? AcceptanceProfile.ConfigurationError,
+        .unsafeSelectionFixtureProcessIdentifier
+      )
+    }
+
+    environment[AcceptanceProfile.selectionFixturePIDEnvironmentKey] = "not-a-pid"
     XCTAssertThrowsError(try AcceptanceProfile.resolve(environment: environment, arguments: [])) { error in
       XCTAssertEqual(
         error as? AcceptanceProfile.ConfigurationError,

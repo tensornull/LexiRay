@@ -508,6 +508,29 @@ recover_interrupted_install
 assert_old_restored
 
 LOCK_FILE="$TMP_ROOT/install.lock"
+lock_probe="$TMP_ROOT/install-lock-probe.sh"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$lock_probe"
+chmod +x "$lock_probe"
+for attack in symlink hardlink; do
+  attack_target="$TMP_ROOT/$attack-install-lock-target"
+  attack_lock="$TMP_ROOT/$attack-install.lock"
+  printf 'install-lock-sentinel-%s\n' "$attack" >"$attack_target"
+  if [[ "$attack" == symlink ]]; then
+    ln -s "$attack_target" "$attack_lock"
+  else
+    ln "$attack_target" "$attack_lock"
+  fi
+  if /usr/bin/swift "$ROOT_DIR/script/install_lock.swift" --test \
+    "$attack_lock" "$lock_probe" >"$TMP_ROOT/$attack-install-lock.out" 2>&1; then
+    echo "install lock launcher accepted a $attack lock" >&2
+    exit 1
+  fi
+  [[ "$(<"$attack_target")" == "install-lock-sentinel-$attack" ]] || {
+    echo "install lock launcher modified the $attack target" >&2
+    exit 1
+  }
+done
+
 ready_file="$TMP_ROOT/install-lock-ready"
 release_fifo="$TMP_ROOT/install-lock-release"
 mkfifo "$release_fifo"
@@ -538,6 +561,15 @@ wait "$lock_holder" >/dev/null 2>&1 || true
 validator_lock="$TMP_ROOT/validator.lock"
 exec 7>"$validator_lock"
 /usr/bin/swift "$ROOT_DIR/script/install_lock_validate.swift" --test "$validator_lock" 7
+validator_alias="$TMP_ROOT/validator-hardlink.lock"
+ln "$validator_lock" "$validator_alias"
+if /usr/bin/swift "$ROOT_DIR/script/install_lock_validate.swift" --test "$validator_lock" 7 \
+  >"$TMP_ROOT/hardlinked-validator.out" 2>&1; then
+  echo "install lock validator accepted a hard-linked lock" >&2
+  exit 1
+fi
+grep -F "does not identify" "$TMP_ROOT/hardlinked-validator.out" >/dev/null
+rm "$validator_alias"
 exec 6</dev/null
 if /usr/bin/swift "$ROOT_DIR/script/install_lock_validate.swift" --test "$validator_lock" 6 \
   >"$TMP_ROOT/forged-fd.out" 2>&1; then

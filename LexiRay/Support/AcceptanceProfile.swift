@@ -95,13 +95,17 @@ struct AcceptanceProfile: Equatable {
       .appending(path: "build/acceptance-data", directoryHint: .isDirectory)
       .standardizedFileURL
       .resolvingSymlinksInPath()
-    let productionDataRoot = homeDirectory
+    let canonicalHomeRoot = homeDirectory
+      .standardizedFileURL
+      .resolvingSymlinksInPath()
+    let productionDataRoot = canonicalHomeRoot
       .appending(path: ".lexiray", directoryHint: .isDirectory)
       .standardizedFileURL
+      .resolvingSymlinksInPath()
     let normalizedRoot = dataRoot.path
     let normalizedAcceptanceBase = acceptanceBase.path
     let productionRoot = productionDataRoot.path
-    let homeRoot = homeDirectory.standardizedFileURL.path
+    let homeRoot = canonicalHomeRoot.path
 
     guard workspaceRoot.path != "/",
           normalizedRoot != "/",
@@ -148,10 +152,10 @@ struct AcceptanceProfile: Equatable {
     )
     let selectionFixtureProcessIdentifier: pid_t?
     if let rawSelectionPID {
-      guard let value = pid_t(rawSelectionPID), value > 0 else {
+      guard let parsedValue = Int32(rawSelectionPID), parsedValue > 0 else {
         throw ConfigurationError.unsafeSelectionFixtureProcessIdentifier
       }
-      selectionFixtureProcessIdentifier = value
+      selectionFixtureProcessIdentifier = pid_t(parsedValue)
     } else {
       selectionFixtureProcessIdentifier = nil
     }
