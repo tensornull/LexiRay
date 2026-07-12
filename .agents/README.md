@@ -1,8 +1,14 @@
 # LexiRay Agent Assets
 
-This directory is the canonical home for repo-local agent assets.
+`AGENTS.md` is the canonical, agent-independent contract. This directory holds
+progressively loaded detail:
 
-- `skills/`: Codex/Open Agent Skills for LexiRay and SwiftUI workflows.
-- `prompts/`: reusable task prompts formerly stored under `.codex/prompts`.
+- `runbooks/`: executable project procedures for verification, GUI acceptance,
+  data safety, installation, Git/CI, and release.
+- `skills/`: narrow reusable capabilities discovered by supported agents.
+- `prompts/`: optional task starters; they must defer to `AGENTS.md` and the
+  runbooks instead of duplicating policy.
 
-The `.codex/skills` and `.codex/prompts` paths are compatibility symlinks. Edit the files under `.agents/` first.
+Codex loads `AGENTS.md` and `.agents/skills` natively. `CLAUDE.md` imports the
+same contract and `.claude/skills` points to `.agents/skills`. Do not add tracked
+`.codex` compatibility files or create an agent-specific source of truth.

@@ -1,18 +1,17 @@
 # Bootstrap LexiRay
 
-You are working in the LexiRay repository. Create or update only the files needed for the requested bootstrap step.
+Bootstrap only the requested repository capability. Follow `AGENTS.md` and the
+applicable `.agents/runbooks/` procedure.
 
-Rules:
+Before editing:
 
-- Keep the project clean-room and MIT-compatible.
-- Use SwiftUI for app UI, AppKit only for global hotkeys, AX text selection, NSPanel, status/window activation, and system integrations SwiftUI cannot model.
-- Use XcodeGen; never hand-edit `LexiRay.xcodeproj`.
-- Run `xcodegen generate` and the most relevant `xcodebuild` command before finishing.
+- Inspect branch/worktree state and run `./script/preflight.sh change`.
+- State the user-visible goal, acceptance matrix, and smallest file scope.
+- Preserve clean-room, Swift-only product code, SwiftUI/AppKit boundaries, and
+  XcodeGen ownership.
 
-Success criteria:
+After each edit batch run `./script/verify.sh changed`. Finish with
+`./script/verify.sh candidate`; install and Computer Use-accept app changes by
+default. Before PR work run `./script/verify.sh pr`.
 
-- The app builds on macOS 15+.
-- Tests pass.
-- Codex Run action points at `./script/build_and_run.sh`.
-- CI workflows are present and deterministic.
-
+Report evidence states, checks blocked or skipped, and residual risk.

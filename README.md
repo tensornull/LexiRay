@@ -61,19 +61,28 @@ Install local tools:
 brew install xcodegen swiftformat
 ```
 
-Run the same gate used before pushing or releasing:
+Run the changed-scope gate while developing. Before pushing an app-binary
+change, create the candidate, install that exact build, complete installed-app
+Computer Use acceptance with the isolated profile, and then run the PR gate:
 
 ```bash
-./script/ci_local.sh
+./script/verify.sh changed
+./script/verify.sh candidate
+./script/install_applications.sh
+./script/verify.sh pr
 ```
+
+The installer and Computer Use steps are skipped for docs/tests-only changes.
+See [the verification runbook](.agents/runbooks/verification.md) for receipt and
+evidence commands.
 
 Run the app from the workspace build:
 
 ```bash
-./script/build_and_run.sh --verify
+./script/build_and_run.sh run
 ```
 
-The run script owns the local development app identity. It removes stale
+The build/run script owns the local development app identity. It removes stale
 development bundles, creates or reuses the `LexiRay Local Development` signing
 identity, signs the workspace debug app with it, disables Debug dylib splitting,
 and launches only:
@@ -95,8 +104,8 @@ Identity warning and block Selection/OCR if it detects an unstable identity.
 Release preparation for `0.2.0` and later must start from `dev`:
 
 ```bash
-./script/ci_local.sh
-./script/release_check.sh 0.2.0
+./script/verify.sh candidate
+./script/verify.sh pr
 ```
 
 Open a PR from `dev` to `main`. After the PR checks pass and `main` is updated,
@@ -110,23 +119,36 @@ git push origin v0.2.0
 ```
 
 Release artifacts are built, signed, verified, and uploaded from the local
-release checkout. After the tag is pushed, fetch it, check out the exact
-tagged commit, make sure the local release signing environment is available,
-then run:
+release checkout when the fixed release identity is available. After the tag is
+pushed, fetch it, check out the exact tagged commit, then run:
 
 ```bash
-./script/publish_release.sh 0.2.0
+./script/release.sh doctor 0.2.0
+./script/release.sh publish 0.2.0
 ```
 
-`publish_release.sh` requires a clean worktree, verifies that `v<version>` points
-to `origin/main`, calls `package_release_dmg.sh`, reruns
-`verify_release_dmg.sh`, uploads the DMG and `.sha256` to GitHub Releases, and
-downloads the uploaded assets to verify the checksum.
+`release.sh` requires a clean worktree, verifies that `v<version>` points to
+`origin/main`, and requires a current candidate receipt with installed-app
+Computer Use acceptance. It uses the local fixed identity when that exact
+certificate is accessible; otherwise it automatically dispatches the GitHub
+`Release Build` fallback. Fallback publication is resumable without polling:
 
-The GitHub Release workflow is only an asset/checksum validation gate. It does
-not compile, sign, or package the app. Repository release signing secrets may
-remain as a fallback, but the default release builder is the local machine with
-the fixed self-signed release identity (`LexiRay Release Self-Signed`).
+```bash
+./script/release.sh status 0.2.0
+```
+
+Exit 75 means the fallback is pending or its visibility is uncertain. The
+fallback workflow creates only a private build artifact. Local `status`
+rechecks installed-app Computer Use evidence, verifies that artifact, then
+uploads it through a draft release before publication. Both paths verify the
+fixed certificate fingerprint, designated requirement, entitlements, DMG
+contents, and published `.sha256` before marking the release complete. Resumable state is kept under ignored
+`build/release-state/`; see [the release runbook](.agents/runbooks/release.md).
+
+The separate GitHub `Release Asset Check` workflow remains an asset/checksum
+validation gate. The fallback `Release Build` workflow may compile, sign,
+package, and upload a private Actions artifact only when the fixed identity is
+unavailable locally; it has no permission or script path to publish a release.
 
 ```bash
 gh release view v0.2.0 --json assets,url

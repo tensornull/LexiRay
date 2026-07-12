@@ -5,7 +5,8 @@ with the clean-room goal.
 
 ## Development Rules
 
-- Work from `dev`; do not change `main` directly.
+- Create `feat/<task>`, `fix/<task>`, `chore/<task>`, or `docs/<task>` from the
+  latest `dev`. Only emergency hotfixes branch from `main`.
 - Keep changes surgical. Do not include unrelated refactors or formatting churn.
 - Use SwiftUI for app surfaces and narrow AppKit bridges for macOS-specific
   edges.
@@ -16,22 +17,30 @@ with the clean-room goal.
 
 ## Required Checks
 
-Run the local CI gate before opening a PR:
+Start each change with preflight, then run the changed-scope gate while
+iterating:
 
 ```bash
-./script/ci_local.sh
+./script/preflight.sh change
+./script/verify.sh changed
 ```
 
-For visible UI, floating-panel, hotkey, OCR, permission, or streaming behavior,
-also verify the real workspace-built app:
+Before opening a PR, create and inspect candidate evidence, then run the PR
+gate. For app-binary changes, the candidate flow also requires canonical
+installation and installed-app Computer Use acceptance; docs/tests-only changes
+stop without installation:
 
 ```bash
-./script/build_and_run.sh --verify
+./script/verify.sh candidate
+./script/install_applications.sh
+./script/verify.sh pr
 ```
 
 ## Pull Requests
 
-- Target `main` from `dev`.
+- Task PRs target `dev` and use squash merge.
+- Release PRs alone target `main` from `dev` and use a merge commit. Sync
+  `main` back to `dev` immediately after release.
 - Include a concise summary and the exact checks you ran.
 - After local CI passes and the PR is open, request the manual dual-agent review:
 
@@ -53,11 +62,11 @@ failures first, then rerun CodeQL only after the build cause is understood.
 
 ## Releases
 
-Release candidates must pass:
+Release candidates must already have current installed-app Computer Use
+evidence. From the tagged `main` checkout, use the resumable orchestrator:
 
 ```bash
-./script/ci_local.sh
-./script/release_check.sh <version>
+./script/release.sh doctor <version>
+./script/release.sh publish <version>
+./script/release.sh status <version>
 ```
-
-After the PR is merged and `main` checks pass, create and push `v<version>`.

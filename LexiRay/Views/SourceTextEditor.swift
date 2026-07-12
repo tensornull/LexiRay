@@ -309,10 +309,86 @@ private struct SourceTextView: NSViewRepresentable {
 }
 
 private final class SourceTextNSTextView: NSTextView {
+  private static let acceptanceEditorIdentifier = "FloatingPanelSourceEditor"
+  private static let acceptanceMarkNotification = Notification.Name(
+    "io.github.tensornull.lexiray.acceptance.ime.mark"
+  )
+  private static let acceptanceCommitNotification = Notification.Name(
+    "io.github.tensornull.lexiray.acceptance.ime.commit"
+  )
+
   var historyNavigationHandler: ((SourceTextHistoryDirection) -> Bool)?
   var contentHeightDidChange: (() -> Void)?
   var appearanceDidChange: ((SourceTextNSTextView) -> Void)?
   var markedTextStateDidChange: ((Bool) -> Void)?
+  private var observesAcceptanceIMECommands = false
+
+  deinit {
+    DistributedNotificationCenter.default().removeObserver(self)
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    guard window != nil else {
+      stopObservingAcceptanceIMECommands()
+      return
+    }
+    guard identifier?.rawValue == Self.acceptanceEditorIdentifier,
+          !observesAcceptanceIMECommands,
+          AppRuntime.acceptanceProfile != nil
+    else {
+      return
+    }
+
+    observesAcceptanceIMECommands = true
+    DistributedNotificationCenter.default().addObserver(
+      self,
+      selector: #selector(handleAcceptanceMarkedText(_:)),
+      name: Self.acceptanceMarkNotification,
+      object: nil
+    )
+    DistributedNotificationCenter.default().addObserver(
+      self,
+      selector: #selector(handleAcceptanceCommittedText(_:)),
+      name: Self.acceptanceCommitNotification,
+      object: nil
+    )
+  }
+
+  private func stopObservingAcceptanceIMECommands() {
+    guard observesAcceptanceIMECommands else {
+      return
+    }
+    let center = DistributedNotificationCenter.default()
+    center.removeObserver(self, name: Self.acceptanceMarkNotification, object: nil)
+    center.removeObserver(self, name: Self.acceptanceCommitNotification, object: nil)
+    observesAcceptanceIMECommands = false
+  }
+
+  @objc private func handleAcceptanceMarkedText(_ notification: Notification) {
+    guard window?.isVisible == true,
+          identifier?.rawValue == Self.acceptanceEditorIdentifier,
+          let text = notification.object as? String
+    else {
+      return
+    }
+    window?.makeFirstResponder(self)
+    setMarkedText(
+      text,
+      selectedRange: NSRange(location: text.utf16.count, length: 0),
+      replacementRange: NSRange(location: NSNotFound, length: 0)
+    )
+  }
+
+  @objc private func handleAcceptanceCommittedText(_ notification: Notification) {
+    guard window?.isVisible == true,
+          identifier?.rawValue == Self.acceptanceEditorIdentifier,
+          let text = notification.object as? String
+    else {
+      return
+    }
+    insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+  }
 
   /// IME composition hooks: `textDidChange` is not a reliable signal for
   /// marked-text transitions, so report state from the NSTextInputClient

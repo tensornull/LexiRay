@@ -42,6 +42,7 @@ final class LexiRayController: ObservableObject {
   private let ocrSelectionOverlay: OCRRegionSelecting
   private let speechService: SpeechControlling
   private let historyStore: TranslationHistoryStore
+  private let pasteboard: NSPasteboard
   private var floatingPanel: FloatingPanelPresenting!
   private var translationTask: Task<Void, Never>?
   private let providerTranslationTasks = ProviderTranslationTaskCoordinator()
@@ -78,7 +79,7 @@ final class LexiRayController: ObservableObject {
   }
 
   init(
-    settings: SettingsStore = SettingsStore(allowsMockProvider: AppRuntime.allowsMockProvider),
+    settings: SettingsStore = AppRuntime.makeSettingsStore(),
     selectionService: TextSelectionReading = TextSelectionService(),
     permissionChecker: PermissionChecking = SystemPermissionChecker(),
     hotKeyService: HotKeyRegistering = GlobalHotKeyService(),
@@ -87,9 +88,10 @@ final class LexiRayController: ObservableObject {
     pipeline: TranslationPipeline? = nil,
     ocrService: OCRRecognizing? = nil,
     ocrSelectionOverlay: OCRRegionSelecting? = nil,
-    historyStore: TranslationHistoryStore = TranslationHistoryStore(),
+    historyStore: TranslationHistoryStore = AppRuntime.makeHistoryStore(),
     speechService: SpeechControlling? = nil,
-    permissionMonitor: PermissionStatusMonitor? = nil
+    permissionMonitor: PermissionStatusMonitor? = nil,
+    pasteboard: NSPasteboard = AppRuntime.makePasteboard()
   ) {
     self.settings = settings
     self.selectionService = selectionService
@@ -102,6 +104,7 @@ final class LexiRayController: ObservableObject {
     self.ocrSelectionOverlay = ocrSelectionOverlay ?? OCRSelectionOverlayController()
     self.speechService = speechService ?? SpeechService()
     self.historyStore = historyStore
+    self.pasteboard = pasteboard
     appIdentity = appIdentityChecker.currentSnapshot
     translationHistory = historyStore.load(limit: settings.translationHistoryLimit)
     floatingPanel = floatingPanelFactory?(self) ?? FloatingPanelController(controller: self)
@@ -419,7 +422,7 @@ final class LexiRayController: ObservableObject {
     format: CopyFormat,
     surface: CopyToastSurface = .floatingPanel
   ) {
-    TranslationPasteboardWriter.write(result: result, format: format)
+    TranslationPasteboardWriter.write(result: result, format: format, to: pasteboard)
     settings.defaultCopyFormat = format
     showCopyToast(surface: surface)
   }
@@ -439,8 +442,8 @@ final class LexiRayController: ObservableObject {
       "Accessibility trusted: \(PermissionService.isAccessibilityTrusted)",
       "Screen Recording trusted: \(PermissionService.isScreenCaptureTrusted)"
     ].joined(separator: "\n")
-    NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(diagnostics, forType: .string)
+    pasteboard.clearContents()
+    pasteboard.setString(diagnostics, forType: .string)
     showCopyToast(surface: surface)
   }
 
@@ -940,7 +943,7 @@ final class LexiRayController: ObservableObject {
       return
     }
 
-    TranslationPasteboardWriter.write(result: result, format: settings.defaultCopyFormat)
+    TranslationPasteboardWriter.write(result: result, format: settings.defaultCopyFormat, to: pasteboard)
     autoCopiedBatchIDs.insert(batch.id)
     showCopyToast(surface: .floatingPanel)
   }

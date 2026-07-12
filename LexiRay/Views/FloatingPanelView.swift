@@ -165,6 +165,7 @@ struct FloatingPanelView: View {
 
       LanguagePickerButton(
         title: sourcePickerTitle,
+        accessibilityIdentifier: "SourceLanguagePicker",
         selection: controller.panelSourceSelection,
         onSelect: { code, mode in controller.selectPanelSourceLanguage(code, mode: mode) }
       )
@@ -180,10 +181,13 @@ struct FloatingPanelView: View {
       }
       .buttonStyle(.plain)
       .disabled(controller.panelSourceText.nonEmptyTrimmed == nil)
+      .accessibilityLabel("Swap translation direction")
+      .accessibilityIdentifier("FloatingPanelSwapDirection")
       .help("Swap translation direction")
 
       LanguagePickerButton(
         title: targetPickerTitle,
+        accessibilityIdentifier: "TargetLanguagePicker",
         selection: controller.panelTargetSelection,
         onSelect: { code, mode in controller.selectPanelTargetLanguage(code, mode: mode) }
       )
@@ -200,11 +204,13 @@ struct FloatingPanelView: View {
         isActive: controller.isSpeakingSource,
         action: controller.toggleSpeakSource
       )
+      .accessibilityIdentifier("FloatingPanelSourceSpeech")
       .opacity(controller.panelSourceText.nonEmptyTrimmed == nil ? 0 : 1)
       .disabled(controller.panelSourceText.nonEmptyTrimmed == nil)
       .accessibilityHidden(controller.panelSourceText.nonEmptyTrimmed == nil)
 
       panelButton(systemName: "xmark.circle.fill", help: "Clear Source", action: controller.clearPanelSourceText)
+        .accessibilityIdentifier("FloatingPanelClearSource")
         .opacity(controller.panelSourceText.isEmpty ? 0 : 1)
         .disabled(controller.panelSourceText.isEmpty)
         .accessibilityHidden(controller.panelSourceText.isEmpty)
@@ -224,6 +230,7 @@ struct FloatingPanelView: View {
       .fixedSize()
       .disabled(controller.panelSourceText.nonEmptyTrimmed == nil)
       .help("Translate")
+      .accessibilityIdentifier("FloatingPanelTranslate")
     }
     .frame(height: 30)
   }

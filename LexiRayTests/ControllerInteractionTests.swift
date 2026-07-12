@@ -215,6 +215,80 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertNil(controller.panelDirectionOverride)
   }
 
+  func testOnceLanguageSelectionsResetOnFreshCapture() async {
+    let panel = MockFloatingPanelPresenter()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(
+        result: SelectionReadResult(text: "fresh English selection", source: .accessibility)
+      ),
+      panel: panel
+    )
+    controller.panelSourceText = "こんにちは"
+
+    controller.selectPanelSourceLanguage("ja", mode: .once)
+    controller.selectPanelTargetLanguage("en", mode: .once)
+
+    XCTAssertEqual(controller.panelDirectionOverride?.source, "ja")
+    XCTAssertEqual(controller.panelDirectionOverride?.target, "en")
+    guard case let .batch(onceBatch) = controller.panelState else {
+      return XCTFail("Expected a batch for the Once direction")
+    }
+    XCTAssertEqual(onceBatch.request.sourceLanguage, "ja")
+    XCTAssertEqual(onceBatch.request.targetLanguage, "en")
+
+    controller.translateCurrentSelection()
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      return batch.request.text == "fresh English selection"
+    }
+
+    XCTAssertNil(controller.panelDirectionOverride)
+    guard case let .batch(freshBatch) = controller.panelState else {
+      return XCTFail("Expected a fresh selection batch")
+    }
+    XCTAssertEqual(freshBatch.request.sourceLanguage, "en")
+    XCTAssertEqual(freshBatch.request.targetLanguage, "zh-Hans")
+  }
+
+  func testAlwaysLanguageSelectionsPersistAcrossSettingsReload() {
+    let defaults = makeScratchDefaults()
+    let providerFileStore = makeProviderFileStore()
+    let settings = SettingsStore(
+      defaults: defaults,
+      providerFileStore: providerFileStore,
+      allowsMockProvider: true
+    )
+    enableOnly([.mock], in: settings)
+    let controller = LexiRayController(
+      settings: settings,
+      selectionService: ImmediateSelectionReader(result: .unavailable),
+      permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
+      hotKeyService: MockHotKeyService(),
+      appIdentityChecker: StaticAppIdentityChecker(snapshot: .stableForTesting()),
+      floatingPanelFactory: { _ in MockFloatingPanelPresenter() },
+      historyStore: makeHistoryStore()
+    )
+    controller.panelSourceText = "bonjour"
+
+    controller.selectPanelSourceLanguage("fr", mode: .always)
+    controller.selectPanelTargetLanguage("en", mode: .always)
+
+    let reloaded = SettingsStore(
+      defaults: defaults,
+      providerFileStore: providerFileStore,
+      allowsMockProvider: true
+    )
+    XCTAssertEqual(reloaded.pinnedSourceLanguage, "fr")
+    XCTAssertEqual(reloaded.pinnedTargetLanguage, "en")
+    guard case let .batch(batch) = controller.panelState else {
+      return XCTFail("Expected a batch for the Always direction")
+    }
+    XCTAssertEqual(batch.request.sourceLanguage, "fr")
+    XCTAssertEqual(batch.request.targetLanguage, "en")
+  }
+
   func testUnstableAppIdentityBlocksSelectionBeforeReadingText() async {
     let selectionReader = BlockingSelectionReader()
     let panel = MockFloatingPanelPresenter()
@@ -1047,7 +1121,12 @@ final class ControllerInteractionTests: XCTestCase {
 
   func testCopySpecificBatchResult() {
     let panel = MockFloatingPanelPresenter()
-    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
+    let pasteboard = makePasteboard()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      pasteboard: pasteboard
+    )
     let request = TranslationRequest(
       text: "hello",
       sourceLanguage: "en",
@@ -1079,14 +1158,19 @@ final class ControllerInteractionTests: XCTestCase {
 
     controller.copyResultToClipboard(second, surface: .mainWindow)
 
-    XCTAssertEqual(NSPasteboard.general.string(forType: .string), "two")
+    XCTAssertEqual(pasteboard.string(forType: .string), "two")
     XCTAssertEqual(controller.copyToast?.message, "Copied")
     XCTAssertEqual(controller.copyToast?.surface, .mainWindow)
   }
 
   func testCopySpecificFormatUpdatesDefaultCopyFormat() {
     let panel = MockFloatingPanelPresenter()
-    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
+    let pasteboard = makePasteboard()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      pasteboard: pasteboard
+    )
     let result = TranslationResult(
       request: TranslationRequest(
         text: "hello",
@@ -1104,16 +1188,19 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(controller.settings.defaultCopyFormat, .html)
     XCTAssertEqual(controller.copyToast?.message, "Copied")
     XCTAssertEqual(controller.copyToast?.surface, .floatingPanel)
-    XCTAssertTrue(NSPasteboard.general.string(forType: .html)?.contains("Hello") == true)
-    XCTAssertTrue(NSPasteboard.general.string(forType: .string)?.contains("Hello world") == true)
+    XCTAssertTrue(pasteboard.string(forType: .html)?.contains("Hello") == true)
+    XCTAssertTrue(pasteboard.string(forType: .string)?.contains("Hello world") == true)
   }
 
   func testAutoCopyOffDoesNotWriteClipboard() async {
-    let pasteboard = NSPasteboard.general
-    pasteboard.clearContents()
+    let pasteboard = makePasteboard()
     pasteboard.setString("sentinel", forType: .string)
     let panel = MockFloatingPanelPresenter()
-    let controller = makeController(selectionReader: ImmediateSelectionReader(result: .unavailable), panel: panel)
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      pasteboard: pasteboard
+    )
 
     controller.translateManualText("hello")
     await waitUntil {
@@ -1128,8 +1215,7 @@ final class ControllerInteractionTests: XCTestCase {
   }
 
   func testAutoCopyWaitsForFirstProviderInOrder() async {
-    let pasteboard = NSPasteboard.general
-    pasteboard.clearContents()
+    let pasteboard = makePasteboard()
     pasteboard.setString("sentinel", forType: .string)
     let panel = MockFloatingPanelPresenter()
     let defaults = makeScratchDefaults()
@@ -1156,7 +1242,8 @@ final class ControllerInteractionTests: XCTestCase {
       permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
       floatingPanelFactory: { _ in panel },
       pipeline: pipeline,
-      historyStore: makeHistoryStore()
+      historyStore: makeHistoryStore(),
+      pasteboard: pasteboard
     )
 
     controller.translateManualText("hello")
@@ -1180,8 +1267,7 @@ final class ControllerInteractionTests: XCTestCase {
   }
 
   func testAutoCopyDoesNotOverwriteWithLaterProviderSuccess() async {
-    let pasteboard = NSPasteboard.general
-    pasteboard.clearContents()
+    let pasteboard = makePasteboard()
     let panel = MockFloatingPanelPresenter()
     let defaults = makeScratchDefaults()
     let settings = SettingsStore(
@@ -1207,7 +1293,8 @@ final class ControllerInteractionTests: XCTestCase {
       permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
       floatingPanelFactory: { _ in panel },
       pipeline: pipeline,
-      historyStore: makeHistoryStore()
+      historyStore: makeHistoryStore(),
+      pasteboard: pasteboard
     )
 
     controller.translateManualText("hello")
@@ -1500,6 +1587,93 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(FloatingPanelController.panelLevel(isPinned: true), .floating)
   }
 
+  func testFloatingPanelMenuInteractionDoesNotDismissOutsidePanelBounds() {
+    XCTAssertFalse(
+      FloatingPanelController.shouldDismissLocalMouseEvent(
+        eventWindowNumber: 7,
+        eventWindowLevel: .popUpMenu,
+        panelWindowNumber: 42,
+        insidePanel: false,
+        menuOwnsEvent: false
+      )
+    )
+    XCTAssertFalse(
+      FloatingPanelController.shouldDismissLocalMouseEvent(
+        eventWindowNumber: nil,
+        eventWindowLevel: nil,
+        panelWindowNumber: 42,
+        insidePanel: false,
+        menuOwnsEvent: false
+      )
+    )
+    XCTAssertFalse(
+      FloatingPanelController.shouldDismissLocalMouseEvent(
+        eventWindowNumber: 7,
+        eventWindowLevel: .normal,
+        panelWindowNumber: 42,
+        insidePanel: false,
+        menuOwnsEvent: true
+      )
+    )
+  }
+
+  func testFloatingPanelOwnsMenuTailEventsWithoutSwallowingLaterInput() {
+    XCTAssertTrue(
+      FloatingPanelController.shouldTreatAsMenuTrackingEvent(
+        trackingDepth: 1,
+        trackingEndedAt: nil,
+        eventTimestamp: 100
+      )
+    )
+    XCTAssertTrue(
+      FloatingPanelController.shouldTreatAsMenuTrackingEvent(
+        trackingDepth: 0,
+        trackingEndedAt: 100,
+        eventTimestamp: 100.2
+      )
+    )
+    XCTAssertFalse(
+      FloatingPanelController.shouldTreatAsMenuTrackingEvent(
+        trackingDepth: 0,
+        trackingEndedAt: 100,
+        eventTimestamp: 100.3
+      )
+    )
+  }
+
+  func testFloatingPanelMouseDismissalPreservesPanelAndResizeEvents() {
+    XCTAssertFalse(
+      FloatingPanelController.shouldDismissLocalMouseEvent(
+        eventWindowNumber: 42,
+        eventWindowLevel: .normal,
+        panelWindowNumber: 42,
+        insidePanel: true,
+        menuOwnsEvent: false
+      )
+    )
+    XCTAssertFalse(
+      FloatingPanelController.shouldDismissLocalMouseEvent(
+        eventWindowNumber: nil,
+        eventWindowLevel: nil,
+        panelWindowNumber: 42,
+        insidePanel: true,
+        menuOwnsEvent: false
+      )
+    )
+  }
+
+  func testFloatingPanelMouseDismissalClosesForExternalOutsideClick() {
+    XCTAssertTrue(
+      FloatingPanelController.shouldDismissLocalMouseEvent(
+        eventWindowNumber: 7,
+        eventWindowLevel: .normal,
+        panelWindowNumber: 42,
+        insidePanel: false,
+        menuOwnsEvent: false
+      )
+    )
+  }
+
   func testFloatingPanelRoutesHistoryKeysWhenVisibleWithoutEventWindow() {
     XCTAssertTrue(
       FloatingPanelController.shouldRoutePanelKeyEvent(
@@ -1542,7 +1716,8 @@ final class ControllerInteractionTests: XCTestCase {
         keyCode: UInt16(kVK_Escape),
         eventWindowNumber: 42,
         panelWindowNumber: 42,
-        panelIsVisible: false
+        panelIsVisible: false,
+        menuOwnsEvent: false
       )
     )
     XCTAssertTrue(
@@ -1550,7 +1725,8 @@ final class ControllerInteractionTests: XCTestCase {
         keyCode: UInt16(kVK_Escape),
         eventWindowNumber: nil,
         panelWindowNumber: 42,
-        panelIsVisible: true
+        panelIsVisible: true,
+        menuOwnsEvent: false
       )
     )
     XCTAssertFalse(
@@ -1558,7 +1734,8 @@ final class ControllerInteractionTests: XCTestCase {
         keyCode: UInt16(kVK_Escape),
         eventWindowNumber: 7,
         panelWindowNumber: 42,
-        panelIsVisible: true
+        panelIsVisible: true,
+        menuOwnsEvent: false
       )
     )
     XCTAssertFalse(
@@ -1566,7 +1743,17 @@ final class ControllerInteractionTests: XCTestCase {
         keyCode: UInt16(kVK_UpArrow),
         eventWindowNumber: 42,
         panelWindowNumber: 42,
-        panelIsVisible: true
+        panelIsVisible: true,
+        menuOwnsEvent: false
+      )
+    )
+    XCTAssertFalse(
+      FloatingPanelController.shouldRouteEscapeKeyEvent(
+        keyCode: UInt16(kVK_Escape),
+        eventWindowNumber: nil,
+        panelWindowNumber: 42,
+        panelIsVisible: true,
+        menuOwnsEvent: true
       )
     )
   }
@@ -1668,6 +1855,33 @@ final class ControllerInteractionTests: XCTestCase {
     )
   }
 
+  func testDockVisibilityRefreshIgnoresTransientAndFloatingPanelWindows() {
+    XCTAssertTrue(
+      AppWindowPresenter.shouldRefreshDockVisibilityAfterClosing(
+        identifier: "main",
+        title: "Settings"
+      )
+    )
+    XCTAssertFalse(
+      AppWindowPresenter.shouldRefreshDockVisibilityAfterClosing(
+        identifier: "",
+        title: "LexiRay"
+      )
+    )
+    XCTAssertFalse(
+      AppWindowPresenter.shouldRefreshDockVisibilityAfterClosing(
+        identifier: "",
+        title: ""
+      )
+    )
+    XCTAssertFalse(
+      AppWindowPresenter.shouldRefreshDockVisibilityAfterClosing(
+        identifier: "FloatingPanelWindow",
+        title: "LexiRay Floating Panel"
+      )
+    )
+  }
+
   func testVisibleAppSurfaceIncludesFloatingPanelLevelWindows() {
     let floatingPanel = AppWindowPresenter.WindowSnapshot(
       isVisible: true,
@@ -1711,6 +1925,18 @@ final class ControllerInteractionTests: XCTestCase {
     AppWindowPresenter.cancelPendingMainWindowPresentation()
 
     XCTAssertFalse(AppWindowPresenter.isMainWindowPresentationPending)
+  }
+
+  func testPendingAcceptanceMainWindowPresentationSurvivesAppResign() async {
+    defer {
+      AppWindowPresenter.cancelPendingMainWindowPresentation()
+    }
+
+    AppWindowPresenter.requestMainWindowPresentation(cancelsOnResign: false)
+    NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: NSApp)
+
+    await Task.yield()
+    XCTAssertTrue(AppWindowPresenter.isMainWindowPresentationPending)
   }
 
   func testWindowPresentationCanTargetHiddenMainWindowWithoutCompletingRequest() {
@@ -1825,7 +2051,8 @@ final class ControllerInteractionTests: XCTestCase {
     ocrSelectionOverlay: OCRRegionSelecting? = nil,
     historyStore: TranslationHistoryStore? = nil,
     speechService: SpeechControlling? = nil,
-    permissionMonitor: PermissionStatusMonitor? = nil
+    permissionMonitor: PermissionStatusMonitor? = nil,
+    pasteboard: NSPasteboard? = nil
   ) -> LexiRayController {
     let defaults = makeScratchDefaults()
     let settings = SettingsStore(
@@ -1847,8 +2074,13 @@ final class ControllerInteractionTests: XCTestCase {
       ocrSelectionOverlay: ocrSelectionOverlay,
       historyStore: historyStore ?? makeHistoryStore(),
       speechService: speechService,
-      permissionMonitor: permissionMonitor
+      permissionMonitor: permissionMonitor,
+      pasteboard: pasteboard ?? makePasteboard()
     )
+  }
+
+  private func makePasteboard() -> NSPasteboard {
+    NSPasteboard(name: NSPasteboard.Name("LexiRayControllerTests-\(UUID().uuidString)"))
   }
 
   private func makeProviderFileStore() -> ProviderSettingsFileStore {

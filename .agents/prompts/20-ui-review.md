@@ -1,20 +1,20 @@
-# UI Review Prompt
+# Review LexiRay UI/UX
 
-Review LexiRay UI/UX as a macOS app.
+Review the real macOS UI with screenshots and Computer Use evidence. Follow
+`AGENTS.md`, `.agents/runbooks/gui-acceptance.md`, and
+`.agents/runbooks/data-safety.md`.
 
-Focus:
+Cover the states relevant to the request, including key/non-key, focused,
+pinned, resized, light/dark, keyboard paths, accessibility, and multiple
+displays where applicable. Focus on panel density/readability, permission
+guidance, native macOS affordances, Settings clarity, truncation, materials,
+and reliable focus/interaction.
 
-- Floating panel size, density, readability, and pointer/keyboard ergonomics.
-- Permission guidance for Accessibility, Automation, and Screen Recording.
-- Settings clarity without visual clutter.
-- Dark mode, light mode, multi-display, and full-screen app behavior.
-- Native macOS affordances: menus, shortcuts, buttons, panels, and system symbols.
+Do not touch real provider/history/defaults data. Avoid marketing UI,
+decorative-card churn, and findings based only on a compile or a single static
+frame.
 
-Avoid:
-
-- Marketing copy inside the app.
-- Decorative cards where native controls are better.
-- Hidden core actions with no keyboard or menu path.
-
-Deliver findings first, ordered by severity, with file and line references.
-
+Deliver findings first, ordered by user impact, with file/line references when
+source is in scope and screenshot evidence for visual claims. Put durable,
+unrelated findings in ROADMAP Backlog with stable IDs rather than expanding the
+current task.

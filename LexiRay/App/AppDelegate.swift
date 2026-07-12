@@ -3,6 +3,7 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationDidFinishLaunching(_: Notification) {
+    applyAcceptanceAppearance()
     installApplicationIcon()
     AppWindowPresenter.applyActivationPolicy(
       showsMenuBarIcon: LexiRayController.shared.settings.showsMenuBarIcon
@@ -14,6 +15,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     AppWindowPresenter.startDockVisibilityObservation(settings: LexiRayController.shared.settings)
     LexiRayController.shared.start()
+    if AppRuntime.shouldPresentMainWindowAtLaunch() {
+      AppWindowPresenter.bringMainWindowToFrontSoon(cancelsOnResign: false)
+    }
+  }
+
+  private func applyAcceptanceAppearance() {
+    switch AppRuntime.acceptanceAppearance {
+    case "dark":
+      NSApp.appearance = NSAppearance(named: .darkAqua)
+    case "light":
+      NSApp.appearance = NSAppearance(named: .aqua)
+    default:
+      break
+    }
   }
 
   func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool {
