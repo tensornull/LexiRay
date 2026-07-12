@@ -2,15 +2,15 @@ import AppKit
 
 @MainActor
 enum AppWindowPresenter {
-  private static var windowCloseObserver: NSObjectProtocol?
+  private static var windowCloseObserver: MainWindowCloseObserver?
   private static var appResignObserver: NSObjectProtocol?
   private weak static var mainWindow: NSWindow?
   private static var mainWindowObservers: [NSObjectProtocol] = []
   private static var closingMainWindowIDs = Set<ObjectIdentifier>()
   private static var pendingMainWindowPresentation: PresentationRequest?
 
-  static func bringMainWindowToFrontSoon() {
-    requestMainWindowPresentation()
+  static func bringMainWindowToFrontSoon(cancelsOnResign: Bool = true) {
+    requestMainWindowPresentation(cancelsOnResign: cancelsOnResign)
     presentMainWindowIfAvailable()
   }
 
@@ -23,15 +23,22 @@ enum AppWindowPresenter {
       return
     }
 
-    windowCloseObserver = NotificationCenter.default.addObserver(
-      forName: NSWindow.willCloseNotification,
-      object: nil,
-      queue: .main
-    ) { _ in
-      Task { @MainActor in
-        hideDockIfNoRegularWindowsSoon(showsMenuBarIcon: settings.showsMenuBarIcon)
+    let observer = MainWindowCloseObserver { window in
+      guard shouldRefreshDockVisibilityAfterClosing(
+        identifier: window.identifier?.rawValue ?? "",
+        title: window.title
+      ) else {
+        return
       }
+      hideDockIfNoRegularWindowsSoon(showsMenuBarIcon: settings.showsMenuBarIcon)
     }
+    NotificationCenter.default.addObserver(
+      observer,
+      selector: #selector(MainWindowCloseObserver.windowWillClose(_:)),
+      name: NSWindow.willCloseNotification,
+      object: nil
+    )
+    windowCloseObserver = observer
   }
 
   static func activateApp() {
@@ -86,9 +93,12 @@ enum AppWindowPresenter {
     presentMainWindowIfAvailable()
   }
 
-  static func requestMainWindowPresentation() {
+  static func requestMainWindowPresentation(cancelsOnResign: Bool = true) {
     startPresentationCancellationObservation()
-    pendingMainWindowPresentation = PresentationRequest(deadline: Date().addingTimeInterval(5))
+    pendingMainWindowPresentation = PresentationRequest(
+      deadline: Date().addingTimeInterval(5),
+      cancelsOnResign: cancelsOnResign
+    )
     activateApp()
   }
 
@@ -155,7 +165,7 @@ enum AppWindowPresenter {
         queue: .main
       ) { _ in
         Task { @MainActor in
-          cancelPendingMainWindowPresentation()
+          cancelPendingMainWindowPresentationOnResignIfNeeded()
         }
       }
     )
@@ -184,9 +194,16 @@ enum AppWindowPresenter {
       queue: .main
     ) { _ in
       Task { @MainActor in
-        cancelPendingMainWindowPresentation()
+        cancelPendingMainWindowPresentationOnResignIfNeeded()
       }
     }
+  }
+
+  private static func cancelPendingMainWindowPresentationOnResignIfNeeded() {
+    guard pendingMainWindowPresentation?.cancelsOnResign == true else {
+      return
+    }
+    cancelPendingMainWindowPresentation()
   }
 
   private static func removeMainWindowObservers() {
@@ -330,6 +347,10 @@ enum AppWindowPresenter {
     desiredPolicy == .accessory && !hasVisibleAppSurface
   }
 
+  static func shouldRefreshDockVisibilityAfterClosing(identifier: String, title _: String) -> Bool {
+    identifier == "main"
+  }
+
   private static func matches(_ window: NSWindow, kind: WindowKind) -> Bool {
     let identifier = window.identifier?.rawValue ?? ""
     let title = window.title
@@ -417,6 +438,23 @@ enum AppWindowPresenter {
 
   private struct PresentationRequest {
     var deadline: Date
+    let cancelsOnResign: Bool
     var retryScheduled = false
+  }
+}
+
+@MainActor
+private final class MainWindowCloseObserver: NSObject {
+  private let handler: @MainActor (NSWindow) -> Void
+
+  init(handler: @escaping @MainActor (NSWindow) -> Void) {
+    self.handler = handler
+  }
+
+  @objc func windowWillClose(_ notification: Notification) {
+    guard let window = notification.object as? NSWindow else {
+      return
+    }
+    handler(window)
   }
 }

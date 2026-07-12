@@ -43,6 +43,7 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   /// (or a hair past) the frame boundary, so an exact `frame.contains` treats the
   /// resize mouseDown as an outside click and dismisses the panel.
   private static let dismissEdgeTolerance: CGFloat = 4
+  private nonisolated static let menuTrackingEventGraceInterval: TimeInterval = 0.25
 
   /// Shared minimum content height for every panel state so the footprint stays
   /// consistent before / during / after a translation. Content longer than this
@@ -54,6 +55,9 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   private var globalMouseMonitor: Any?
   private var localMouseMonitor: Any?
   private var localKeyMonitor: Any?
+  private var menuTrackingDepth = 0
+  private var menuTrackingEndedAt: TimeInterval?
+  private var isObservingMenuTracking = false
   private var pendingResizeTask: Task<Void, Never>?
   private var isMovingProgrammatically = false
   private var isSizingProgrammatically = false
@@ -83,6 +87,8 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
         NSEvent.removeMonitor(monitor)
       }
     }
+    NotificationCenter.default.removeObserver(self, name: NSMenu.didBeginTrackingNotification, object: nil)
+    NotificationCenter.default.removeObserver(self, name: NSMenu.didEndTrackingNotification, object: nil)
   }
 
   func show(activating: Bool = false, repositioning: Bool = true) {
@@ -203,7 +209,8 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
       defer: false
     )
 
-    panel.title = "LexiRay"
+    panel.title = "LexiRay Floating Panel"
+    panel.setAccessibilityIdentifier("FloatingPanelWindow")
     Self.updatePanelPresentation(panel, isPinned: controller.isPanelPinned)
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     panel.isMovableByWindowBackground = true
@@ -304,6 +311,22 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
       return
     }
 
+    menuTrackingDepth = 0
+    menuTrackingEndedAt = nil
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(menuDidBeginTracking(_:)),
+      name: NSMenu.didBeginTrackingNotification,
+      object: nil
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(menuDidEndTracking(_:)),
+      name: NSMenu.didEndTrackingNotification,
+      object: nil
+    )
+    isObservingMenuTracking = true
+
     globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
       matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
     ) { [weak self] _ in
@@ -316,13 +339,18 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
       matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
     ) { [weak self] event in
       let screenLocation = event.window?.convertPoint(toScreen: event.locationInWindow) ?? NSEvent.mouseLocation
-      // A resize-grab mouseDown on a borderless window often arrives with no
-      // owning window (it's handled by the window frame, not the contentView),
-      // so a windowNumber check misfires. Treat "belongs to the panel" as: the
-      // event is the panel's, or it has no window and lands within the panel.
-      let isPanelWindowEvent = event.window == nil || event.window === self?.panel
+      let eventWindowNumber = event.window?.windowNumber
+      let eventWindowLevel = event.window?.level
+      let menuOwnsEvent = MainActor.assumeIsolated {
+        self?.isMenuTrackingEvent(timestamp: event.timestamp) == true
+      }
       Task { @MainActor in
-        self?.hideAfterLocalMouseEvent(isPanelWindowEvent: isPanelWindowEvent, screenLocation: screenLocation)
+        self?.hideAfterLocalMouseEvent(
+          eventWindowNumber: eventWindowNumber,
+          eventWindowLevel: eventWindowLevel,
+          menuOwnsEvent: menuOwnsEvent,
+          screenLocation: screenLocation
+        )
       }
       return event
     }
@@ -336,6 +364,9 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
       let keyCode = event.keyCode
       let modifierFlagsRawValue = event.modifierFlags.rawValue
       let eventWindowNumber = event.window?.windowNumber
+      let menuOwnsEvent = MainActor.assumeIsolated {
+        self.isMenuTrackingEvent(timestamp: event.timestamp)
+      }
       // Local event monitors are always invoked on the main thread as part of
       // the app's event dispatch, so main-actor isolation holds here. The
       // monitor must decide synchronously whether to swallow the key (returning
@@ -347,7 +378,8 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
           modifierFlags: NSEvent.ModifierFlags(rawValue: modifierFlagsRawValue),
           eventWindowNumber: eventWindowNumber,
           panelWindowNumber: panelWindowNumber,
-          panelIsVisible: panel?.isVisible == true
+          panelIsVisible: panel?.isVisible == true,
+          menuOwnsEvent: menuOwnsEvent
         )
       }
       return shouldSwallowEvent ? nil : event
@@ -369,6 +401,32 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
       NSEvent.removeMonitor(localKeyMonitor)
       self.localKeyMonitor = nil
     }
+
+    if isObservingMenuTracking {
+      NotificationCenter.default.removeObserver(self, name: NSMenu.didBeginTrackingNotification, object: nil)
+      NotificationCenter.default.removeObserver(self, name: NSMenu.didEndTrackingNotification, object: nil)
+      isObservingMenuTracking = false
+    }
+    menuTrackingDepth = 0
+    menuTrackingEndedAt = nil
+  }
+
+  @objc private func menuDidBeginTracking(_: Notification) {
+    menuTrackingDepth += 1
+    menuTrackingEndedAt = nil
+  }
+
+  @objc private func menuDidEndTracking(_: Notification) {
+    menuTrackingDepth = max(0, menuTrackingDepth - 1)
+    menuTrackingEndedAt = ProcessInfo.processInfo.systemUptime
+  }
+
+  private func isMenuTrackingEvent(timestamp: TimeInterval) -> Bool {
+    Self.shouldTreatAsMenuTrackingEvent(
+      trackingDepth: menuTrackingDepth,
+      trackingEndedAt: menuTrackingEndedAt,
+      eventTimestamp: timestamp
+    )
   }
 
   private func hideAfterOutsideClick(at screenLocation: NSPoint) {
@@ -381,7 +439,12 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     }
   }
 
-  private func hideAfterLocalMouseEvent(isPanelWindowEvent: Bool, screenLocation: NSPoint) {
+  private func hideAfterLocalMouseEvent(
+    eventWindowNumber: Int?,
+    eventWindowLevel: NSWindow.Level?,
+    menuOwnsEvent: Bool,
+    screenLocation: NSPoint
+  ) {
     guard panel?.isVisible == true, controller?.isPanelPinned == false, !isLiveResizing else {
       return
     }
@@ -391,12 +454,13 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     }
 
     let insidePanel = expandedDismissFrame(panel).contains(screenLocation)
-    // The panel's own event (including its edge/corner resize grab) never
-    // dismisses; anything landing outside the panel does.
-    if isPanelWindowEvent, insidePanel {
-      return
-    }
-    if !insidePanel {
+    if Self.shouldDismissLocalMouseEvent(
+      eventWindowNumber: eventWindowNumber,
+      eventWindowLevel: eventWindowLevel,
+      panelWindowNumber: panel.windowNumber,
+      insidePanel: insidePanel,
+      menuOwnsEvent: menuOwnsEvent
+    ) {
       hide()
     }
   }
@@ -689,7 +753,8 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     modifierFlags: NSEvent.ModifierFlags,
     eventWindowNumber: Int?,
     panelWindowNumber: Int?,
-    panelIsVisible: Bool
+    panelIsVisible: Bool,
+    menuOwnsEvent: Bool
   ) -> Bool {
     if Self.isSubmitShortcut(keyCode: keyCode, modifierFlags: modifierFlags),
        eventWindowNumber == panelWindowNumber
@@ -722,7 +787,8 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
       keyCode: keyCode,
       eventWindowNumber: eventWindowNumber,
       panelWindowNumber: panelWindowNumber,
-      panelIsVisible: panelIsVisible
+      panelIsVisible: panelIsVisible,
+      menuOwnsEvent: menuOwnsEvent
     ) else {
       return false
     }
@@ -739,9 +805,11 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     keyCode: UInt16,
     eventWindowNumber: Int?,
     panelWindowNumber: Int?,
-    panelIsVisible: Bool
+    panelIsVisible: Bool,
+    menuOwnsEvent: Bool
   ) -> Bool {
-    isEscapeKey(keyCode: keyCode)
+    !menuOwnsEvent
+      && isEscapeKey(keyCode: keyCode)
       && shouldRoutePanelKeyEvent(
         eventWindowNumber: eventWindowNumber,
         panelWindowNumber: panelWindowNumber,
@@ -755,6 +823,41 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     panelIsVisible: Bool
   ) -> Bool {
     eventWindowNumber == panelWindowNumber || (eventWindowNumber == nil && panelIsVisible)
+  }
+
+  nonisolated static func shouldDismissLocalMouseEvent(
+    eventWindowNumber: Int?,
+    eventWindowLevel: NSWindow.Level?,
+    panelWindowNumber: Int?,
+    insidePanel: Bool,
+    menuOwnsEvent: Bool
+  ) -> Bool {
+    if menuOwnsEvent
+      || eventWindowNumber == nil
+      || eventWindowNumber == panelWindowNumber
+      || eventWindowLevel == .popUpMenu
+    {
+      return false
+    }
+
+    // Menu tracking and borderless resize grabs can arrive without an owning
+    // window. Other applications and the desktop are handled by the global
+    // monitor, so an ambiguous local event must not dismiss the panel.
+    return !insidePanel
+  }
+
+  nonisolated static func shouldTreatAsMenuTrackingEvent(
+    trackingDepth: Int,
+    trackingEndedAt: TimeInterval?,
+    eventTimestamp: TimeInterval
+  ) -> Bool {
+    if trackingDepth > 0 {
+      return true
+    }
+    guard let trackingEndedAt else {
+      return false
+    }
+    return abs(trackingEndedAt - eventTimestamp) <= menuTrackingEventGraceInterval
   }
 
   private nonisolated static func historyNavigationDirection(

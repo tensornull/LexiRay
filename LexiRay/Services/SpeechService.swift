@@ -1,6 +1,26 @@
 import AVFoundation
 import Foundation
 
+struct SpeechUtteranceState {
+  private(set) var activeID: ObjectIdentifier?
+
+  mutating func start(_ id: ObjectIdentifier) {
+    activeID = id
+  }
+
+  mutating func stop() {
+    activeID = nil
+  }
+
+  mutating func complete(_ id: ObjectIdentifier) -> Bool {
+    guard activeID == id else {
+      return false
+    }
+    activeID = nil
+    return true
+  }
+}
+
 @MainActor
 protocol SpeechControlling: AnyObject {
   var isSpeaking: Bool { get }
@@ -14,6 +34,7 @@ protocol SpeechControlling: AnyObject {
 @MainActor
 final class SpeechService: NSObject, SpeechControlling, AVSpeechSynthesizerDelegate {
   private let synthesizer = AVSpeechSynthesizer()
+  private var utteranceState = SpeechUtteranceState()
   private(set) var isSpeaking = false {
     didSet {
       guard oldValue != isSpeaking else {
@@ -43,6 +64,7 @@ final class SpeechService: NSObject, SpeechControlling, AVSpeechSynthesizerDeleg
 
     let utterance = AVSpeechUtterance(string: value)
     utterance.voice = Self.voice(for: languageCode)
+    utteranceState.start(ObjectIdentifier(utterance))
     synthesizer.speak(utterance)
     isSpeaking = true
     return true
@@ -53,18 +75,27 @@ final class SpeechService: NSObject, SpeechControlling, AVSpeechSynthesizerDeleg
       return
     }
 
+    utteranceState.stop()
     synthesizer.stopSpeaking(at: .immediate)
     isSpeaking = false
   }
 
-  nonisolated func speechSynthesizer(_: AVSpeechSynthesizer, didFinish _: AVSpeechUtterance) {
+  nonisolated func speechSynthesizer(_: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+    let utteranceID = ObjectIdentifier(utterance)
     Task { @MainActor [weak self] in
+      guard self?.utteranceState.complete(utteranceID) == true else {
+        return
+      }
       self?.isSpeaking = false
     }
   }
 
-  nonisolated func speechSynthesizer(_: AVSpeechSynthesizer, didCancel _: AVSpeechUtterance) {
+  nonisolated func speechSynthesizer(_: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+    let utteranceID = ObjectIdentifier(utterance)
     Task { @MainActor [weak self] in
+      guard self?.utteranceState.complete(utteranceID) == true else {
+        return
+      }
       self?.isSpeaking = false
     }
   }

@@ -5,6 +5,7 @@ import AppKit
 import ApplicationServices
 import Carbon
 import CoreGraphics
+import Darwin
 import Foundation
 
 let appBundle = CommandLine.arguments[1]
@@ -19,59 +20,181 @@ let repoRoot = CommandLine.arguments.count > 5 ? CommandLine.arguments[5] : URL(
   .deletingLastPathComponent()
   .deletingLastPathComponent()
   .path
+let acceptanceRoot = CommandLine.arguments[6]
+let acceptanceDefaultsSuite = CommandLine.arguments[7]
 
 let lexirayBundleID = "io.github.tensornull.lexiray"
 let seededHistoryText = "LexiRay seeded history text."
 let richWrapHistoryText = "LexiRay rich wrap history text."
 let selectionSmokeText = "LexiRay smoke selection text."
-let appExecutablePrefix = appBundle + "/Contents/MacOS/"
-let lexirayHomeURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".lexiray", isDirectory: true)
+let appExecutablePath = URL(fileURLWithPath: appBundle)
+  .appendingPathComponent("Contents/MacOS/LexiRay")
+  .standardizedFileURL
+  .resolvingSymlinksInPath()
+  .path
+let lexirayHomeURL = URL(fileURLWithPath: acceptanceRoot, isDirectory: true)
 let providersFileURL = lexirayHomeURL.appendingPathComponent("providers.json")
 let historyFileURL = lexirayHomeURL.appendingPathComponent("history.json")
 let fixtureDirectoryURL = URL(fileURLWithPath: repoRoot).appendingPathComponent("script/ui/fixtures", isDirectory: true)
 let fixtureProvidersFileURL = fixtureDirectoryURL.appendingPathComponent("providers.json")
 let fixtureHistoryFileURL = fixtureDirectoryURL.appendingPathComponent("history.json")
+var workspaceLaunchExtraArguments: [String] = []
+var workspaceProcessIdentifier: pid_t?
+var ownedWorkspaceArguments: [String]?
+var validatedFloatingPanelWindowID: UInt32?
+var scenarioCleanupActions: [() -> Void] = []
 
 // MARK: - Target app resolution
-// Two LexiRay copies can run at once (workspace build + installed release).
-// Every lookup must pin the workspace copy by executable path, never by name
-// or bundle identifier alone.
+
+// Every lookup pins the workspace copy by executable path. Scenarios block
+// before launch if another LexiRay process exists because global hotkeys cannot
+// be safely directed to one bundle-identical process.
 
 func lexirayInstances() -> [NSRunningApplication] {
   NSRunningApplication.runningApplications(withBundleIdentifier: lexirayBundleID)
 }
 
+func canonicalExecutablePath(_ application: NSRunningApplication) -> String? {
+  application.executableURL?
+    .standardizedFileURL
+    .resolvingSymlinksInPath()
+    .path
+}
+
+func processArguments(processIdentifier: pid_t) -> [String]? {
+  var mib = [CTL_KERN, KERN_PROCARGS2, processIdentifier]
+  var byteCount = 0
+  guard sysctl(&mib, u_int(mib.count), nil, &byteCount, nil, 0) == 0,
+        byteCount > MemoryLayout<Int32>.size
+  else {
+    return nil
+  }
+
+  var bytes = [UInt8](repeating: 0, count: byteCount)
+  let readResult = bytes.withUnsafeMutableBytes { buffer in
+    sysctl(&mib, u_int(mib.count), buffer.baseAddress, &byteCount, nil, 0)
+  }
+  guard readResult == 0 else {
+    return nil
+  }
+
+  var argumentCount: Int32 = 0
+  withUnsafeMutableBytes(of: &argumentCount) { destination in
+    bytes.withUnsafeBytes { source in
+      destination.copyBytes(from: source.prefix(MemoryLayout<Int32>.size))
+    }
+  }
+  guard argumentCount > 0 else {
+    return nil
+  }
+
+  var index = MemoryLayout<Int32>.size
+  while index < byteCount, bytes[index] != 0 {
+    index += 1
+  }
+  while index < byteCount, bytes[index] == 0 {
+    index += 1
+  }
+
+  var arguments: [String] = []
+  while index < byteCount, arguments.count < Int(argumentCount) {
+    let start = index
+    while index < byteCount, bytes[index] != 0 {
+      index += 1
+    }
+    guard index > start else {
+      return nil
+    }
+    arguments.append(String(decoding: bytes[start ..< index], as: UTF8.self))
+    while index < byteCount, bytes[index] == 0 {
+      index += 1
+    }
+  }
+  return arguments.count == Int(argumentCount) ? arguments : nil
+}
+
+func expectedWorkspaceArguments(extraArguments: [String]) -> [String] {
+  [
+    "--lexiray-ui-scenario",
+    "--lexiray-acceptance-profile",
+    "--lexiray-acceptance-workspace-root", repoRoot,
+    "--lexiray-acceptance-root", acceptanceRoot,
+    "--lexiray-acceptance-defaults-suite", acceptanceDefaultsSuite
+  ] + extraArguments
+}
+
+func applicationMatchesWorkspaceProcess(
+  _ application: NSRunningApplication,
+  expectedArguments: [String]
+) -> Bool {
+  guard !application.isTerminated,
+        canonicalExecutablePath(application) == appExecutablePath,
+        let arguments = processArguments(processIdentifier: application.processIdentifier),
+        let argumentZero = arguments.first,
+        URL(fileURLWithPath: argumentZero).standardizedFileURL.resolvingSymlinksInPath().path
+        == appExecutablePath
+  else {
+    return false
+  }
+  return Array(arguments.dropFirst()) == expectedArguments
+}
+
+func workspacePathInstances() -> [NSRunningApplication] {
+  lexirayInstances().filter { canonicalExecutablePath($0) == appExecutablePath }
+}
+
 func workspaceInstance() -> NSRunningApplication? {
-  lexirayInstances().first { $0.executableURL?.path.hasPrefix(appExecutablePrefix) == true }
+  guard let workspaceProcessIdentifier,
+        let ownedWorkspaceArguments,
+        let application = NSRunningApplication(processIdentifier: workspaceProcessIdentifier),
+        applicationMatchesWorkspaceProcess(application, expectedArguments: ownedWorkspaceArguments)
+  else {
+    return nil
+  }
+  return application
 }
 
 func foreignInstances() -> [NSRunningApplication] {
-  lexirayInstances().filter { $0.executableURL?.path.hasPrefix(appExecutablePrefix) != true }
+  lexirayInstances().filter { $0.processIdentifier != workspaceProcessIdentifier }
 }
 
 // MARK: - Outcome
 
 func fail(_ message: String) -> Never {
-  if !shotDir.isEmpty {
-    let outputURL = URL(fileURLWithPath: shotDir).appendingPathComponent("FAIL-\(scenarioName).png")
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-    process.arguments = ["-x", outputURL.path]
-    try? process.run()
-    process.waitUntilExit()
+  recordFailureEvidence(message)
+  if let cleanupError = runScenarioCleanup() {
+    print("UI_CLEANUP_BLOCKED[\(scenarioName)]: \(cleanupError)")
   }
   print("UI_FAIL[\(scenarioName)]: \(message)")
   exit(1)
 }
 
 func blocked(_ message: String) -> Never {
+  if let cleanupError = runScenarioCleanup() {
+    print("UI_CLEANUP_BLOCKED[\(scenarioName)]: \(cleanupError)")
+  }
   print("UI_BLOCKED[\(scenarioName)]: \(message)")
   exit(2)
 }
 
 func pass() -> Never {
+  if let cleanupError = runScenarioCleanup() {
+    print("UI_BLOCKED[\(scenarioName)]: \(cleanupError)")
+    exit(2)
+  }
   print("UI_PASS[\(scenarioName)]")
   exit(0)
+}
+
+func registerScenarioCleanup(_ action: @escaping () -> Void) {
+  scenarioCleanupActions.append(action)
+}
+
+func runScenarioCleanup() -> String? {
+  let actions = Array(scenarioCleanupActions.reversed())
+  scenarioCleanupActions.removeAll()
+  actions.forEach { $0() }
+  return terminateWorkspaceApp()
 }
 
 func require(_ condition: Bool, _ message: String) {
@@ -117,6 +240,18 @@ func windows(owner: String, name: String? = nil) -> [CGRect] {
   }
 }
 
+func windows(processIdentifier: pid_t, name: String? = nil) -> [CGRect] {
+  allWindows().compactMap { window in
+    guard windowOwnerPID(window) == processIdentifier else {
+      return nil
+    }
+    if let name, windowName(window) != name {
+      return nil
+    }
+    return windowBounds(window)
+  }
+}
+
 func windowOwnerPID(_ window: [String: Any]) -> pid_t? {
   (window[kCGWindowOwnerPID as String] as? Int).map(pid_t.init)
 }
@@ -128,41 +263,252 @@ func lexirayWindowInfos() -> [[String: Any]] {
   return allWindows().filter { windowOwnerPID($0) == pid }
 }
 
-func lexirayMainWindowInfo() -> [String: Any]? {
-  lexirayWindowInfos().first { window in
-    let rect = windowBounds(window)
-    return rect.width >= 650 && rect.height >= 420
+func windowFramesApproximatelyMatch(_ lhs: CGRect, _ rhs: CGRect, tolerance: CGFloat = 4) -> Bool {
+  abs(lhs.minX - rhs.minX) < tolerance
+    && abs(lhs.minY - rhs.minY) < tolerance
+    && abs(lhs.width - rhs.width) < tolerance
+    && abs(lhs.height - rhs.height) < tolerance
+}
+
+func windowInfo(matching accessibilityWindow: AXUIElement?) -> [String: Any]? {
+  guard let accessibilityWindow, let frame = axFrame(accessibilityWindow) else {
+    return nil
   }
+  let matches = lexirayWindowInfos().filter {
+    windowID($0) != nil && windowFramesApproximatelyMatch(windowBounds($0), frame)
+  }
+  return matches.count == 1 ? matches[0] : nil
+}
+
+func lexirayMainWindowInfo() -> [String: Any]? {
+  windowInfo(matching: lexirayMainAXWindow())
 }
 
 func floatingPanelWindowInfo() -> [String: Any]? {
-  lexirayWindowInfos().first { window in
-    let rect = windowBounds(window)
-    return rect.width >= 560 && rect.width <= 980 && rect.height >= 180 && rect.height <= 780
+  if let matched = windowInfo(matching: floatingPanelAXWindow()) {
+    validatedFloatingPanelWindowID = windowID(matched)
+    return matched
   }
+
+  // NSMenu teardown can briefly remove the panel from the AX window tree even
+  // though the same app-owned CGWindow remains on screen. Reuse only the window
+  // ID that AX already proved during this exact runner-owned process lifetime.
+  guard let validatedFloatingPanelWindowID else {
+    return nil
+  }
+  let matches = lexirayWindowInfos().filter { windowID($0) == validatedFloatingPanelWindowID }
+  return matches.count == 1 ? matches[0] : nil
+}
+
+func isFloatingPanelWindow(_ window: [String: Any]) -> Bool {
+  guard let candidateID = windowID(window), let panelID = floatingPanelWindowInfo().flatMap(windowID) else {
+    return false
+  }
+  return candidateID == panelID
 }
 
 func panelWindows() -> [CGRect] {
-  lexirayWindowInfos().map(windowBounds).filter { rect in
-    rect.width >= 560 && rect.width <= 980 && rect.height >= 180 && rect.height <= 780
-  }
+  floatingPanelWindowInfo().map { [windowBounds($0)] } ?? []
 }
 
 func lexirayMainWindows() -> [CGRect] {
-  lexirayWindowInfos().map(windowBounds).filter { rect in
-    rect.width >= 650 && rect.height >= 420
-  }
+  lexirayMainWindowInfo().map { [windowBounds($0)] } ?? []
 }
 
 // MARK: - Screenshots
 
-func snap(_ name: String, window: [String: Any]?) {
-  guard !shotDir.isEmpty else {
-    return
+final class AcceptanceSafeBackdropPanel: NSPanel {
+  override var canBecomeKey: Bool {
+    false
   }
-  guard let window, let id = windowID(window) else {
-    fail("screenshot \(name): target window was not found")
+
+  override var canBecomeMain: Bool {
+    false
   }
+}
+
+final class AcceptanceSafeBackdropView: NSView {
+  override var isOpaque: Bool {
+    true
+  }
+
+  override func draw(_ dirtyRect: NSRect) {
+    NSColor(calibratedWhite: 0.92, alpha: 1).setFill()
+    dirtyRect.fill()
+
+    let tileSize: CGFloat = 28
+    let columns = Int(ceil(bounds.width / tileSize))
+    let rows = Int(ceil(bounds.height / tileSize))
+    for row in 0 ... rows {
+      for column in 0 ... columns where (row + column).isMultiple(of: 2) {
+        let color = row.isMultiple(of: 2)
+          ? NSColor(calibratedRed: 0.12, green: 0.48, blue: 0.42, alpha: 1)
+          : NSColor(calibratedRed: 0.86, green: 0.34, blue: 0.28, alpha: 1)
+        color.setFill()
+        NSRect(
+          x: CGFloat(column) * tileSize,
+          y: CGFloat(row) * tileSize,
+          width: tileSize,
+          height: tileSize
+        ).fill()
+      }
+    }
+  }
+}
+
+func windowLayer(_ window: [String: Any]) -> Int? {
+  window[kCGWindowLayer as String] as? Int
+}
+
+func windowAlpha(_ window: [String: Any]) -> CGFloat? {
+  (window[kCGWindowAlpha as String] as? NSNumber).map { CGFloat(truncating: $0) }
+}
+
+final class ControlledPanelBackdrop {
+  private static let title = "LexiRay Acceptance Safe Backdrop"
+  private static let padding: CGFloat = 64
+
+  private let panel: AcceptanceSafeBackdropPanel
+  private let targetLayer: Int
+  private let expectedBounds: CGRect
+
+  init?(targetWindow: [String: Any]) {
+    guard let targetWindowID = windowID(targetWindow),
+          let targetLayer = windowLayer(targetWindow),
+          let primaryScreen = NSScreen.screens.first
+    else {
+      return nil
+    }
+
+    self.targetLayer = targetLayer
+    expectedBounds = windowBounds(targetWindow).insetBy(
+      dx: -Self.padding,
+      dy: -Self.padding
+    )
+    let appKitFrame = CGRect(
+      x: expectedBounds.minX,
+      y: primaryScreen.frame.maxY - expectedBounds.maxY,
+      width: expectedBounds.width,
+      height: expectedBounds.height
+    )
+
+    _ = NSApplication.shared
+    panel = AcceptanceSafeBackdropPanel(
+      contentRect: appKitFrame,
+      styleMask: [.borderless, .nonactivatingPanel],
+      backing: .buffered,
+      defer: false
+    )
+    panel.title = Self.title
+    panel.level = NSWindow.Level(rawValue: targetLayer)
+    panel.isOpaque = true
+    panel.backgroundColor = NSColor(calibratedWhite: 0.92, alpha: 1)
+    panel.alphaValue = 1
+    panel.hasShadow = false
+    panel.ignoresMouseEvents = true
+    panel.isReleasedWhenClosed = false
+    panel.animationBehavior = .none
+    panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
+    let contentView = AcceptanceSafeBackdropView(frame: CGRect(origin: .zero, size: appKitFrame.size))
+    contentView.autoresizingMask = [.width, .height]
+    panel.contentView = contentView
+    panel.order(.below, relativeTo: Int(targetWindowID))
+    RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+  }
+
+  func verificationError(targetWindowID: UInt32, processIdentifier: pid_t) -> String? {
+    guard panel.isVisible,
+          panel.isOpaque,
+          panel.alphaValue == 1,
+          panel.styleMask.contains(.nonactivatingPanel),
+          !panel.canBecomeKey,
+          !panel.canBecomeMain,
+          panel.ignoresMouseEvents,
+          let contentView = panel.contentView as? AcceptanceSafeBackdropView,
+          contentView.subviews.isEmpty
+    else {
+      return "controlled panel backdrop is not visibly opaque"
+    }
+
+    let orderedWindows = allWindows()
+    guard let targetIndex = orderedWindows.firstIndex(where: {
+      windowID($0) == targetWindowID && windowOwnerPID($0) == processIdentifier
+    }),
+      let backdropIndex = orderedWindows.firstIndex(where: {
+        windowID($0) == UInt32(panel.windowNumber) && windowOwnerPID($0) == getpid()
+      })
+    else {
+      return "controlled panel backdrop or target is absent from the window server"
+    }
+
+    let target = orderedWindows[targetIndex]
+    let backdrop = orderedWindows[backdropIndex]
+    guard windowLayer(target) == targetLayer,
+          windowLayer(backdrop) == targetLayer,
+          backdropIndex == targetIndex + 1
+    else {
+      return "controlled panel backdrop is not immediately below the target panel"
+    }
+    guard let alpha = windowAlpha(backdrop), alpha >= 0.999 else {
+      return "controlled panel backdrop is not fully opaque in the window server"
+    }
+
+    let targetBounds = windowBounds(target)
+    let backdropBounds = windowBounds(backdrop)
+    let tolerance: CGFloat = 1
+    guard backdropBounds.minX <= targetBounds.minX + tolerance,
+          backdropBounds.minY <= targetBounds.minY + tolerance,
+          backdropBounds.maxX >= targetBounds.maxX - tolerance,
+          backdropBounds.maxY >= targetBounds.maxY - tolerance,
+          abs(backdropBounds.minX - expectedBounds.minX) <= tolerance,
+          abs(backdropBounds.minY - expectedBounds.minY) <= tolerance,
+          abs(backdropBounds.width - expectedBounds.width) <= tolerance,
+          abs(backdropBounds.height - expectedBounds.height) <= tolerance
+    else {
+      return "controlled panel backdrop does not cover the target panel frame"
+    }
+    return nil
+  }
+
+  func close() {
+    panel.orderOut(nil)
+    panel.close()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+  }
+}
+
+func currentOwnedWindowInfo(targetWindowID: UInt32, processIdentifier: pid_t) -> [String: Any]? {
+  allWindows().first {
+    windowID($0) == targetWindowID && windowOwnerPID($0) == processIdentifier
+  }
+}
+
+func captureOwnedWindow(_ name: String, window: [String: Any]) -> String? {
+  guard let processIdentifier = workspaceProcessIdentifier,
+        workspaceInstance()?.processIdentifier == processIdentifier,
+        windowOwnerPID(window) == processIdentifier,
+        let id = windowID(window),
+        currentOwnedWindowInfo(targetWindowID: id, processIdentifier: processIdentifier) != nil
+  else {
+    return "target window is not owned by the validated LexiRay PID"
+  }
+
+  var controlledBackdrop: ControlledPanelBackdrop?
+  if isFloatingPanelWindow(window) {
+    guard let backdrop = ControlledPanelBackdrop(targetWindow: window) else {
+      return "could not create a synthetic controlled backdrop for the material panel"
+    }
+    controlledBackdrop = backdrop
+    guard backdrop.verificationError(
+      targetWindowID: id,
+      processIdentifier: processIdentifier
+    ) == nil
+    else {
+      backdrop.close()
+      return "synthetic controlled backdrop could not be verified below the material panel"
+    }
+  }
+  defer { controlledBackdrop?.close() }
 
   let outputURL = URL(fileURLWithPath: shotDir).appendingPathComponent("\(name).png")
   let process = Process()
@@ -171,48 +517,167 @@ func snap(_ name: String, window: [String: Any]?) {
   do {
     try process.run()
     process.waitUntilExit()
-    if process.terminationStatus != 0 {
-      fail("screenshot \(name): screencapture exited \(process.terminationStatus)")
+    guard process.terminationStatus == 0 else {
+      return "screencapture exited \(process.terminationStatus)"
     }
+    guard currentOwnedWindowInfo(targetWindowID: id, processIdentifier: processIdentifier) != nil else {
+      try? FileManager.default.removeItem(at: outputURL)
+      return "target window ownership changed while capturing"
+    }
+    if let backdropError = controlledBackdrop?.verificationError(
+      targetWindowID: id,
+      processIdentifier: processIdentifier
+    ) {
+      try? FileManager.default.removeItem(at: outputURL)
+      return "controlled panel backdrop changed while capturing: \(backdropError)"
+    }
+    guard let attributes = try? FileManager.default.attributesOfItem(atPath: outputURL.path),
+          let size = attributes[.size] as? NSNumber,
+          size.intValue > 0
+    else {
+      try? FileManager.default.removeItem(at: outputURL)
+      return "screencapture produced no window evidence"
+    }
+    return nil
   } catch {
-    fail("screenshot \(name): \(error.localizedDescription)")
+    try? FileManager.default.removeItem(at: outputURL)
+    return error.localizedDescription
+  }
+}
+
+func recordFailureEvidence(_ message: String) {
+  guard !shotDir.isEmpty else {
+    return
+  }
+
+  var lines = [
+    "scenario=\(scenarioName)",
+    "result=failed",
+    "message=\(message)"
+  ]
+  guard let processIdentifier = workspaceProcessIdentifier,
+        workspaceInstance()?.processIdentifier == processIdentifier
+  else {
+    lines.append("validated_lexiray_process=unavailable")
+    let outputURL = URL(fileURLWithPath: shotDir).appendingPathComponent("FAIL-\(scenarioName).txt")
+    try? lines.joined(separator: "\n").write(to: outputURL, atomically: true, encoding: .utf8)
+    return
+  }
+
+  lines.append("validated_lexiray_pid=\(processIdentifier)")
+  lines.append("executable=\(appExecutablePath)")
+  let windowInfos = lexirayWindowInfos()
+  lines.append("window_count=\(windowInfos.count)")
+  for (index, window) in windowInfos.enumerated() {
+    let id = windowID(window).map(String.init) ?? "unavailable"
+    lines.append(
+      "window[\(index)]=id:\(id),name:\(windowName(window)),bounds:\(NSStringFromRect(windowBounds(window)))"
+    )
+    if let error = captureOwnedWindow("FAIL-\(scenarioName)-window-\(index + 1)", window: window) {
+      lines.append("window[\(index)].capture_error=\(error)")
+    }
+  }
+
+  let outputURL = URL(fileURLWithPath: shotDir).appendingPathComponent("FAIL-\(scenarioName).txt")
+  try? lines.joined(separator: "\n").write(to: outputURL, atomically: true, encoding: .utf8)
+}
+
+func snap(_ name: String, window: [String: Any]?) {
+  guard !shotDir.isEmpty else {
+    return
+  }
+  guard let window else {
+    fail("screenshot \(name): target window was not found")
+  }
+  if let error = captureOwnedWindow(name, window: window) {
+    fail("screenshot \(name): \(error)")
   }
 }
 
 func snapMain(_ name: String) {
-  snap(name, window: lexirayMainWindowInfo())
+  var window: [String: Any]?
+  _ = waitFor("main window for screenshot \(name)", timeout: 3) {
+    window = lexirayMainWindowInfo()
+    return window != nil
+  }
+  snap(name, window: window)
 }
 
 func snapPanel(_ name: String) {
-  snap(name, window: floatingPanelWindowInfo())
+  var window: [String: Any]?
+  _ = waitFor("floating panel for screenshot \(name)", timeout: 3) {
+    window = floatingPanelWindowInfo()
+    return window != nil
+  }
+  snap(name, window: window)
+}
+
+func recordPanelPixelEvidence(_ imageName: String) {
+  let imageURL = URL(fileURLWithPath: shotDir).appendingPathComponent("\(imageName).png")
+  guard let image = NSImage(contentsOf: imageURL),
+        let tiff = image.tiffRepresentation,
+        let bitmap = NSBitmapImageRep(data: tiff)
+  else {
+    fail("could not read pixel evidence from \(imageName).png")
+  }
+
+  let points = [
+    ("top-left", 1, max(0, bitmap.pixelsHigh - 2)),
+    ("top-right", max(0, bitmap.pixelsWide - 2), max(0, bitmap.pixelsHigh - 2)),
+    ("bottom-left", 1, 1),
+    ("bottom-right", max(0, bitmap.pixelsWide - 2), 1),
+    ("interior", min(20, bitmap.pixelsWide - 1), min(20, bitmap.pixelsHigh - 1))
+  ]
+  let sampledColors = points.map { name, x, y in
+    (name, bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+  }
+  let samples = sampledColors.map { name, color -> String in
+    guard let color else {
+      return "\(name)=unavailable"
+    }
+    return "\(name)=r:\(color.redComponent),g:\(color.greenComponent),b:\(color.blueComponent),a:\(color.alphaComponent)"
+  }
+
+  let evidenceURL = URL(fileURLWithPath: shotDir).appendingPathComponent("\(imageName)-pixels.txt")
+  do {
+    try samples.joined(separator: "\n").write(to: evidenceURL, atomically: true, encoding: .utf8)
+  } catch {
+    fail("could not write panel pixel evidence: \(error.localizedDescription)")
+  }
+
+  let cornerColors = sampledColors.prefix(4).compactMap(\.1)
+  guard cornerColors.count == 4, cornerColors.allSatisfy({ $0.alphaComponent < 0.25 }) else {
+    fail("\(imageName) has opaque corner pixels; rounded clipping regressed")
+  }
+  guard let interior = sampledColors.last?.1, interior.alphaComponent > 0.9 else {
+    fail("\(imageName) did not capture an opaque panel interior for corner comparison")
+  }
 }
 
 // MARK: - Accessibility tree
+
+func axElements(root: AXUIElement, depth: Int = 0) -> [AXUIElement] {
+  var elements = [root]
+  guard depth < 14 else {
+    return elements
+  }
+
+  var value: CFTypeRef?
+  if AXUIElementCopyAttributeValue(root, kAXChildrenAttribute as CFString, &value) == .success,
+     let children = value as? [AXUIElement]
+  {
+    for child in children {
+      elements += axElements(root: child, depth: depth + 1)
+    }
+  }
+  return elements
+}
 
 func lexirayAXElements() -> [AXUIElement] {
   guard let app = workspaceInstance() else {
     return []
   }
-
-  let root = AXUIElementCreateApplication(app.processIdentifier)
-  func collect(_ element: AXUIElement, depth: Int = 0) -> [AXUIElement] {
-    var elements = [element]
-    guard depth < 14 else {
-      return elements
-    }
-
-    var value: CFTypeRef?
-    if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &value) == .success,
-       let children = value as? [AXUIElement] {
-      for child in children {
-        elements += collect(child, depth: depth + 1)
-      }
-    }
-
-    return elements
-  }
-
-  return collect(root)
+  return axElements(root: AXUIElementCreateApplication(app.processIdentifier))
 }
 
 func axString(_ element: AXUIElement, _ attribute: String) -> String {
@@ -227,6 +692,81 @@ func axElement(identifier: String) -> AXUIElement? {
   lexirayAXElements().first { element in
     axString(element, kAXIdentifierAttribute) == identifier
   }
+}
+
+func axElement(title: String) -> AXUIElement? {
+  lexirayAXElements().first { element in
+    let role = axString(element, kAXRoleAttribute)
+    return ["AXButton", "AXMenuItem", "AXRadioButton"].contains(role)
+      && axString(element, kAXTitleAttribute) == title
+  }
+}
+
+func axMenuItems(title: String) -> [AXUIElement] {
+  lexirayAXElements().filter { element in
+    ["AXMenuItem", "AXRadioButton"].contains(axString(element, kAXRoleAttribute))
+      && axString(element, kAXTitleAttribute) == title
+  }
+}
+
+func axMenuItem(title: String) -> AXUIElement? {
+  let matches = axMenuItems(title: title)
+  return matches.first { axString($0, kAXRoleAttribute) == "AXMenuItem" } ?? matches.first
+}
+
+func axMenuItemIsMarked(title: String) -> Bool {
+  axMenuItems(title: title).contains { element in
+    !axString(element, kAXMenuItemMarkCharAttribute).isEmpty
+  }
+}
+
+func acceptanceDefaultString(_ key: String) -> String? {
+  _ = CFPreferencesAppSynchronize(acceptanceDefaultsSuite as CFString)
+  return CFPreferencesCopyAppValue(
+    key as CFString,
+    acceptanceDefaultsSuite as CFString
+  ) as? String
+}
+
+func lexiRayLanguageMenuIsOpen() -> Bool {
+  axMenuItem(title: "Once") != nil && axMenuItem(title: "Always") != nil
+}
+
+func dismissLexiRayLanguageMenu(timeout: TimeInterval) -> Bool {
+  guard lexiRayLanguageMenuIsOpen() else {
+    return true
+  }
+  press(CGKeyCode(kVK_Escape))
+  return waitFor("dismiss language menu", timeout: timeout) { !lexiRayLanguageMenuIsOpen() }
+}
+
+func openLexiRayLanguageMenu(
+  containing title: String,
+  pickerIdentifier: String,
+  timeout: TimeInterval
+) -> Bool {
+  guard floatingPanelWindowInfo() != nil else {
+    print("UI_MENU_DIAGNOSTIC[\(scenarioName)]: panel dismissed before opening \(pickerIdentifier)")
+    return false
+  }
+  let deadline = Date().addingTimeInterval(timeout)
+  var lastOpenAttempt = Date.distantPast
+  repeat {
+    guard floatingPanelWindowInfo() != nil else {
+      print("UI_MENU_DIAGNOSTIC[\(scenarioName)]: panel dismissed while opening \(pickerIdentifier)")
+      return false
+    }
+    if lexiRayLanguageMenuIsOpen(), axMenuItem(title: title) != nil {
+      return true
+    }
+    if !lexiRayLanguageMenuIsOpen(), Date().timeIntervalSince(lastOpenAttempt) >= 0.5 {
+      _ = pressLexiRayElement(identifier: pickerIdentifier)
+      lastOpenAttempt = Date()
+    }
+    RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+  } while Date() < deadline
+  print("UI_TIMEOUT[\(scenarioName)]: open \(pickerIdentifier) menu containing \(title)")
+  return false
 }
 
 func axVisibleText(_ element: AXUIElement) -> String {
@@ -261,27 +801,21 @@ func axFrame(_ element: AXUIElement) -> CGRect? {
 }
 
 func panelAXSizes() -> [CGSize] {
-  lexirayAXElements().compactMap { element in
-    var sizeValue: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeValue) == .success,
-          let sizeValue
-    else {
-      return nil
-    }
-
-    let axValue = sizeValue as! AXValue
-    var size = CGSize.zero
-    guard AXValueGetValue(axValue, .cgSize, &size),
-          size.width >= 560 && size.width <= 980 && size.height >= 180 && size.height <= 780
-    else {
-      return nil
-    }
-    return size
+  guard let window = floatingPanelAXWindow(), let frame = axFrame(window) else {
+    return []
   }
+  return [frame.size]
 }
 
 func lexirayVisibleTextContains(_ needle: String) -> Bool {
   lexirayAXElements().contains { axVisibleText($0).contains(needle) }
+}
+
+func floatingPanelVisibleTextContains(_ needle: String) -> Bool {
+  guard let panel = floatingPanelAXWindow() else {
+    return false
+  }
+  return axElements(root: panel).contains { axVisibleText($0).contains(needle) }
 }
 
 func visibleStaticTextOverflowingFloatingPanelRightBoundary() -> [String] {
@@ -311,23 +845,23 @@ func floatingPanelSize() -> CGSize? {
 }
 
 func floatingPanelAXWindow() -> AXUIElement? {
-  guard let panelInfo = floatingPanelWindowInfo() else {
-    return nil
+  lexirayAXElements().first { element in
+    axString(element, kAXRoleAttribute) == "AXWindow"
+      && axString(element, kAXIdentifierAttribute) == "FloatingPanelWindow"
   }
+}
 
-  let panelFrame = windowBounds(panelInfo)
-  return lexirayAXElements().first { element in
+func lexirayMainAXWindow() -> AXUIElement? {
+  let matches = lexirayAXElements().filter { element in
     guard axString(element, kAXRoleAttribute) == "AXWindow",
+          axString(element, kAXIdentifierAttribute) != "FloatingPanelWindow",
           let frame = axFrame(element)
     else {
       return false
     }
-
-    return abs(frame.midX - panelFrame.midX) < 8
-      && abs(frame.midY - panelFrame.midY) < 8
-      && abs(frame.width - panelFrame.width) < 8
-      && abs(frame.height - panelFrame.height) < 8
+    return frame.width >= 650 && frame.height >= 420
   }
+  return matches.count == 1 ? matches[0] : nil
 }
 
 func setFloatingPanelSize(_ size: CGSize) -> Bool {
@@ -335,14 +869,41 @@ func setFloatingPanelSize(_ size: CGSize) -> Bool {
     return false
   }
 
-  var requestedSize = size
-  guard let value = AXValueCreate(.cgSize, &requestedSize) else {
-    return false
+  // AX window sizes and CGWindow bounds can use different effective scales on
+  // a scaled secondary display. Iteratively translate the desired on-screen
+  // size into the AX coordinate space instead of assuming a 1:1 mapping.
+  for _ in 0 ..< 5 {
+    guard let screenSize = floatingPanelSize(),
+          let accessibilityFrame = axFrame(window),
+          screenSize.width > 0,
+          screenSize.height > 0
+    else {
+      return false
+    }
+    if abs(screenSize.width - size.width) < 4,
+       abs(screenSize.height - size.height) < 4
+    {
+      return true
+    }
+
+    var requestedSize = CGSize(
+      width: size.width * accessibilityFrame.width / screenSize.width,
+      height: size.height * accessibilityFrame.height / screenSize.height
+    )
+    guard let value = AXValueCreate(.cgSize, &requestedSize) else {
+      return false
+    }
+    guard AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, value) == .success else {
+      return false
+    }
+    RunLoop.current.run(until: Date().addingTimeInterval(0.25))
   }
 
-  let result = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, value)
-  RunLoop.current.run(until: Date().addingTimeInterval(0.25))
-  return result == .success
+  guard let finalSize = floatingPanelSize() else {
+    return false
+  }
+  return abs(finalSize.width - size.width) < 4
+    && abs(finalSize.height - size.height) < 4
 }
 
 // MARK: - Source editor
@@ -372,17 +933,16 @@ func focusAndReplaceSourceText(_ text: String) -> Bool {
   }
 
   if AXUIElementSetAttributeValue(editor, kAXFocusedAttribute as CFString, kCFBooleanTrue) != .success,
-     let frame = axFrame(editor) {
+     let frame = axFrame(editor)
+  {
     click(CGPoint(x: frame.midX, y: frame.midY))
   }
 
   RunLoop.current.run(until: Date().addingTimeInterval(0.2))
 
-  NSPasteboard.general.clearContents()
-  NSPasteboard.general.setString(text, forType: .string)
   press(0, flags: .maskCommand)
   RunLoop.current.run(until: Date().addingTimeInterval(0.05))
-  press(9, flags: .maskCommand)
+  typeUnicode(text)
   RunLoop.current.run(until: Date().addingTimeInterval(0.2))
 
   return true
@@ -400,6 +960,26 @@ func focusFloatingSourceEditor() -> Bool {
 
   RunLoop.current.run(until: Date().addingTimeInterval(0.2))
   return true
+}
+
+func setAcceptanceMarkedText(_ text: String) {
+  DistributedNotificationCenter.default().postNotificationName(
+    Notification.Name("io.github.tensornull.lexiray.acceptance.ime.mark"),
+    object: text,
+    userInfo: nil,
+    deliverImmediately: true
+  )
+  RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+}
+
+func commitAcceptanceMarkedText(_ text: String) {
+  DistributedNotificationCenter.default().postNotificationName(
+    Notification.Name("io.github.tensornull.lexiray.acceptance.ime.commit"),
+    object: text,
+    userInfo: nil,
+    deliverImmediately: true
+  )
+  RunLoop.current.run(until: Date().addingTimeInterval(0.3))
 }
 
 // MARK: - Controls
@@ -446,6 +1026,103 @@ func pressLexiRayElement(identifier: String) -> Bool {
   }
 
   return AXUIElementPerformAction(element, kAXPressAction as CFString) == .success
+}
+
+func clickLexiRayElement(identifier: String) -> Bool {
+  guard let element = axElement(identifier: identifier), let frame = axFrame(element) else {
+    return false
+  }
+  click(CGPoint(x: frame.midX, y: frame.midY))
+  return true
+}
+
+func pressLexiRayElement(title: String) -> Bool {
+  guard let element = axElement(title: title) else {
+    return false
+  }
+  if AXUIElementPerformAction(element, kAXPressAction as CFString) == .success {
+    return true
+  }
+  guard let frame = axFrame(element) else {
+    return false
+  }
+  click(CGPoint(x: frame.midX, y: frame.midY))
+  return true
+}
+
+func selectLexiRayMenuItem(
+  title: String,
+  pickerIdentifier: String,
+  timeout: TimeInterval = 5
+) -> Bool {
+  guard dismissLexiRayLanguageMenu(timeout: timeout) else {
+    print("UI_MENU_DIAGNOSTIC[\(scenarioName)]: stale-menu-dismiss failed for \(pickerIdentifier)")
+    return false
+  }
+  guard openLexiRayLanguageMenu(
+    containing: title,
+    pickerIdentifier: pickerIdentifier,
+    timeout: timeout
+  ) else {
+    print("UI_MENU_DIAGNOSTIC[\(scenarioName)]: menu open failed for \(pickerIdentifier)")
+    return false
+  }
+  guard let element = axMenuItem(title: title) else {
+    print("UI_MENU_DIAGNOSTIC[\(scenarioName)]: \(title) disappeared from \(pickerIdentifier)")
+    return false
+  }
+
+  for action in [kAXPressAction, kAXPickAction] {
+    let result = AXUIElementPerformAction(element, action as CFString)
+    if result == .success {
+      return true
+    }
+  }
+  guard let frame = axFrame(element) else {
+    print("UI_MENU_DIAGNOSTIC[\(scenarioName)]: no actionable frame for \(title) in \(pickerIdentifier)")
+    return false
+  }
+  click(CGPoint(x: frame.midX, y: frame.midY))
+  return true
+}
+
+func selectAndVerifyLexiRayMenuMode(
+  title: String,
+  pickerIdentifier: String,
+  timeout: TimeInterval = 5
+) -> Bool {
+  guard selectLexiRayMenuItem(
+    title: title,
+    pickerIdentifier: pickerIdentifier,
+    timeout: timeout
+  ) else {
+    print("UI_MENU_DIAGNOSTIC[\(scenarioName)]: initial \(title) selection failed")
+    return false
+  }
+
+  RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+  guard dismissLexiRayLanguageMenu(timeout: timeout) else {
+    print("UI_MENU_DIAGNOSTIC[\(scenarioName)]: post-selection dismiss failed for \(title)")
+    return false
+  }
+  guard openLexiRayLanguageMenu(
+    containing: title,
+    pickerIdentifier: pickerIdentifier,
+    timeout: timeout
+  ) else {
+    print("UI_MENU_DIAGNOSTIC[\(scenarioName)]: verification menu open failed for \(pickerIdentifier)")
+    return false
+  }
+  guard waitFor("verify \(title) mode", timeout: timeout, { axMenuItemIsMarked(title: title) }) else {
+    let onceMark = axMenuItems(title: "Once").map { axString($0, kAXMenuItemMarkCharAttribute) }
+    let alwaysMark = axMenuItems(title: "Always").map { axString($0, kAXMenuItemMarkCharAttribute) }
+    print(
+      "UI_MENU_DIAGNOSTIC[\(scenarioName)]: mode mark mismatch "
+        + "once=\(onceMark) always=\(alwaysMark)"
+    )
+    return false
+  }
+  return dismissLexiRayLanguageMenu(timeout: timeout)
 }
 
 // MARK: - Input events
@@ -592,6 +1269,24 @@ func press(_ keyCode: CGKeyCode, flags: CGEventFlags = []) {
   }
 }
 
+func typeUnicode(_ text: String) {
+  let units = Array(text.utf16)
+  let chunkSize = 32
+  for start in stride(from: 0, to: units.count, by: chunkSize) {
+    let end = min(start + chunkSize, units.count)
+    let chunk = Array(units[start ..< end])
+    chunk.withUnsafeBufferPointer { buffer in
+      let source = CGEventSource(stateID: .hidSystemState)
+      let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true)
+      let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false)
+      down?.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: buffer.baseAddress)
+      up?.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: buffer.baseAddress)
+      down?.post(tap: .cghidEventTap)
+      up?.post(tap: .cghidEventTap)
+    }
+  }
+}
+
 // MARK: - Hotkey
 
 struct SmokeHotKey: Decodable {
@@ -599,13 +1294,13 @@ struct SmokeHotKey: Decodable {
   let modifiers: UInt32
 }
 
-func loadTranslateHotKey() -> (keyCode: CGKeyCode, flags: CGEventFlags) {
-  let fallback = SmokeHotKey(
-    keyCode: UInt32(kVK_ANSI_A),
-    modifiers: UInt32(controlKey) | UInt32(optionKey)
-  )
-  let domain = UserDefaults.standard.persistentDomain(forName: lexirayBundleID)
-  let data = domain?["translateHotKey"] as? Data
+func loadHotKey(
+  key: String,
+  fallbackKeyCode: Int,
+  fallbackModifiers: UInt32 = UInt32(controlKey) | UInt32(optionKey)
+) -> (keyCode: CGKeyCode, flags: CGEventFlags) {
+  let fallback = SmokeHotKey(keyCode: UInt32(fallbackKeyCode), modifiers: fallbackModifiers)
+  let data = UserDefaults(suiteName: acceptanceDefaultsSuite)?.data(forKey: key)
   let hotKey = data.flatMap { try? JSONDecoder().decode(SmokeHotKey.self, from: $0) } ?? fallback
 
   var flags: CGEventFlags = []
@@ -623,6 +1318,22 @@ func loadTranslateHotKey() -> (keyCode: CGKeyCode, flags: CGEventFlags) {
   }
 
   return (CGKeyCode(hotKey.keyCode), flags)
+}
+
+func loadTranslateHotKey() -> (keyCode: CGKeyCode, flags: CGEventFlags) {
+  loadHotKey(
+    key: "translateHotKey",
+    fallbackKeyCode: kVK_ANSI_A,
+    fallbackModifiers: UInt32(controlKey) | UInt32(optionKey) | UInt32(shiftKey)
+  )
+}
+
+func loadOCRHotKey() -> (keyCode: CGKeyCode, flags: CGEventFlags) {
+  loadHotKey(
+    key: "ocrHotKey",
+    fallbackKeyCode: kVK_ANSI_S,
+    fallbackModifiers: UInt32(controlKey) | UInt32(optionKey) | UInt32(shiftKey)
+  )
 }
 
 // MARK: - Waiting and activation
@@ -674,14 +1385,16 @@ func closeLexiRayMainWindow() -> Bool {
   let root = AXUIElementCreateApplication(app.processIdentifier)
   var windowsValue: CFTypeRef?
   if AXUIElementCopyAttributeValue(root, kAXWindowsAttribute as CFString, &windowsValue) == .success,
-     let axWindows = windowsValue as? [AXUIElement] {
+     let axWindows = windowsValue as? [AXUIElement]
+  {
     for axWindow in axWindows {
       guard let frame = axFrame(axWindow), frame.width >= 650, frame.height >= 420 else {
         continue
       }
       var buttonValue: CFTypeRef?
       if AXUIElementCopyAttributeValue(axWindow, kAXCloseButtonAttribute as CFString, &buttonValue) == .success,
-         let buttonValue {
+         let buttonValue
+      {
         let button = buttonValue as! AXUIElement
         if AXUIElementPerformAction(button, kAXPressAction as CFString) == .success {
           return true
@@ -698,49 +1411,225 @@ func closeLexiRayMainWindow() -> Bool {
   return true
 }
 
+func closeApplicationWindow(bundleIdentifier: String, titleContains: String) -> Bool {
+  for app in NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier) {
+    let root = AXUIElementCreateApplication(app.processIdentifier)
+    var windowsValue: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(root, kAXWindowsAttribute as CFString, &windowsValue) == .success,
+          let axWindows = windowsValue as? [AXUIElement]
+    else {
+      continue
+    }
+
+    for axWindow in axWindows where axString(axWindow, kAXTitleAttribute).contains(titleContains) {
+      var buttonValue: CFTypeRef?
+      guard AXUIElementCopyAttributeValue(
+        axWindow,
+        kAXCloseButtonAttribute as CFString,
+        &buttonValue
+      ) == .success, let buttonValue
+      else {
+        continue
+      }
+      if AXUIElementPerformAction(buttonValue as! AXUIElement, kAXPressAction as CFString) == .success {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+func closeApplicationWindow(processIdentifier: pid_t, titleContains: String) -> Bool {
+  guard let app = NSRunningApplication(processIdentifier: processIdentifier) else {
+    return false
+  }
+  let root = AXUIElementCreateApplication(app.processIdentifier)
+  var windowsValue: CFTypeRef?
+  guard AXUIElementCopyAttributeValue(root, kAXWindowsAttribute as CFString, &windowsValue) == .success,
+        let axWindows = windowsValue as? [AXUIElement]
+  else {
+    return false
+  }
+
+  for axWindow in axWindows where axString(axWindow, kAXTitleAttribute).contains(titleContains) {
+    var buttonValue: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(
+      axWindow,
+      kAXCloseButtonAttribute as CFString,
+      &buttonValue
+    ) == .success, let buttonValue
+    else {
+      continue
+    }
+    if AXUIElementPerformAction(buttonValue as! AXUIElement, kAXPressAction as CFString) == .success {
+      return true
+    }
+  }
+  return false
+}
+
+func applicationWindowFrame(processIdentifier: pid_t, titleContains: String) -> CGRect? {
+  let windowServerMatches = allWindows().filter {
+    windowOwnerPID($0) == processIdentifier
+      && windowName($0).contains(titleContains)
+      && !windowBounds($0).isEmpty
+  }
+  if windowServerMatches.count == 1 {
+    return windowBounds(windowServerMatches[0])
+  }
+
+  guard let app = NSRunningApplication(processIdentifier: processIdentifier) else {
+    return nil
+  }
+  let root = AXUIElementCreateApplication(app.processIdentifier)
+  var windowsValue: CFTypeRef?
+  guard AXUIElementCopyAttributeValue(root, kAXWindowsAttribute as CFString, &windowsValue) == .success,
+        let axWindows = windowsValue as? [AXUIElement]
+  else {
+    return nil
+  }
+
+  let matches = axWindows.filter {
+    axString($0, kAXTitleAttribute).contains(titleContains) && axFrame($0) != nil
+  }
+  guard matches.count == 1 else {
+    return nil
+  }
+  return axFrame(matches[0])
+}
+
 // MARK: - Scenario preconditions
 
 func ensureAppRunning() {
   if workspaceInstance() != nil {
     return
   }
+  if !workspacePathInstances().isEmpty {
+    blocked("an untracked workspace LexiRay instance is already running")
+  }
+  validatedFloatingPanelWindowID = nil
 
-  NSWorkspace.shared.open(URL(fileURLWithPath: appBundle))
+  let configuration = NSWorkspace.OpenConfiguration()
+  configuration.activates = false
+  configuration.createsNewApplicationInstance = true
+  let launchArguments = expectedWorkspaceArguments(extraArguments: workspaceLaunchExtraArguments)
+  configuration.arguments = launchArguments
+
+  var launchCompleted = false
+  var launchError: Error?
+  var launchedProcessIdentifier: pid_t?
+  NSWorkspace.shared.openApplication(
+    at: URL(fileURLWithPath: appBundle),
+    configuration: configuration
+  ) { application, error in
+    launchedProcessIdentifier = application?.processIdentifier
+    launchError = error
+    launchCompleted = true
+  }
+
+  let launchDeadline = Date().addingTimeInterval(10)
+  while !launchCompleted, Date() < launchDeadline {
+    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+  }
+  if let launchError {
+    fail("LexiRay launch failed: \(launchError.localizedDescription)")
+  }
+  guard let launchedProcessIdentifier else {
+    fail("LexiRay launch did not return a process identifier")
+  }
+  guard let launchedApplication = NSRunningApplication(processIdentifier: launchedProcessIdentifier),
+        applicationMatchesWorkspaceProcess(
+          launchedApplication,
+          expectedArguments: launchArguments
+        )
+  else {
+    blocked(
+      "launched LexiRay PID \(launchedProcessIdentifier) did not match the exact workspace executable "
+        + "and acceptance arguments; it was not recorded or terminated"
+    )
+  }
+  workspaceProcessIdentifier = launchedProcessIdentifier
+  ownedWorkspaceArguments = launchArguments
   if !waitFor("LexiRay launches", timeout: 10, { workspaceInstance() != nil }) {
     fail("LexiRay did not launch from \(appBundle)")
   }
+  guardAgainstForeignCopies()
   RunLoop.current.run(until: Date().addingTimeInterval(1))
 }
 
-func terminateWorkspaceApp() {
-  guard let app = workspaceInstance() else {
-    return
+@discardableResult
+func terminateWorkspaceApp() -> String? {
+  guard let processIdentifier = workspaceProcessIdentifier,
+        let expectedArguments = ownedWorkspaceArguments
+  else {
+    if workspaceProcessIdentifier != nil || ownedWorkspaceArguments != nil {
+      return "incomplete workspace process ownership record; no process was terminated"
+    }
+    validatedFloatingPanelWindowID = nil
+    return nil
+  }
+
+  guard let app = NSRunningApplication(processIdentifier: processIdentifier),
+        !app.isTerminated
+  else {
+    workspaceProcessIdentifier = nil
+    ownedWorkspaceArguments = nil
+    validatedFloatingPanelWindowID = nil
+    return nil
+  }
+  guard applicationMatchesWorkspaceProcess(app, expectedArguments: expectedArguments) else {
+    return "recorded PID \(processIdentifier) no longer matches the exact workspace executable "
+      + "and acceptance arguments; no signal was sent"
   }
 
   _ = app.terminate()
   let deadline = Date().addingTimeInterval(5)
   while Date() < deadline {
-    if workspaceInstance() == nil {
-      return
+    if app.isTerminated {
+      workspaceProcessIdentifier = nil
+      ownedWorkspaceArguments = nil
+      validatedFloatingPanelWindowID = nil
+      return nil
     }
     RunLoop.current.run(until: Date().addingTimeInterval(0.1))
   }
 
-  if let pid = workspaceInstance()?.processIdentifier {
-    kill(pid, SIGKILL)
+  guard applicationMatchesWorkspaceProcess(app, expectedArguments: expectedArguments) else {
+    return "recorded PID \(processIdentifier) changed identity before forced termination; no signal was sent"
   }
-  _ = waitFor("workspace app terminates", timeout: 3, { workspaceInstance() == nil })
+  kill(processIdentifier, SIGKILL)
+  let terminated = waitFor("workspace app terminates", timeout: 3) { app.isTerminated }
+  guard terminated else {
+    return "runner-owned LexiRay PID \(processIdentifier) did not terminate"
+  }
+  workspaceProcessIdentifier = nil
+  ownedWorkspaceArguments = nil
+  validatedFloatingPanelWindowID = nil
+  return nil
 }
 
 func restartWorkspaceApp() {
-  terminateWorkspaceApp()
+  if let cleanupError = terminateWorkspaceApp() {
+    blocked(cleanupError)
+  }
+  ensureAppRunning()
+}
+
+func restartWorkspaceApp(extraArguments: [String]) {
+  if let cleanupError = terminateWorkspaceApp() {
+    blocked(cleanupError)
+  }
+  workspaceLaunchExtraArguments = extraArguments
   ensureAppRunning()
 }
 
 func openMainWindow() {
   ensureAppRunning()
   if lexirayMainWindows().isEmpty {
-    NSWorkspace.shared.open(URL(fileURLWithPath: appBundle))
+    require(
+      pressLexiRayElement(title: "Open LexiRay"),
+      "menu-bar Open LexiRay action was not reachable"
+    )
   }
   if !waitFor("LexiRay main window", timeout: 10, { !lexirayMainWindows().isEmpty }) {
     fail("main window did not appear")
@@ -768,7 +1657,7 @@ func openBlankComposer() {
 
 func closePanel() {
   require(pressLexiRayButton(identifier: "xmark"), "panel close button was not reachable")
-  require(waitFor("panel closes", { panelWindows().isEmpty }), "panel did not close")
+  require(waitFor("panel closes") { panelWindows().isEmpty }, "panel did not close")
 }
 
 func guardAgainstShieldedSession() {
@@ -783,9 +1672,8 @@ func guardAgainstForeignCopies() {
   if !foreign.isEmpty {
     let paths = foreign.map { $0.executableURL?.path ?? "pid \($0.processIdentifier)" }
     blocked(
-      "another LexiRay copy is running (\(paths.joined(separator: ", "))); "
-        + "it steals hotkeys and AX targeting and trips the in-app identity guard. "
-        + "Quit it or rerun with --quit-other-copies"
+      "another LexiRay process could intercept acceptance hotkeys: "
+        + paths.joined(separator: ", ")
     )
   }
 }
@@ -818,7 +1706,9 @@ func resetToBaseline() {
   closeVisibleLexiRayWindows()
 
   if !panelWindows().isEmpty || !lexirayMainWindows().isEmpty {
-    terminateWorkspaceApp()
+    if let cleanupError = terminateWorkspaceApp() {
+      blocked(cleanupError)
+    }
     ensureAppRunning()
     closeVisibleLexiRayWindows()
   }

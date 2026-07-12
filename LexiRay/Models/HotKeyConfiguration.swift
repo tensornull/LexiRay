@@ -22,6 +22,22 @@ struct HotKeyConfiguration: Codable, Equatable {
     )
   }
 
+  static var acceptanceTranslate: HotKeyConfiguration {
+    HotKeyConfiguration(
+      keyCode: UInt32(kVK_ANSI_A),
+      modifiers: UInt32(controlKey) | UInt32(optionKey) | UInt32(shiftKey),
+      keyEquivalent: "A"
+    )
+  }
+
+  static var acceptanceOCR: HotKeyConfiguration {
+    HotKeyConfiguration(
+      keyCode: UInt32(kVK_ANSI_S),
+      modifiers: UInt32(controlKey) | UInt32(optionKey) | UInt32(shiftKey),
+      keyEquivalent: "S"
+    )
+  }
+
   var isValidGlobalShortcut: Bool {
     modifiers != 0 && !keyEquivalent.trimmedForQuery.isEmpty
   }

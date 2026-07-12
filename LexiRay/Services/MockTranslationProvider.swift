@@ -10,7 +10,8 @@ struct MockTranslationProvider: TranslationProvider {
       throw TranslationError.emptyInput
     }
 
-    let translatedText = "LexiRay mock translation:\n\(text)"
+    let direction = "\(request.sourceLanguage ?? "auto") -> \(request.targetLanguage)"
+    let translatedText = "LexiRay mock translation:\nDirection: \(direction)\n\(text)"
 
     return TranslationResult(
       request: request,

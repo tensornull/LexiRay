@@ -1,24 +1,25 @@
-# Feature Prompt
+# Implement One LexiRay Feature
 
-Implement one LexiRay feature.
+Implement the smallest complete user outcome. Follow `AGENTS.md` and the
+relevant `.agents/runbooks/`.
 
-Before editing, state:
+Before editing, record:
 
-- User goal.
-- Acceptance criteria.
-- Files likely to change.
-- Test or manual verification command.
+- User goal and product assumptions.
+- State-based acceptance matrix.
+- Files likely to change and tests/scenarios that cover them.
+- Relevant roadmap ID only when the item already exists or is durable beyond
+  this task.
 
-Implementation rules:
+Run `./script/preflight.sh change`, implement in small batches, and use
+`./script/verify.sh changed` after each batch. Add unit coverage for logic and a
+new/extended GUI scenario plus accessibility identifiers for visible behavior.
 
-- Make the smallest change that satisfies the criteria.
-- Preserve clean-room boundaries.
-- Add tests for model, provider, cache, parsing, and settings behavior.
-- For UI-only work, add a concise manual verification checklist.
+At candidate, run `./script/verify.sh candidate`. For app-binary changes,
+automatically install the verified candidate and complete the acceptance matrix
+with Computer Use on the installed app's isolated acceptance profile. Run
+`./script/verify.sh pr` before any push or PR.
 
-Finish with:
-
-- What changed.
-- What was tested.
-- Any remaining risk.
-
+Finish with changed scope, receipt/artifact paths, evidence states, uncovered
+states, and residual risk. Do not substitute a manual user checklist for agent
+acceptance.
