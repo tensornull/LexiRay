@@ -55,8 +55,12 @@ other path before reading or writing screenshot evidence.
   speech.
 - Panel styling: key/non-key, pinned/unpinned, resized/default, light/dark,
   rounded corners, and live translucency.
-- OCR: each available display plus union-relative geometry. Record the display
-  count; if a second display is required but unavailable, record not covered.
+- OCR permission gate: a denied acceptance-injected Screen Recording state
+  shows the recovery panel and never opens a selection overlay or a real system
+  permission prompt.
+- OCR geometry: each available display plus union-relative geometry. Record the
+  display count; if a second display is required but unavailable, record not
+  covered.
 
 ## Installed-app Computer Use
 
@@ -87,11 +91,14 @@ After candidate verification and canonical installation:
    different unused fixture application.
    The capture helper independently reads the target PID's AX tree and CGWindow
    state. Passing capture states are fixed: a main window for `launch`; a
-   focused non-empty editor for `source_editor`; Japanese and English pickers
+   selected `LexiRay` source text, Accessibility source badge, and mock result
+   for `selection_hotkey`; a focused non-empty editor for `source_editor`; Japanese and English pickers
    plus `Direction: ja -> en` for `language_direction`; exactly one identified
    Stop button for `speech_controls`; an Unpin control on a resized, non-key,
-   floating-level panel for `panel_visual_states`; and one PID-owned OCR overlay
-   for every current display. A scenario label without these predicates blocks.
+   floating-level panel for `panel_visual_states`; OCR result panels containing
+   recognized `LexiRay` source text plus mock translation on displays 1 and 2;
+   and one PID-owned OCR overlay for every current display. A scenario label
+   without these predicates blocks.
 4. After reaching the required state for each scenario, run
    `./script/acceptance_receipt.sh capture-computer-use <scenario> [window-id]`.
    The helper chooses only an allowed PID-owned window, validates any required

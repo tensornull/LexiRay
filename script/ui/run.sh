@@ -19,7 +19,7 @@ SCENARIO_DIR="$UI_DIR/scenarios"
 APP_BUNDLE="$ROOT_DIR/build/DerivedData/Build/Products/Debug/LexiRay.app"
 RECEIPT_TOOL="$ROOT_DIR/script/acceptance_receipt.sh"
 
-SCENARIO_ORDER=(launch providers settings_identity panel_blank source_editor language_direction_input speech_controls history_nav rich_result_wrap pin panel_visual_states selection_translate ocr_multi_display manual_resize_preserved streaming_growth)
+SCENARIO_ORDER=(launch providers settings_identity panel_blank source_editor language_direction_input speech_controls history_nav rich_result_wrap pin panel_visual_states selection_translate ocr_permission_gate ocr_multi_display manual_resize_preserved streaming_growth)
 
 cd "$ROOT_DIR"
 
@@ -285,7 +285,7 @@ for name in "${REQUESTED[@]}"; do
   seed_fixture_state
   echo "--- scenario: $name"
   set +e
-  cat "$UI_DIR/lib.swift" "$SCENARIO_DIR/$name.swift" |
+  cat "$UI_DIR/panel_border_evidence.swift" "$UI_DIR/lib.swift" "$SCENARIO_DIR/$name.swift" |
     swift - "$APP_BUNDLE" "$WORK_DIR" "$ARTIFACT_DIR" "$name" "$ROOT_DIR" \
       "$ACCEPTANCE_ROOT" "$ACCEPTANCE_DEFAULTS_SUITE"
   status=$?

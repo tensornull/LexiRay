@@ -3,6 +3,11 @@ import Darwin
 import Foundation
 
 enum AppRuntime {
+  static let canonicalApplicationURL = URL(
+    fileURLWithPath: "/Applications/LexiRay.app",
+    isDirectory: true
+  )
+
   static var acceptanceProfile: AcceptanceProfile? {
     do {
       return try AcceptanceProfile.resolve()
@@ -36,6 +41,32 @@ enum AppRuntime {
 
   static var usesStreamingMockProvider: Bool {
     isRunningUIScenarios
+  }
+
+  static func makePermissionChecker() -> PermissionChecking {
+    guard acceptanceProfile != nil else {
+      return SystemPermissionChecker()
+    }
+
+    let argumentPrefix = "--lexiray-acceptance-screen-capture="
+    let argumentMode = ProcessInfo.processInfo.arguments
+      .first(where: { $0.hasPrefix(argumentPrefix) })
+      .map { String($0.dropFirst(argumentPrefix.count)) }
+    let mode = argumentMode
+      ?? ProcessInfo.processInfo.environment["LEXIRAY_ACCEPTANCE_SCREEN_CAPTURE"]
+
+    switch mode?.lowercased() {
+    case "system":
+      return SystemPermissionChecker()
+    case "denied":
+      return AcceptancePermissionChecker(isScreenCaptureTrusted: false, grantsScreenCaptureOnRequest: false)
+    case "grant-on-request":
+      return AcceptancePermissionChecker(isScreenCaptureTrusted: false, grantsScreenCaptureOnRequest: true)
+    default:
+      return isRunningUIScenarios
+        ? AcceptancePermissionChecker(isScreenCaptureTrusted: true, grantsScreenCaptureOnRequest: true)
+        : SystemPermissionChecker()
+    }
   }
 
   @MainActor
@@ -98,5 +129,60 @@ enum AppRuntime {
     }
 
     return TranslationHistoryStore(fileURL: profile.historyURL)
+  }
+
+  @MainActor
+  static func makeLoginItemCoordinator(
+    acceptanceProfile profile: AcceptanceProfile? = acceptanceProfile,
+    runningTests: Bool = isRunningTests,
+    bundleURL: URL = Bundle.main.bundleURL,
+    systemServiceFactory: @MainActor () -> LoginItemSystemServicing = {
+      SystemLoginItemService()
+    },
+    standardDefaults: UserDefaults = .standard,
+    noncanonicalDefaults: UserDefaults? = nil
+  ) -> LoginItemCoordinator {
+    if let profile {
+      guard let defaults = UserDefaults(suiteName: profile.defaultsSuiteName) else {
+        fatalError("Could not create acceptance defaults suite \(profile.defaultsSuiteName)")
+      }
+      return LoginItemCoordinator(systemService: IsolatedLoginItemSystemService(), defaults: defaults)
+    }
+
+    if runningTests {
+      let suiteName = "io.github.tensornull.lexiray.tests.login-item.\(UUID().uuidString)"
+      guard let defaults = UserDefaults(suiteName: suiteName) else {
+        fatalError("Could not create isolated test defaults suite")
+      }
+      return LoginItemCoordinator(systemService: IsolatedLoginItemSystemService(), defaults: defaults)
+    }
+
+    guard isCanonicalInstalledApplication(bundleURL: bundleURL) else {
+      let defaults = noncanonicalDefaults ?? makeIsolatedLoginItemDefaults()
+      return LoginItemCoordinator(
+        systemService: UnavailableLoginItemSystemService(
+          message: "Start at login is available only from /Applications/LexiRay.app."
+        ),
+        defaults: defaults
+      )
+    }
+
+    return LoginItemCoordinator(
+      systemService: systemServiceFactory(),
+      defaults: standardDefaults
+    )
+  }
+
+  static func isCanonicalInstalledApplication(bundleURL: URL = Bundle.main.bundleURL) -> Bool {
+    bundleURL.standardizedFileURL.resolvingSymlinksInPath().path
+      == canonicalApplicationURL.standardizedFileURL.resolvingSymlinksInPath().path
+  }
+
+  private static func makeIsolatedLoginItemDefaults() -> UserDefaults {
+    let suiteName = "io.github.tensornull.lexiray.noncanonical.login-item.\(UUID().uuidString)"
+    guard let defaults = UserDefaults(suiteName: suiteName) else {
+      fatalError("Could not create isolated noncanonical login item defaults suite")
+    }
+    return defaults
   }
 }

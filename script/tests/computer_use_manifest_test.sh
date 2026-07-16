@@ -47,8 +47,9 @@ import Foundation
 
 let outputDirectory = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
 let scenarios = [
-  "launch", "source_editor", "language_direction", "speech_controls",
-  "panel_visual_states", "ocr_multi_display"
+  "launch", "selection_hotkey", "source_editor", "language_direction", "speech_controls",
+  "panel_visual_states", "ocr_result_display_1", "ocr_result_display_2",
+  "ocr_multi_display"
 ]
 for (index, scenario) in scenarios.enumerated() {
   let width = 240
@@ -142,6 +143,11 @@ start_provenance() {
       /usr/bin/plutil -insert state_assertions.values.editor_focused -string true -- "$output"
       /usr/bin/plutil -insert state_assertions.values.editor_nonempty -string true -- "$output"
       ;;
+    selection_hotkey)
+      /usr/bin/plutil -insert state_assertions.values.mock_translation -string present -- "$output"
+      /usr/bin/plutil -insert state_assertions.values.source_contains -string LexiRay -- "$output"
+      /usr/bin/plutil -insert state_assertions.values.source_kind -string Accessibility -- "$output"
+      ;;
     language_direction)
       /usr/bin/plutil -insert state_assertions.values.source_picker -string Japanese -- "$output"
       /usr/bin/plutil -insert state_assertions.values.target_picker -string English -- "$output"
@@ -157,6 +163,16 @@ start_provenance() {
       /usr/bin/plutil -insert state_assertions.values.floating_layer -string 3 -- "$output"
       /usr/bin/plutil -insert state_assertions.values.pinned_control -string Unpin -- "$output"
       /usr/bin/plutil -insert state_assertions.values.resized -string true -- "$output"
+      ;;
+    ocr_result_display_1|ocr_result_display_2)
+      local display_index=1
+      [[ "$scenario" == ocr_result_display_2 ]] && display_index=2
+      /usr/bin/plutil -insert state_assertions.values.capture_display_index -string "$display_index" -- "$output"
+      /usr/bin/plutil -insert state_assertions.values.display_count -string "$display_count" -- "$output"
+      /usr/bin/plutil -insert state_assertions.values.display_index -string "$display_index" -- "$output"
+      /usr/bin/plutil -insert state_assertions.values.mock_translation -string present -- "$output"
+      /usr/bin/plutil -insert state_assertions.values.source_contains -string LexiRay -- "$output"
+      /usr/bin/plutil -insert state_assertions.values.source_kind -string OCR -- "$output"
       ;;
     ocr_multi_display)
       /usr/bin/plutil -insert state_assertions.values.overlay_count -string "$display_count" -- "$output"
@@ -215,12 +231,28 @@ add_capture launch 0 100 LexiRay 0 100 100 820 560
 finish_provenance launch
 
 window_identifier=101
-for scenario in source_editor language_direction speech_controls panel_visual_states; do
+for scenario in selection_hotkey source_editor language_direction speech_controls panel_visual_states; do
   start_provenance "$scenario" "$display_count"
   add_capture "$scenario" 0 "$window_identifier" "LexiRay Floating Panel" 3 200 200 420 300
   finish_provenance "$scenario"
   window_identifier=$((window_identifier + 1))
 done
+
+display_index=0
+while IFS=$'\t' read -r x y width height; do
+  if [[ "$display_index" -lt 2 ]]; then
+    scenario="ocr_result_display_$((display_index + 1))"
+    panel_x="$(awk -v value="$x" 'BEGIN { printf "%.0f", value + 100 }')"
+    panel_y="$(awk -v value="$y" 'BEGIN { printf "%.0f", value + 100 }')"
+    start_provenance "$scenario" "$display_count"
+    add_capture "$scenario" 0 "$window_identifier" "LexiRay Floating Panel" 3 \
+      "$panel_x" "$panel_y" 420 300
+    finish_provenance "$scenario"
+    window_identifier=$((window_identifier + 1))
+  fi
+  display_index=$((display_index + 1))
+done < <(/usr/bin/swift "$ROOT_DIR/script/acceptance_evidence.swift" displays)
+[[ "$display_index" -ge 2 ]]
 
 start_provenance ocr_multi_display "$display_count"
 /usr/bin/plutil -replace display_count -integer "$display_count" -- "$CAPTURE_ROOT/ocr_multi_display.plist"
@@ -379,12 +411,42 @@ while IFS='|' read -r scenario key invalid_value; do
   mv "$EVIDENCE_DIR/state-backup.json" "$CAPTURE_ROOT/$scenario.json"
 done <<'STATE_CASES'
 launch|main_window|missing
+selection_hotkey|source_kind|Manual
 source_editor|editor_focused|false
 language_direction|mock_direction|Direction: en -> ja
 speech_controls|stop_control_count|2
 panel_visual_states|app_active|true
+ocr_result_display_1|source_kind|Manual
+ocr_result_display_2|source_kind|Accessibility
 ocr_multi_display|overlay_count|0
 STATE_CASES
+
+# OCR result evidence must seal source_kind=OCR; omitting the field entirely
+# cannot be replaced by a generic translated floating-panel capture.
+cp "$CAPTURE_ROOT/ocr_result_display_1.json" "$EVIDENCE_DIR/ocr-source-kind-backup.json"
+/usr/bin/plutil -remove state_assertions.values.source_kind \
+  -- "$CAPTURE_ROOT/ocr_result_display_1.json"
+if verify_computer_use_provenance \
+  "$RECEIPT" "$CAPTURE_ROOT/ocr_result_display_1.json" \
+  ocr_result_display_1 0 0 >/dev/null 2>&1; then
+  echo "Computer Use provenance accepted OCR result evidence without source_kind=OCR" >&2
+  exit 1
+fi
+mv "$EVIDENCE_DIR/ocr-source-kind-backup.json" "$CAPTURE_ROOT/ocr_result_display_1.json"
+
+# Moving a display-1 OCR result panel onto display 2 must not manufacture
+# display-2 capture provenance. The live panel geometry may match display 2,
+# but its sealed OCR source remains display 1 and must be rejected.
+cp "$CAPTURE_ROOT/ocr_result_display_2.json" "$EVIDENCE_DIR/ocr-capture-display-backup.json"
+/usr/bin/plutil -replace state_assertions.values.capture_display_index -string 1 \
+  -- "$CAPTURE_ROOT/ocr_result_display_2.json"
+if verify_computer_use_provenance \
+  "$RECEIPT" "$CAPTURE_ROOT/ocr_result_display_2.json" \
+  ocr_result_display_2 0 0 >/dev/null 2>&1; then
+  echo "Computer Use provenance accepted a display-1 OCR result moved onto display 2" >&2
+  exit 1
+fi
+mv "$EVIDENCE_DIR/ocr-capture-display-backup.json" "$CAPTURE_ROOT/ocr_result_display_2.json"
 
 # Evidence from the same source but a different installation transaction must
 # never be replayed, even if every app hash and PID-shaped field still matches.

@@ -5,12 +5,13 @@ struct DashboardSettingsView: View {
   @ObservedObject var controller: LexiRayController
   @ObservedObject private var settings: SettingsStore
   @ObservedObject private var permissionMonitor: PermissionStatusMonitor
-  @State private var loginItemStatus = LoginItemService.status
+  @ObservedObject private var loginItems: LoginItemCoordinator
 
   init(controller: LexiRayController) {
     self.controller = controller
     settings = controller.settings
     permissionMonitor = controller.permissionMonitor
+    loginItems = controller.loginItemCoordinator
   }
 
   var body: some View {
@@ -26,7 +27,7 @@ struct DashboardSettingsView: View {
     }
     .onAppear(perform: refreshRuntimeState)
     .onReceive(permissionMonitor.refreshEvents) {
-      refreshLoginItemStatus()
+      loginItems.refresh()
     }
     .onChange(of: scenePhase) { _, newPhase in
       guard newPhase == .active else {
@@ -42,12 +43,26 @@ struct DashboardSettingsView: View {
         Toggle("Show menu bar icon", isOn: showsMenuBarIcon)
 
         Toggle("Start at login", isOn: startAtLogin)
-          .disabled(loginItemStatus.isUnavailable)
+          .disabled(loginItems.status.isUnavailable)
+          .accessibilityIdentifier("StartAtLoginToggle")
 
-        if let detail = loginItemStatus.detail {
+        if let detail = loginItems.detail {
           Text(detail)
             .font(.caption)
             .foregroundStyle(loginItemDetailColor)
+            .accessibilityIdentifier("StartAtLoginStatus")
+        }
+
+        if loginItems.needsSystemApproval {
+          Button("Open Login Items") {
+            LoginItemCoordinator.openSystemSettings()
+          }
+          .accessibilityIdentifier("OpenLoginItemsSettingsButton")
+        } else if loginItems.canRetryDesiredOperation {
+          Button("Try Again") {
+            loginItems.retryDesiredOperation()
+          }
+          .accessibilityIdentifier("RetryLoginItemButton")
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -74,13 +89,15 @@ struct DashboardSettingsView: View {
         HotKeySettingsRow(
           title: "Translate selection",
           hotKey: translateHotKey,
-          defaultHotKey: .defaultTranslate
+          defaultHotKey: .defaultTranslate,
+          registrationStatus: controller.hotKeyRegistrationResults?.translate
         )
 
         HotKeySettingsRow(
           title: "OCR region",
           hotKey: ocrHotKey,
-          defaultHotKey: .defaultOCR
+          defaultHotKey: .defaultOCR,
+          registrationStatus: controller.hotKeyRegistrationResults?.ocr
         )
 
         Button("Restore Default Hotkeys") {
@@ -228,15 +245,9 @@ struct DashboardSettingsView: View {
 
   private var startAtLogin: Binding<Bool> {
     Binding(
-      get: { loginItemStatus.isEnabled },
+      get: { loginItems.desiredStartAtLogin },
       set: { newValue in
-        do {
-          try LoginItemService.setEnabled(newValue)
-          refreshLoginItemStatus()
-        } catch {
-          loginItemStatus = .unavailable(error.localizedDescription)
-          AppLog.settings.error("Failed to update login item: \(error.localizedDescription, privacy: .public)")
-        }
+        loginItems.setDesiredStartAtLogin(newValue)
       }
     )
   }
@@ -249,7 +260,7 @@ struct DashboardSettingsView: View {
   }
 
   private var loginItemDetailColor: Color {
-    loginItemStatus == .requiresApproval ? Color.orange : Color.secondary
+    loginItems.status == .requiresApproval || loginItems.operationError != nil ? Color.orange : Color.secondary
   }
 
   private var appIdentityIconName: String {
@@ -291,11 +302,7 @@ struct DashboardSettingsView: View {
   private func refreshRuntimeState() {
     controller.refreshAppIdentity()
     permissionMonitor.refreshNow()
-    refreshLoginItemStatus()
-  }
-
-  private func refreshLoginItemStatus() {
-    loginItemStatus = LoginItemService.status
+    loginItems.refresh()
   }
 
   private func openAccessibilitySettings() {
@@ -335,18 +342,28 @@ private struct HotKeySettingsRow: View {
   let title: String
   @Binding var hotKey: HotKeyConfiguration
   let defaultHotKey: HotKeyConfiguration
+  let registrationStatus: HotKeyRegistrationStatus?
 
   var body: some View {
-    HStack(spacing: 12) {
-      Text(title)
-      Spacer()
-      HotKeyRecorderButton(hotKey: $hotKey)
-        .frame(width: 190, height: 28)
-        .id(hotKey.displayString)
-      Button("Reset") {
-        hotKey = defaultHotKey
+    VStack(alignment: .leading, spacing: 3) {
+      HStack(spacing: 12) {
+        Text(title)
+        Spacer()
+        HotKeyRecorderButton(hotKey: $hotKey)
+          .frame(width: 190, height: 28)
+          .id(hotKey.displayString)
+        Button("Reset") {
+          hotKey = defaultHotKey
+        }
+        .disabled(hotKey == defaultHotKey)
       }
-      .disabled(hotKey == defaultHotKey)
+
+      if let registrationStatus {
+        Text(registrationStatus.detail)
+          .font(.caption)
+          .foregroundStyle(registrationStatus.isFailure ? Color.orange : Color.secondary)
+          .accessibilityIdentifier("\(title.replacingOccurrences(of: " ", with: ""))HotKeyStatus")
+      }
     }
   }
 }

@@ -8,6 +8,9 @@ protocol PermissionChecking {
 
   @discardableResult
   func requestAccessibilityIfNeeded(prompt: Bool) -> Bool
+
+  @discardableResult
+  func requestScreenCaptureIfNeeded() -> Bool
 }
 
 struct SystemPermissionChecker: PermissionChecking {
@@ -22,6 +25,33 @@ struct SystemPermissionChecker: PermissionChecking {
   @discardableResult
   func requestAccessibilityIfNeeded(prompt: Bool) -> Bool {
     PermissionService.requestAccessibilityIfNeeded(prompt: prompt)
+  }
+
+  @discardableResult
+  func requestScreenCaptureIfNeeded() -> Bool {
+    PermissionService.requestScreenCaptureIfNeeded()
+  }
+}
+
+final class AcceptancePermissionChecker: PermissionChecking {
+  let isAccessibilityTrusted = true
+  private(set) var isScreenCaptureTrusted: Bool
+  private let grantsScreenCaptureOnRequest: Bool
+
+  init(isScreenCaptureTrusted: Bool, grantsScreenCaptureOnRequest: Bool) {
+    self.isScreenCaptureTrusted = isScreenCaptureTrusted
+    self.grantsScreenCaptureOnRequest = grantsScreenCaptureOnRequest
+  }
+
+  func requestAccessibilityIfNeeded(prompt _: Bool) -> Bool {
+    true
+  }
+
+  func requestScreenCaptureIfNeeded() -> Bool {
+    if grantsScreenCaptureOnRequest {
+      isScreenCaptureTrusted = true
+    }
+    return isScreenCaptureTrusted
   }
 }
 
@@ -65,7 +95,6 @@ enum PermissionService {
   }
 
   static func openScreenCaptureSettings() {
-    requestScreenCaptureIfNeeded()
     openSettings(path: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
   }
 

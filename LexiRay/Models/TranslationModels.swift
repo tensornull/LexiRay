@@ -113,6 +113,32 @@ struct PanelLoadingState: Equatable {
   let preview: String?
 }
 
+enum PanelRecoveryAction: Equatable {
+  case reselectOCRRegion
+  case openScreenRecordingSettings
+
+  var title: String {
+    switch self {
+    case .reselectOCRRegion:
+      "Select Again"
+    case .openScreenRecordingSettings:
+      "Open System Settings"
+    }
+  }
+}
+
+struct PanelErrorState: Equatable {
+  let title: String
+  let message: String
+  let recoveryAction: PanelRecoveryAction?
+
+  init(title: String, message: String, recoveryAction: PanelRecoveryAction? = nil) {
+    self.title = title
+    self.message = message
+    self.recoveryAction = recoveryAction
+  }
+}
+
 struct TranslationBatch: Equatable, Identifiable {
   let id = UUID()
   let request: TranslationRequest
@@ -189,7 +215,7 @@ enum PanelState: Equatable {
   case loading(PanelLoadingState)
   case batch(TranslationBatch)
   case result(TranslationResult)
-  case error(String)
+  case error(PanelErrorState)
 
   var isIdle: Bool {
     if case .idle = self {

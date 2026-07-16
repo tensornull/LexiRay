@@ -42,6 +42,36 @@ app_designated_requirement_sha256() { printf '%s\n' "$TEST_HASH"; }
 app_entitlements_sha256() { printf '%s\n' "$TEST_HASH"; }
 
 scenario_names="$("$ROOT_DIR/script/ui/run.sh" --list | paste -sd, -)"
+permuted_scenario_names="$(
+  "$ROOT_DIR/script/ui/run.sh" --list |
+    /usr/bin/awk '{ scenario[NR] = $0 } END {
+      for (i = NR; i >= 1; i--) {
+        printf "%s%s", scenario[i], (i == 1 ? "" : ",")
+      }
+    }'
+)"
+
+reverse_scenario_lines() {
+  /usr/bin/awk '{ scenario[NR] = $0 } END {
+    for (i = NR; i >= 1; i--) print scenario[i]
+  }'
+}
+
+set_bundle_scenarios() {
+  local dir="$1"
+  local scenarios="$2"
+  /usr/bin/plutil -replace scenarios -string "$scenarios" -- "$dir/gui-run.json"
+}
+
+write_pass_results() {
+  local dir="$1"
+  local scenario
+  while IFS= read -r scenario; do
+    printf 'PASS  %s\n' "$scenario"
+  done >"$dir/results.txt"
+  /usr/bin/plutil -replace results_sha256 \
+    -string "$(sha256_file "$dir/results.txt")" -- "$dir/gui-run.json"
+}
 
 make_bundle() {
   local dir="$1"
@@ -52,7 +82,7 @@ make_bundle() {
 
   mkdir -p "$dir"
   cp "$ICON" "$screenshot"
-  cp "$ICON" "$dir/contact-sheet.png"
+  "$ROOT_DIR/script/make_contact_sheet.swift" "$dir" "$dir/contact-sheet.png" >/dev/null
   while IFS= read -r scenario; do
     printf 'PASS  %s\n' "$scenario"
   done < <("$ROOT_DIR/script/ui/run.sh" --list) >"$dir/results.txt"
@@ -94,12 +124,57 @@ PREFIX_BUNDLE="$PREFIX_DIR/prefix"
 make_bundle "$VALID_BUNDLE"
 make_bundle "$OUTSIDE_BUNDLE"
 make_bundle "$PREFIX_BUNDLE"
+set_bundle_scenarios "$VALID_BUNDLE" "$permuted_scenario_names"
+"$ROOT_DIR/script/ui/run.sh" --list | reverse_scenario_lines | write_pass_results "$VALID_BUNDLE"
 
 require_candidate_gui_evidence_paths \
   "$VALID_BUNDLE" "$VALID_BUNDLE/contact-sheet.png" \
   "$VALID_BUNDLE/results.txt" "$VALID_BUNDLE/gui-run.json" \
   "$VALID_BUNDLE/gui-screenshots.sha256"
 verify_screenshot_manifest "$VALID_BUNDLE/gui-screenshots.sha256" 1 "$VALID_BUNDLE"
+validate_gui_artifact "$APP" "$VALID_BUNDLE" "$VALID_BUNDLE/contact-sheet.png"
+
+expect_rejected "Scenario set validator accepted a duplicate canonical scenario" \
+  validate_gui_scenario_set "$scenario_names,launch" "Test GUI"
+expect_rejected "Scenario set validator accepted a missing canonical scenario" \
+  validate_gui_scenario_set \
+  "$("$ROOT_DIR/script/ui/run.sh" --list | /usr/bin/sed '$d' | paste -sd, -)" \
+  "Test GUI"
+expect_rejected "Scenario set validator accepted an extra scenario" \
+  validate_gui_scenario_set "$scenario_names,unexpected_extra" "Test GUI"
+expect_rejected "Scenario set validator accepted an unknown replacement scenario" \
+  validate_gui_scenario_set \
+  "$(
+    { "$ROOT_DIR/script/ui/run.sh" --list | /usr/bin/sed '$d'; printf 'unknown_replacement\n'; } |
+      paste -sd, -
+  )" \
+  "Test GUI"
+expect_rejected "Scenario set validator accepted an empty scenario" \
+  validate_gui_scenario_set "$scenario_names,," "Test GUI"
+
+RESULTS_CASE="$EVIDENCE_DIR/results-case.txt"
+CANONICAL_RESULTS_CASE="$EVIDENCE_DIR/canonical-results.txt"
+while IFS= read -r scenario; do
+  printf 'PASS  %s\n' "$scenario"
+done < <("$ROOT_DIR/script/ui/run.sh" --list) >"$CANONICAL_RESULTS_CASE"
+cp "$CANONICAL_RESULTS_CASE" "$RESULTS_CASE"
+printf 'PASS  launch\n' >>"$RESULTS_CASE"
+expect_rejected "GUI results validator accepted a duplicate PASS" \
+  validate_gui_results "$RESULTS_CASE" "Test GUI"
+/usr/bin/sed '$d' "$CANONICAL_RESULTS_CASE" >"$RESULTS_CASE"
+expect_rejected "GUI results validator accepted a missing PASS" \
+  validate_gui_results "$RESULTS_CASE" "Test GUI"
+cp "$CANONICAL_RESULTS_CASE" "$RESULTS_CASE"
+printf 'PASS  unexpected_extra\n' >>"$RESULTS_CASE"
+expect_rejected "GUI results validator accepted an extra or unknown PASS" \
+  validate_gui_results "$RESULTS_CASE" "Test GUI"
+/usr/bin/sed '1s/^PASS  /FAIL  /' "$CANONICAL_RESULTS_CASE" >"$RESULTS_CASE"
+expect_rejected "GUI results validator accepted FAIL" \
+  validate_gui_results "$RESULTS_CASE" "Test GUI"
+/usr/bin/sed '1s/^PASS  /BLOCK /' "$CANONICAL_RESULTS_CASE" >"$RESULTS_CASE"
+expect_rejected "GUI results validator accepted BLOCK" \
+  validate_gui_results "$RESULTS_CASE" "Test GUI"
+rm -f "$CANONICAL_RESULTS_CASE" "$RESULTS_CASE"
 
 expect_rejected "GUI directory validator accepted /tmp evidence" \
   require_gui_artifact_directory "$OUTSIDE_BUNDLE"
@@ -158,7 +233,30 @@ expect_rejected "Candidate writer accepted a final-symlink screenshot" \
   write_candidate "$APP" passed "$SYMLINK_SCREENSHOT_BUNDLE" \
   "$SYMLINK_SCREENSHOT_BUNDLE/contact-sheet.png"
 
+UNRELATED_CONTACT_BUNDLE="$EVIDENCE_DIR/unrelated-contact-sheet"
+make_bundle "$UNRELATED_CONTACT_BUNDLE"
+cp "$ICON" "$UNRELATED_CONTACT_BUNDLE/contact-sheet.png"
+expect_rejected "Reusable GUI preflight accepted an unrelated valid contact sheet" \
+  validate_gui_artifact "$APP" "$UNRELATED_CONTACT_BUNDLE" \
+  "$UNRELATED_CONTACT_BUNDLE/contact-sheet.png"
+expect_rejected "Candidate writer accepted an unrelated valid PNG as the GUI contact sheet" \
+  write_candidate "$APP" passed "$UNRELATED_CONTACT_BUNDLE" \
+  "$UNRELATED_CONTACT_BUNDLE/contact-sheet.png"
+
 RECEIPT="$(write_candidate "$APP" passed "$VALID_BUNDLE" "$VALID_BUNDLE/contact-sheet.png")"
+require_candidate 0 >/dev/null
+
+# Updating both the valid contact-sheet PNG and its receipt hash must not let a
+# receipt reader detach the sheet from the raw screenshots sealed by the run.
+cp "$VALID_BUNDLE/contact-sheet.png" "$OUTSIDE_DIR/contact-sheet-backup.png"
+original_contact_hash="$(plist_value "$RECEIPT" verification.contact_sheet_sha256)"
+cp "$ICON" "$VALID_BUNDLE/contact-sheet.png"
+/usr/bin/plutil -replace verification.contact_sheet_sha256 \
+  -string "$(sha256_file "$VALID_BUNDLE/contact-sheet.png")" -- "$RECEIPT"
+expect_rejected "Candidate reader accepted a rehashed unrelated GUI contact sheet" require_candidate 0
+mv "$OUTSIDE_DIR/contact-sheet-backup.png" "$VALID_BUNDLE/contact-sheet.png"
+/usr/bin/plutil -replace verification.contact_sheet_sha256 \
+  -string "$original_contact_hash" -- "$RECEIPT"
 require_candidate 0 >/dev/null
 
 /usr/bin/plutil -replace verification.gui_artifact_dir -string "$OUTSIDE_BUNDLE" -- "$RECEIPT"
