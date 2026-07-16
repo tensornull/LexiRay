@@ -632,6 +632,25 @@ select {
   gap: 18px;
 }
 
+.settings-action-toast {
+  position: sticky;
+  top: 10px;
+  z-index: 5;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 -12px;
+  padding: 7px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(58, 58, 60, 0.94);
+  color: #34c759;
+  font-size: 12px;
+  font-weight: 650;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
 .settings-page .section-card > .toggle-row {
   display: flex;
 }

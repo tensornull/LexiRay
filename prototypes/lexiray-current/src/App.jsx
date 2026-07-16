@@ -293,7 +293,7 @@ function Providers({ providers, setProviders }) {
   );
 }
 
-function Settings({ settings, setSettings }) {
+function Settings({ settings, setSettings, onResetProviders }) {
   const [notice, setNotice] = useState("");
   const patch = (value) => setSettings((current) => ({ ...current, ...value }));
   const reportMockAction = (message) => setNotice(message);
@@ -311,7 +311,7 @@ function Settings({ settings, setSettings }) {
   );
   return (
     <div className="page settings-page" data-testid="settings-page">
-      {notice ? <p className="setting-detail" role="status" data-testid="settings-action-status">{notice}</p> : null}
+      {notice ? <p className="settings-action-toast" role="status" data-testid="settings-action-status"><CheckCircle size={14} weight="fill" />{notice}</p> : null}
       <SectionCard title="App" icon={AppWindow}>
         <Toggle label="Show menu bar icon" checked={settings.menuBar} onChange={(menuBar) => patch({ menuBar })} />
         <Toggle label="Start at login" checked={settings.startAtLogin} onChange={(startAtLogin) => patch({ startAtLogin })} />
@@ -352,7 +352,7 @@ function Settings({ settings, setSettings }) {
 
       <SectionCard title="Advanced" icon={Wrench}>
         <label className="setting-line"><span>Last source</span><select><option>Manual</option><option>Selection</option><option>OCR</option></select></label>
-        <button className="button" onClick={() => reportMockAction("Provider settings reset (mock).")}>Reset Provider Settings</button>
+        <button className="button" onClick={() => { onResetProviders(); reportMockAction("Provider settings reset to mock defaults."); }}>Reset Provider Settings</button>
       </SectionCard>
     </div>
   );
@@ -432,14 +432,10 @@ function FloatingPanel({
   const previousHistory = () => selectHistory(historyIndex === null ? historyItems.length - 1 : historyIndex - 1);
   const nextHistory = () => selectHistory(historyIndex === null ? historyItems.length : historyIndex + 1);
 
-  const copyResult = async () => {
+  const copyResult = () => {
     if (!result) return;
-    try {
-      await navigator.clipboard.writeText(result);
-    } catch {
-      // Clipboard access may be unavailable in a local prototype; the visible
-      // product feedback remains testable without persisting any user data.
-    }
+    // This isolated prototype exercises product feedback without touching the
+    // user's real clipboard or allowing an async completion to outlive close.
     setToast("Copied");
     window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(""), 1300);
@@ -608,7 +604,7 @@ export function App() {
             />
           ) : null}
           {section === "providers" ? <Providers providers={providers} setProviders={setProviders} /> : null}
-          {section === "settings" ? <Settings settings={settings} setSettings={setSettings} /> : null}
+          {section === "settings" ? <Settings settings={settings} setSettings={setSettings} onResetProviders={() => setProviders(initialProviders)} /> : null}
         </div>
       </div>
 
