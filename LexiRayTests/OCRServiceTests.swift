@@ -1,5 +1,7 @@
 import CoreGraphics
+import Foundation
 @testable import LexiRay
+import ScreenCaptureKit
 import XCTest
 
 final class OCRServiceTests: XCTestCase {
@@ -66,6 +68,7 @@ final class OCRServiceTests: XCTestCase {
         for: CGRect(x: 100, y: 200, width: 300, height: 120),
         displays: [
           OCRCaptureDisplay(
+            displayIndex: 1,
             appKitFrame: CGRect(x: 0, y: 0, width: 1440, height: 900),
             displayBounds: CGRect(x: 0, y: 0, width: 1440, height: 900)
           )
@@ -75,6 +78,7 @@ final class OCRServiceTests: XCTestCase {
 
     XCTAssertEqual(conversion.rect, CGRect(x: 100, y: 580, width: 300, height: 120))
     XCTAssertEqual(conversion.displayCount, 1)
+    XCTAssertEqual(conversion.displayIndices, [1])
   }
 
   func testCaptureRectConversionKeepsNegativeSideDisplayXCoordinate() throws {
@@ -83,6 +87,7 @@ final class OCRServiceTests: XCTestCase {
         for: CGRect(x: -1200, y: 100, width: 200, height: 50),
         displays: [
           OCRCaptureDisplay(
+            displayIndex: 2,
             appKitFrame: CGRect(x: -1280, y: 0, width: 1280, height: 720),
             displayBounds: CGRect(x: -1280, y: 0, width: 1280, height: 720)
           )
@@ -92,6 +97,7 @@ final class OCRServiceTests: XCTestCase {
 
     XCTAssertEqual(conversion.rect, CGRect(x: -1200, y: 570, width: 200, height: 50))
     XCTAssertEqual(conversion.displayCount, 1)
+    XCTAssertEqual(conversion.displayIndices, [2])
   }
 
   func testCaptureRectConversionUnionsCrossDisplaySelection() throws {
@@ -100,10 +106,12 @@ final class OCRServiceTests: XCTestCase {
         for: CGRect(x: 1380, y: 100, width: 120, height: 60),
         displays: [
           OCRCaptureDisplay(
+            displayIndex: 1,
             appKitFrame: CGRect(x: 0, y: 0, width: 1440, height: 900),
             displayBounds: CGRect(x: 0, y: 0, width: 1440, height: 900)
           ),
           OCRCaptureDisplay(
+            displayIndex: 2,
             appKitFrame: CGRect(x: 1440, y: 0, width: 1000, height: 900),
             displayBounds: CGRect(x: 1440, y: 0, width: 1000, height: 900)
           )
@@ -113,6 +121,32 @@ final class OCRServiceTests: XCTestCase {
 
     XCTAssertEqual(conversion.rect, CGRect(x: 1380, y: 740, width: 120, height: 60))
     XCTAssertEqual(conversion.displayCount, 2)
+    XCTAssertEqual(conversion.displayIndices, [1, 2])
+  }
+
+  func testCaptureErrorMapsUserDeclinedToPermissionRecovery() {
+    let error = NSError(
+      domain: SCStreamErrorDomain,
+      code: SCStreamError.userDeclined.rawValue
+    )
+
+    XCTAssertEqual(
+      OCRService.captureError(from: error),
+      .screenRecordingPermissionRequired
+    )
+  }
+
+  func testCaptureErrorPreservesUnexpectedFailureDescription() {
+    let error = NSError(
+      domain: SCStreamErrorDomain,
+      code: SCStreamError.failedToStart.rawValue,
+      userInfo: [NSLocalizedDescriptionKey: "capture unavailable"]
+    )
+
+    XCTAssertEqual(
+      OCRService.captureError(from: error),
+      .captureFailed("capture unavailable")
+    )
   }
 
   private func makeImage(width: Int, height: Int) throws -> CGImage {

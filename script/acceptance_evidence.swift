@@ -330,6 +330,26 @@ private func axVisibleText(_ element: AXUIElement) -> String {
   .joined(separator: " ")
 }
 
+private func ocrCaptureDisplayIndices(from value: String) -> [Int]? {
+  let prefix = "OCR capture displays: "
+  guard value.hasPrefix(prefix) else {
+    return nil
+  }
+  let components = value.dropFirst(prefix.count).split(separator: ",", omittingEmptySubsequences: false)
+  let indices = components.compactMap { component -> Int? in
+    guard let index = Int(component), index > 0, String(index) == String(component) else {
+      return nil
+    }
+    return index
+  }
+  guard indices.count == components.count,
+        indices == Array(Set(indices)).sorted()
+  else {
+    return nil
+  }
+  return indices
+}
+
 private func accessibilityElements(root: AXUIElement) -> [AXUIElement] {
   var elements: [AXUIElement] = []
   func collect(_ element: AXUIElement, depth: Int) {
@@ -403,6 +423,15 @@ private func validateScenarioStateAssertions(
       throw EvidenceError.message("source_editor requires a focused, non-empty source editor")
     }
 
+  case "selection_hotkey":
+    guard values == [
+      "mock_translation": "present",
+      "source_contains": "LexiRay",
+      "source_kind": "Accessibility"
+    ] else {
+      throw EvidenceError.message("selection_hotkey does not prove the installed selection workflow")
+    }
+
   case "language_direction":
     guard values["source_picker"]?.contains("Japanese") == true,
           values["target_picker"]?.contains("English") == true,
@@ -432,6 +461,21 @@ private func validateScenarioStateAssertions(
     ] else {
       throw EvidenceError.message(
         "panel_visual_states requires a pinned, non-key, resized floating-level panel"
+      )
+    }
+
+  case "ocr_result_display_1", "ocr_result_display_2":
+    let expectedDisplayIndex = scenario == "ocr_result_display_1" ? 1 : 2
+    guard values["display_index"] == String(expectedDisplayIndex),
+          values["capture_display_index"] == String(expectedDisplayIndex),
+          values["mock_translation"] == "present",
+          values["source_contains"] == "LexiRay",
+          values["source_kind"] == "OCR",
+          Int(values["display_count"] ?? "") ?? 0 >= 2,
+          values.count == 6
+    else {
+      throw EvidenceError.message(
+        "\(scenario) does not prove OCR source, capture display, translation, and panel placement"
       )
     }
 
@@ -486,6 +530,40 @@ private func scenarioStateAssertions(
       throw EvidenceError.message("source_editor live AX state is not focused and non-empty")
     }
     values = ["editor_focused": "true", "editor_nonempty": "true"]
+
+  case "selection_hotkey":
+    guard windows.count == 1,
+          windows[0].role == .panel,
+          let accessibilityWindow = windows[0].accessibilityWindow
+    else {
+      throw EvidenceError.message("selection_hotkey is not bound to the floating panel AX window")
+    }
+    let elements = accessibilityElements(root: accessibilityWindow)
+    guard let editor = elements.first(where: {
+      axString($0, kAXIdentifierAttribute) == "FloatingPanelSourceEditor"
+        && axString($0, kAXRoleAttribute) == "AXTextArea"
+    }) else {
+      throw EvidenceError.message("selection_hotkey could not find the floating source editor")
+    }
+    let sourceText = axString(editor, kAXValueAttribute)
+    let sourceKinds = elements.filter {
+      axString($0, kAXIdentifierAttribute) == "FloatingPanelSelectionSource"
+    }
+    guard !sourceKinds.isEmpty else {
+      throw EvidenceError.message("selection_hotkey could not find the selection source badge")
+    }
+    let allText = elements.map(axVisibleText).joined(separator: "\n")
+    guard sourceText.contains("LexiRay"),
+          sourceKinds.contains(where: { axVisibleText($0).contains("Accessibility") }),
+          allText.contains("LexiRay mock translation:")
+    else {
+      throw EvidenceError.message("selection_hotkey does not show selected source, source kind, and mock translation")
+    }
+    values = [
+      "mock_translation": "present",
+      "source_contains": "LexiRay",
+      "source_kind": "Accessibility"
+    ]
 
   case "language_direction":
     guard windows.count == 1,
@@ -564,6 +642,66 @@ private func scenarioStateAssertions(
       "floating_layer": String(NSWindow.Level.floating.rawValue),
       "pinned_control": "Unpin",
       "resized": "true"
+    ]
+
+  case "ocr_result_display_1", "ocr_result_display_2":
+    guard windows.count == 1,
+          windows[0].role == .panel,
+          let accessibilityWindow = windows[0].accessibilityWindow
+    else {
+      throw EvidenceError.message("\(scenario) is not bound to the floating panel AX window")
+    }
+    let elements = accessibilityElements(root: accessibilityWindow)
+    guard let editor = elements.first(where: {
+      axString($0, kAXIdentifierAttribute) == "FloatingPanelSourceEditor"
+        && axString($0, kAXRoleAttribute) == "AXTextArea"
+    }) else {
+      throw EvidenceError.message("\(scenario) could not find the OCR source editor")
+    }
+    let sourceText = axString(editor, kAXValueAttribute)
+    let sourceKinds = elements.filter {
+      axString($0, kAXIdentifierAttribute) == "FloatingPanelSelectionSource"
+    }
+    guard sourceKinds.count == 1 else {
+      throw EvidenceError.message("\(scenario) could not find the OCR source badge")
+    }
+    let sourceKindValues = sourceKinds.flatMap { sourceKind in
+      [
+        axString(sourceKind, kAXTitleAttribute),
+        axString(sourceKind, kAXDescriptionAttribute),
+        axString(sourceKind, kAXValueAttribute)
+      ]
+    }
+    let allText = elements.map(axVisibleText).joined(separator: "\n")
+    let captureDisplayIndices = ocrCaptureDisplayIndices(
+      from: axString(sourceKinds[0], kAXValueAttribute)
+    )
+    let expectedDisplayIndex = scenario == "ocr_result_display_1" ? 1 : 2
+    guard sourceText.contains("LexiRay"),
+          sourceKindValues.contains("OCR"),
+          allText.contains("LexiRay mock translation:"),
+          captureDisplayIndices == [expectedDisplayIndex]
+    else {
+      throw EvidenceError.message(
+        "\(scenario) does not show OCR text and translation captured from display \(expectedDisplayIndex)"
+      )
+    }
+    let displays = expectedDisplayWindowBounds()
+    guard displays.count >= 2,
+          displays.indices.contains(expectedDisplayIndex - 1),
+          displays[expectedDisplayIndex - 1].contains(
+            CGPoint(x: windowBounds(windows[0].info).midX, y: windowBounds(windows[0].info).midY)
+          )
+    else {
+      throw EvidenceError.message("\(scenario) panel is not centered on the required display")
+    }
+    values = [
+      "capture_display_index": String(expectedDisplayIndex),
+      "display_count": String(displays.count),
+      "display_index": String(expectedDisplayIndex),
+      "mock_translation": "present",
+      "source_contains": "LexiRay",
+      "source_kind": "OCR"
     ]
 
   case "ocr_multi_display":
@@ -660,7 +798,8 @@ private func semanticAccessibilityWindow(
       return frame.width >= 650 && frame.height >= 420
     }
 
-  case "source_editor", "language_direction", "speech_controls", "panel_visual_states":
+  case "selection_hotkey", "source_editor", "language_direction", "speech_controls", "panel_visual_states",
+       "ocr_result_display_1", "ocr_result_display_2":
     role = .panel
     matches = windows.filter {
       axString($0, kAXRoleAttribute) == "AXWindow"
@@ -711,7 +850,8 @@ private func eligibleWindows(
   }
 
   switch scenario {
-  case "launch", "source_editor", "language_direction", "speech_controls", "panel_visual_states":
+  case "launch", "selection_hotkey", "source_editor", "language_direction", "speech_controls", "panel_visual_states",
+       "ocr_result_display_1", "ocr_result_display_2":
     let semantic = try semanticAccessibilityWindow(
       scenario: scenario,
       processIdentifier: processIdentifier
@@ -1308,7 +1448,7 @@ private func verifyProvenance(
       throw EvidenceError.message("launch provenance does not contain a LexiRay main window")
     }
 
-  case "source_editor", "language_direction", "speech_controls", "panel_visual_states":
+  case "selection_hotkey", "source_editor", "language_direction", "speech_controls", "panel_visual_states":
     guard provenance.displayCount == 0,
           provenance.captures.count == 1,
           provenance.captures.allSatisfy({ capture in
@@ -1318,6 +1458,31 @@ private func verifyProvenance(
           })
     else {
       throw EvidenceError.message("\(scenario) provenance does not contain the floating panel")
+    }
+
+  case "ocr_result_display_1", "ocr_result_display_2":
+    let displays = expectedDisplayWindowBounds()
+    let expectedDisplayIndex = scenario == "ocr_result_display_1" ? 1 : 2
+    let captureFrame = provenance.captures.first.map { capture in
+      CGRect(
+        x: capture.bounds.x,
+        y: capture.bounds.y,
+        width: capture.bounds.width,
+        height: capture.bounds.height
+      )
+    }
+    guard provenance.displayCount == 0,
+          provenance.availableDisplayCount == displays.count,
+          displays.count >= 2,
+          displays.indices.contains(expectedDisplayIndex - 1),
+          provenance.captures.count == 1,
+          provenance.captures[0].windowRole == EvidenceWindowRole.panel.rawValue,
+          let captureFrame,
+          displays[expectedDisplayIndex - 1].contains(
+            CGPoint(x: captureFrame.midX, y: captureFrame.midY)
+          )
+    else {
+      throw EvidenceError.message("\(scenario) provenance is not a result panel on the required display")
     }
 
   case "ocr_multi_display":

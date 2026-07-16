@@ -1,6 +1,6 @@
-// Shared GUI scenario harness. Concatenated before each scenario file by
-// script/ui/run.sh and executed as one Swift script:
-//   cat lib.swift scenarios/<name>.swift | swift - <app> <workdir> <shotdir> <name>
+// Shared GUI scenario harness. Concatenated after pure evidence helpers and
+// before each scenario file by script/ui/run.sh, then executed as one script:
+//   cat panel_border_evidence.swift lib.swift scenarios/<name>.swift | swift - ...
 import AppKit
 import ApplicationServices
 import Carbon
@@ -483,7 +483,11 @@ func currentOwnedWindowInfo(targetWindowID: UInt32, processIdentifier: pid_t) ->
   }
 }
 
-func captureOwnedWindow(_ name: String, window: [String: Any]) -> String? {
+func captureOwnedWindow(
+  _ name: String,
+  window: [String: Any],
+  existingPanelBackdrop: ControlledPanelBackdrop? = nil
+) -> String? {
   guard let processIdentifier = workspaceProcessIdentifier,
         workspaceInstance()?.processIdentifier == processIdentifier,
         windowOwnerPID(window) == processIdentifier,
@@ -494,21 +498,27 @@ func captureOwnedWindow(_ name: String, window: [String: Any]) -> String? {
   }
 
   var controlledBackdrop: ControlledPanelBackdrop?
+  var ownedBackdrop: ControlledPanelBackdrop?
   if isFloatingPanelWindow(window) {
-    guard let backdrop = ControlledPanelBackdrop(targetWindow: window) else {
-      return "could not create a synthetic controlled backdrop for the material panel"
+    if let existingPanelBackdrop {
+      controlledBackdrop = existingPanelBackdrop
+    } else {
+      guard let backdrop = ControlledPanelBackdrop(targetWindow: window) else {
+        return "could not create a synthetic controlled backdrop for the material panel"
+      }
+      controlledBackdrop = backdrop
+      ownedBackdrop = backdrop
     }
-    controlledBackdrop = backdrop
-    guard backdrop.verificationError(
+    guard controlledBackdrop?.verificationError(
       targetWindowID: id,
       processIdentifier: processIdentifier
     ) == nil
     else {
-      backdrop.close()
+      ownedBackdrop?.close()
       return "synthetic controlled backdrop could not be verified below the material panel"
     }
   }
-  defer { controlledBackdrop?.close() }
+  defer { ownedBackdrop?.close() }
 
   let outputURL = URL(fileURLWithPath: shotDir).appendingPathComponent("\(name).png")
   let process = Process()
@@ -612,6 +622,49 @@ func snapPanel(_ name: String) {
   snap(name, window: window)
 }
 
+func snapPanelWithOpenLanguageMenu(
+  _ name: String,
+  containing title: String,
+  pickerIdentifier: String,
+  timeout: TimeInterval
+) -> String? {
+  guard let window = floatingPanelWindowInfo(),
+        let processIdentifier = workspaceProcessIdentifier,
+        let targetWindowID = windowID(window),
+        let backdrop = ControlledPanelBackdrop(targetWindow: window)
+  else {
+    return "could not prepare the panel and controlled backdrop before opening the language menu"
+  }
+  defer { backdrop.close() }
+
+  guard backdrop.verificationError(
+    targetWindowID: targetWindowID,
+    processIdentifier: processIdentifier
+  ) == nil
+  else {
+    return "controlled backdrop was invalid before opening the language menu"
+  }
+  guard openLexiRayLanguageMenu(
+    containing: title,
+    pickerIdentifier: pickerIdentifier,
+    timeout: timeout
+  ) else {
+    return "\(pickerIdentifier) did not open while the controlled backdrop was already present"
+  }
+  guard lexiRayLanguageMenuIsOpen() else {
+    return "language menu closed before its panel-border capture"
+  }
+  if let error = captureOwnedWindow(name, window: window, existingPanelBackdrop: backdrop) {
+    return "screenshot \(name): \(error)"
+  }
+  guard lexiRayLanguageMenuIsOpen() else {
+    let outputURL = URL(fileURLWithPath: shotDir).appendingPathComponent("\(name).png")
+    try? FileManager.default.removeItem(at: outputURL)
+    return "language menu closed during its panel-border capture"
+  }
+  return nil
+}
+
 func recordPanelPixelEvidence(_ imageName: String) {
   let imageURL = URL(fileURLWithPath: shotDir).appendingPathComponent("\(imageName).png")
   guard let image = NSImage(contentsOf: imageURL),
@@ -626,7 +679,9 @@ func recordPanelPixelEvidence(_ imageName: String) {
     ("top-right", max(0, bitmap.pixelsWide - 2), max(0, bitmap.pixelsHigh - 2)),
     ("bottom-left", 1, 1),
     ("bottom-right", max(0, bitmap.pixelsWide - 2), 1),
-    ("interior", min(20, bitmap.pixelsWide - 1), min(20, bitmap.pixelsHigh - 1))
+    ("interior", min(20, bitmap.pixelsWide - 1), min(20, bitmap.pixelsHigh - 1)),
+    ("top-outline", bitmap.pixelsWide / 2, max(0, bitmap.pixelsHigh - 2)),
+    ("top-outline-inset", bitmap.pixelsWide / 2, max(0, bitmap.pixelsHigh - 8))
   ]
   let sampledColors = points.map { name, x, y in
     (name, bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
@@ -637,7 +692,6 @@ func recordPanelPixelEvidence(_ imageName: String) {
     }
     return "\(name)=r:\(color.redComponent),g:\(color.greenComponent),b:\(color.blueComponent),a:\(color.alphaComponent)"
   }
-
   let evidenceURL = URL(fileURLWithPath: shotDir).appendingPathComponent("\(imageName)-pixels.txt")
   do {
     try samples.joined(separator: "\n").write(to: evidenceURL, atomically: true, encoding: .utf8)
@@ -646,11 +700,87 @@ func recordPanelPixelEvidence(_ imageName: String) {
   }
 
   let cornerColors = sampledColors.prefix(4).compactMap(\.1)
-  guard cornerColors.count == 4, cornerColors.allSatisfy({ $0.alphaComponent < 0.25 }) else {
-    fail("\(imageName) has opaque corner pixels; rounded clipping regressed")
+  guard cornerColors.count == 4, cornerColors.allSatisfy({ $0.alphaComponent <= 0.005 }) else {
+    fail("\(imageName) has non-transparent square corner pixels; rounded frame clipping regressed")
   }
-  guard let interior = sampledColors.last?.1, interior.alphaComponent > 0.9 else {
+  guard sampledColors.count >= 5,
+        let interior = sampledColors[4].1,
+        interior.alphaComponent > 0.9
+  else {
     fail("\(imageName) did not capture an opaque panel interior for corner comparison")
+  }
+
+  guard sampledColors.count >= 7,
+        let topOutline = sampledColors[5].1,
+        let topOutlineInset = sampledColors[6].1
+  else {
+    fail("\(imageName) did not capture top-outline pixel evidence")
+  }
+  func luminance(_ color: NSColor) -> CGFloat {
+    0.2126 * color.redComponent + 0.7152 * color.greenComponent + 0.0722 * color.blueComponent
+  }
+  let outlineLuminance = luminance(topOutline)
+  let insetLuminance = luminance(topOutlineInset)
+  if imageName.contains("-non-key") {
+    guard topOutline.alphaComponent > 0.9,
+          topOutlineInset.alphaComponent > 0.9,
+          abs(outlineLuminance - insetLuminance) <= 0.03
+    else {
+      fail("\(imageName) has a stale top outline while the panel is non-key")
+    }
+  } else {
+    guard topOutline.alphaComponent > 0.9,
+          outlineLuminance >= insetLuminance + 0.04
+    else {
+      fail("\(imageName) is missing the clean key-window top outline")
+    }
+  }
+}
+
+func recordPanelMenuOpenBorderEvidence(
+  _ imageName: String,
+  referenceImageName: String
+) {
+  let directoryURL = URL(fileURLWithPath: shotDir)
+  let imageURL = directoryURL.appendingPathComponent("\(imageName).png")
+  let referenceURL = directoryURL.appendingPathComponent("\(referenceImageName).png")
+  let evidenceURL = directoryURL.appendingPathComponent("\(imageName)-border.txt")
+
+  guard let imageData = try? Data(contentsOf: imageURL),
+        let imageBitmap = NSBitmapImageRep(data: imageData),
+        let referenceData = try? Data(contentsOf: referenceURL),
+        let referenceBitmap = NSBitmapImageRep(data: referenceData)
+  else {
+    fail("could not read menu-open panel border evidence from \(imageName).png")
+  }
+
+  do {
+    let analysis = try analyzePanelMenuOpenBorder(
+      referenceWidth: referenceBitmap.pixelsWide,
+      referenceHeight: referenceBitmap.pixelsHigh,
+      menuOpenWidth: imageBitmap.pixelsWide,
+      menuOpenHeight: imageBitmap.pixelsHigh,
+      referenceAlphaAt: { x, y in
+        referenceBitmap.colorAt(x: x, y: y).map { Double($0.alphaComponent) }
+      },
+      menuOpenAlphaAt: { x, y in
+        imageBitmap.colorAt(x: x, y: y).map { Double($0.alphaComponent) }
+      }
+    )
+    try analysis.evidenceText.write(to: evidenceURL, atomically: true, encoding: .utf8)
+    guard analysis.leakingCorners.isEmpty else {
+      let summary = analysis.leakingCorners.map {
+        "\($0.corner)=\($0.longestRun)px"
+      }.joined(separator: ", ")
+      fail(
+        "\(imageName) has a sustained rectangular hairline outside the rounded panel "
+          + "(\(summary), threshold \(analysis.minimumLeakRun)px)"
+      )
+    }
+  } catch {
+    let message = "result=invalid\nerror=\(error)"
+    try? message.write(to: evidenceURL, atomically: true, encoding: .utf8)
+    fail("\(imageName) could not prove the menu-open rounded border: \(error)")
   }
 }
 
@@ -1253,6 +1383,7 @@ func press(_ keyCode: CGKeyCode, flags: CGEventFlags = []) {
 
   for code in modifiers {
     CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: true)?.post(tap: .cghidEventTap)
+    usleep(20000)
   }
 
   let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true)
@@ -1260,12 +1391,15 @@ func press(_ keyCode: CGKeyCode, flags: CGEventFlags = []) {
   down?.flags = flags
   up?.flags = flags
   down?.post(tap: .cghidEventTap)
+  usleep(30000)
   up?.post(tap: .cghidEventTap)
+  usleep(20000)
 
   // Explicitly release modifiers so no synthetic modifier state leaks into
   // later clicks or key presses.
   for code in modifiers.reversed() {
     CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: false)?.post(tap: .cghidEventTap)
+    usleep(20000)
   }
 }
 
@@ -1373,6 +1507,18 @@ func activateWorkspaceApp() {
     app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
   }
   RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+}
+
+func positionPointerOnPrimaryDisplay() {
+  let bounds = CGDisplayBounds(CGMainDisplayID())
+  let center = CGPoint(x: bounds.midX, y: bounds.midY)
+  CGEvent(
+    mouseEventSource: CGEventSource(stateID: .hidSystemState),
+    mouseType: .mouseMoved,
+    mouseCursorPosition: center,
+    mouseButton: .left
+  )?.post(tap: .cghidEventTap)
+  RunLoop.current.run(until: Date().addingTimeInterval(0.1))
 }
 
 func closeLexiRayMainWindow() -> Bool {
@@ -1537,12 +1683,16 @@ func ensureAppRunning() {
   guard let launchedProcessIdentifier else {
     fail("LexiRay launch did not return a process identifier")
   }
-  guard let launchedApplication = NSRunningApplication(processIdentifier: launchedProcessIdentifier),
-        applicationMatchesWorkspaceProcess(
-          launchedApplication,
-          expectedArguments: launchArguments
-        )
-  else {
+  let launchIdentityMatched = waitFor("launched LexiRay process identity", timeout: 3) {
+    guard let launchedApplication = NSRunningApplication(processIdentifier: launchedProcessIdentifier) else {
+      return false
+    }
+    return applicationMatchesWorkspaceProcess(
+      launchedApplication,
+      expectedArguments: launchArguments
+    )
+  }
+  guard launchIdentityMatched else {
     blocked(
       "launched LexiRay PID \(launchedProcessIdentifier) did not match the exact workspace executable "
         + "and acceptance arguments; it was not recorded or terminated"
@@ -1736,4 +1886,5 @@ func restoreFixtureStateAndRestart() {
 
 guardAgainstShieldedSession()
 guardAgainstForeignCopies()
+positionPointerOnPrimaryDisplay()
 resetToBaseline()

@@ -186,4 +186,8 @@ private final class MutablePermissionChecker: PermissionChecking {
   func requestAccessibilityIfNeeded(prompt _: Bool) -> Bool {
     accessibilityTrusted
   }
+
+  func requestScreenCaptureIfNeeded() -> Bool {
+    screenCaptureTrusted
+  }
 }

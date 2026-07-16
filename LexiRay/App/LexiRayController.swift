@@ -22,6 +22,7 @@ final class LexiRayController: ObservableObject {
   @Published var lastSelectionSource: SelectionSource = .unavailable
   @Published private(set) var panelDirectionOverride: PanelDirectionOverride?
   @Published var lastOCRText = ""
+  @Published private(set) var lastOCRCaptureDisplayIndices: [Int] = []
   @Published var selectedMainSection: MainSection = .dashboard
   @Published private(set) var appIdentity: AppIdentitySnapshot
   @Published private(set) var copyToast: CopyToast?
@@ -29,9 +30,11 @@ final class LexiRayController: ObservableObject {
   @Published private(set) var isSpeakingSource = false
   @Published private(set) var activeHistoryPositionText: String?
   @Published private(set) var hasTranslationHistory = false
+  @Published private(set) var hotKeyRegistrationResults: HotKeyRegistrationResults?
 
   let settings: SettingsStore
   let permissionMonitor: PermissionStatusMonitor
+  let loginItemCoordinator: LoginItemCoordinator
 
   private let selectionService: TextSelectionReading
   private let permissionChecker: PermissionChecking
@@ -81,7 +84,7 @@ final class LexiRayController: ObservableObject {
   init(
     settings: SettingsStore = AppRuntime.makeSettingsStore(),
     selectionService: TextSelectionReading = TextSelectionService(),
-    permissionChecker: PermissionChecking = SystemPermissionChecker(),
+    permissionChecker: PermissionChecking? = nil,
     hotKeyService: HotKeyRegistering = GlobalHotKeyService(),
     appIdentityChecker: AppIdentityChecking = AppIdentityCheckerFactory.makeDefault(),
     floatingPanelFactory: ((LexiRayController) -> FloatingPanelPresenting)? = nil,
@@ -91,16 +94,19 @@ final class LexiRayController: ObservableObject {
     historyStore: TranslationHistoryStore = AppRuntime.makeHistoryStore(),
     speechService: SpeechControlling? = nil,
     permissionMonitor: PermissionStatusMonitor? = nil,
+    loginItemCoordinator: LoginItemCoordinator? = nil,
     pasteboard: NSPasteboard = AppRuntime.makePasteboard()
   ) {
+    let resolvedPermissionChecker = permissionChecker ?? AppRuntime.makePermissionChecker()
     self.settings = settings
     self.selectionService = selectionService
-    self.permissionChecker = permissionChecker
-    self.permissionMonitor = permissionMonitor ?? PermissionStatusMonitor(permissionChecker: permissionChecker)
+    self.permissionChecker = resolvedPermissionChecker
+    self.permissionMonitor = permissionMonitor ?? PermissionStatusMonitor(permissionChecker: resolvedPermissionChecker)
+    self.loginItemCoordinator = loginItemCoordinator ?? AppRuntime.makeLoginItemCoordinator()
     self.hotKeyService = hotKeyService
     self.appIdentityChecker = appIdentityChecker
     self.pipeline = pipeline ?? TranslationPipeline(settings: settings)
-    self.ocrService = ocrService ?? OCRService()
+    self.ocrService = ocrService ?? OCRService(permissionChecker: resolvedPermissionChecker)
     self.ocrSelectionOverlay = ocrSelectionOverlay ?? OCRSelectionOverlayController()
     self.speechService = speechService ?? SpeechService()
     self.historyStore = historyStore
@@ -125,6 +131,7 @@ final class LexiRayController: ObservableObject {
 
     refreshAppIdentity()
     permissionChecker.requestAccessibilityIfNeeded(prompt: false)
+    loginItemCoordinator.reconcileAtStartup()
     permissionMonitor.start()
     registerHotKeys()
     observeSettings()
@@ -159,12 +166,16 @@ final class LexiRayController: ObservableObject {
   }
 
   func translateCurrentSelection() {
+    // Reading the next selection must supersede any pending capture/OCR work,
+    // but it must not cancel an in-flight provider batch until usable new text
+    // has actually been captured. A no-selection re-summon retains that batch.
+    ocrSelectionOverlay.close()
+    stopSpeaking()
+    translationTask?.cancel()
+    translationTask = nil
     guard preparePermissionSensitiveWorkflow() else {
       return
     }
-
-    translationTask?.cancel()
-    translationTask = nil
 
     translationTask = Task { @MainActor [weak self] in
       guard let self else {
@@ -185,14 +196,17 @@ final class LexiRayController: ObservableObject {
       }
 
       cancelTranslationWork(cancelSelectionTask: false)
-      translationTask = nil
       isExpanded = false
       panelSourceText = text
       panelState = .loading(PanelLoadingState(title: "Translating...", preview: text))
       floatingPanel.show(activating: false, repositioning: false)
       await Task.yield()
+      guard !Task.isCancelled else {
+        return
+      }
 
       startBatchTranslation(text: text, source: selection.source, bypassCache: true)
+      translationTask = nil
     }
   }
 
@@ -318,16 +332,44 @@ final class LexiRayController: ObservableObject {
   }
 
   func translateOCRRegion() {
+    AppLog.ocr.info("OCR workflow triggered")
+    cancelTranslationWork()
     guard preparePermissionSensitiveWorkflow() else {
       return
     }
 
-    cancelTranslationWork()
+    guard permissionChecker.isScreenCaptureTrusted else {
+      AppLog.ocr.info("OCR preflight requesting Screen Recording permission")
+      let granted = permissionChecker.requestScreenCaptureIfNeeded()
+      permissionMonitor.refreshNow()
+      isExpanded = false
+      panelSourceText = ""
+      lastSelectionSource = .ocr
+      panelState = .error(
+        granted
+          ? PanelErrorState(
+            title: "Screen Recording Enabled",
+            message: "Press \(settings.ocrHotKey.displayString) again to select an OCR region."
+          )
+          : PanelErrorState(
+            title: "Screen Recording Required",
+            message: "Allow LexiRay to record the screen, then press \(settings.ocrHotKey.displayString) again.",
+            recoveryAction: .openScreenRecordingSettings
+          )
+      )
+      floatingPanel.show(activating: false, repositioning: false)
+      AppLog.ocr.info("OCR preflight completed granted=\(granted)")
+      return
+    }
+
+    AppLog.ocr.info("OCR Screen Recording permission verified")
+
     isExpanded = false
     panelSourceText = ""
     panelState = .loading(PanelLoadingState(title: "Drag to select an OCR region...", preview: nil))
     lastSelectionSource = .ocr
     floatingPanel.hide()
+    AppLog.ocr.info("OCR selection overlay shown")
 
     ocrSelectionOverlay.beginSelection { [weak self] rect in
       guard let self else {
@@ -335,17 +377,32 @@ final class LexiRayController: ObservableObject {
       }
 
       guard let rect else {
+        AppLog.ocr.info("OCR selection cancelled")
         panelState = .idle
         hideFloatingPanelIfNeeded()
         return
       }
 
+      AppLog.ocr.info(
+        "OCR selection completed x=\(rect.origin.x) y=\(rect.origin.y) width=\(rect.width) height=\(rect.height)"
+      )
       recognizeAndTranslateOCR(in: rect)
     }
   }
 
   func translateLastOCRText() {
     translate(text: lastOCRText, source: .ocr)
+  }
+
+  var selectionSourceAccessibilityValue: String {
+    guard lastSelectionSource == .ocr,
+          panelSourceText == lastOCRText,
+          !lastOCRCaptureDisplayIndices.isEmpty
+    else {
+      return lastSelectionSource.displayName
+    }
+
+    return "OCR capture displays: \(lastOCRCaptureDisplayIndices.map(String.init).joined(separator: ","))"
   }
 
   private func recognizeAndTranslateOCR(in rect: CGRect) {
@@ -365,15 +422,19 @@ final class LexiRayController: ObservableObject {
           return
         }
 
-        let text = try await ocrService.captureAndRecognizeText(in: rect)
+        let result = try await ocrService.captureAndRecognizeText(in: rect)
         guard !Task.isCancelled else {
           return
         }
 
-        lastOCRText = text
-        await translateRecognizedText(text)
+        lastOCRText = result.text
+        lastOCRCaptureDisplayIndices = result.captureDisplayIndices
+        await translateRecognizedText(result.text)
       } catch {
-        panelState = .error(error.localizedDescription)
+        guard !Task.isCancelled else {
+          return
+        }
+        panelState = .error(ocrPanelError(for: error))
         floatingPanel.show(activating: false, repositioning: false)
         AppLog.ocr.error("OCR failed: \(error.localizedDescription, privacy: .public)")
       }
@@ -386,8 +447,51 @@ final class LexiRayController: ObservableObject {
     panelState = .loading(PanelLoadingState(title: "Translating OCR text...", preview: text))
     floatingPanel.show(activating: false, repositioning: false)
     await Task.yield()
+    guard !Task.isCancelled else {
+      return
+    }
 
     startBatchTranslation(text: text, source: .ocr, bypassCache: true)
+  }
+
+  func performPanelRecovery(_ action: PanelRecoveryAction) {
+    switch action {
+    case .reselectOCRRegion:
+      translateOCRRegion()
+    case .openScreenRecordingSettings:
+      PermissionService.openScreenCaptureSettings()
+      permissionMonitor.refreshNow()
+    }
+  }
+
+  private func ocrPanelError(for error: Error) -> PanelErrorState {
+    guard let ocrError = error as? OCRError else {
+      return PanelErrorState(
+        title: "OCR Failed",
+        message: error.localizedDescription,
+        recoveryAction: .reselectOCRRegion
+      )
+    }
+
+    switch ocrError {
+    case .screenRecordingPermissionRequired:
+      return PanelErrorState(
+        title: "Screen Recording Required",
+        message: ocrError.localizedDescription,
+        recoveryAction: .openScreenRecordingSettings
+      )
+    case .unsupportedSystem:
+      return PanelErrorState(
+        title: "OCR Unavailable",
+        message: ocrError.localizedDescription
+      )
+    case .selectionTooSmall, .captureFailed, .noTextRecognized, .recognitionFailed:
+      return PanelErrorState(
+        title: "OCR Failed",
+        message: ocrError.localizedDescription,
+        recoveryAction: .reselectOCRRegion
+      )
+    }
   }
 
   private func translate(text: String, source: SelectionSource, directionOverride: PanelDirectionOverride? = nil) {
@@ -645,7 +749,7 @@ final class LexiRayController: ObservableObject {
     isExpanded = false
     panelSourceText = ""
     lastSelectionSource = .unavailable
-    panelState = .error(message)
+    panelState = .error(PanelErrorState(title: "Action Unavailable", message: message))
     floatingPanel.show(activating: false, repositioning: false)
     AppLog.app.error("Blocked permission-sensitive workflow: \(message, privacy: .public)")
   }
@@ -655,7 +759,12 @@ final class LexiRayController: ObservableObject {
     isExpanded = false
     panelSourceText = ""
     lastSelectionSource = .unavailable
-    panelState = .error(selectionUnavailableMessage(for: .accessibilityPermissionMissing))
+    panelState = .error(
+      PanelErrorState(
+        title: "Selection Unavailable",
+        message: selectionUnavailableMessage(for: .accessibilityPermissionMissing)
+      )
+    )
     floatingPanel.show(activating: false, repositioning: false)
   }
 
@@ -690,13 +799,15 @@ final class LexiRayController: ObservableObject {
   }
 
   private func registerHotKeys(translateHotKey: HotKeyConfiguration, ocrHotKey: HotKeyConfiguration) {
-    hotKeyService.registerDefaultHotKeys(
+    hotKeyRegistrationResults = hotKeyService.registerDefaultHotKeys(
       translateHotKey: translateHotKey,
       ocrHotKey: ocrHotKey,
       translate: { [weak self] in
+        AppLog.hotKey.info("Selection hotkey triggered")
         self?.translateCurrentSelection()
       },
       ocr: { [weak self] in
+        AppLog.hotKey.info("OCR hotkey triggered")
         self?.translateOCRRegion()
       }
     )
@@ -757,7 +868,7 @@ final class LexiRayController: ObservableObject {
       }
     } catch {
       activeBatchID = nil
-      panelState = .error(error.localizedDescription)
+      panelState = .error(PanelErrorState(title: "Translation Failed", message: error.localizedDescription))
       floatingPanel.show(activating: false, repositioning: false)
       AppLog.translation.error("Translation failed: \(error.localizedDescription, privacy: .public)")
     }
@@ -891,6 +1002,7 @@ final class LexiRayController: ObservableObject {
   }
 
   private func cancelTranslationWork(cancelSelectionTask: Bool = true) {
+    ocrSelectionOverlay.close()
     stopSpeaking()
     if cancelSelectionTask {
       translationTask?.cancel()
