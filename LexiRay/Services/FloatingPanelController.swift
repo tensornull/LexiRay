@@ -217,12 +217,30 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
     panel.hidesOnDeactivate = false
     panel.isOpaque = false
     panel.backgroundColor = .clear
-    panel.hasShadow = false
     panel.delegate = self
     panel.contentView = Self.makeContentView(controller: controller)
+    panel.hasShadow = false
+    Self.clipWindowFrameBacking(panel)
     applySizeLimits(panel, for: controller)
 
     return panel
+  }
+
+  private static func clipWindowFrameBacking(_ panel: NSPanel) {
+    guard let frameView = panel.contentView?.superview else {
+      return
+    }
+    frameView.wantsLayer = true
+    frameView.layer?.backgroundColor = NSColor.clear.cgColor
+    frameView.layer?.isOpaque = false
+    // A borderless resizable NSPanel still composites a faint rectangular
+    // frame backing outside its rounded material content. Clear alone does not
+    // suppress those corner pixels, so clip that AppKit-owned backing at the
+    // same radius as the glass. This is the outer window boundary; the inner
+    // content clip remains responsible for SwiftUI's key-window backing.
+    frameView.layer?.cornerRadius = cornerRadius
+    frameView.layer?.cornerCurve = .continuous
+    frameView.layer?.masksToBounds = true
   }
 
   private static func makeContentView(controller: LexiRayController) -> NSView {

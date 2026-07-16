@@ -102,6 +102,36 @@ rg -F 'app_cdhash -string "$APP_CDHASH"' script/ui/run.sh >/dev/null || {
   exit 1
 }
 
+rg -F '[[ -z "${LEXIRAY_REUSE_GUI_ARTIFACT_DIR:-}" ]]' script/verify.sh >/dev/null || {
+  echo "explicit GUI artifact reuse can be shadowed by a stale automated candidate" >&2
+  exit 1
+}
+
+rg -F 'let sourceKindValues = sourceKinds.flatMap' script/acceptance_evidence.swift >/dev/null || {
+  echo "OCR source evidence does not inspect every AX element carrying the source badge identifier" >&2
+  exit 1
+}
+
+rg -F 'sourceKindValues.contains("OCR")' script/acceptance_evidence.swift >/dev/null || {
+  echo "OCR source evidence is not matched exactly against the AX badge" >&2
+  exit 1
+}
+
+rg -F 'sourceKinds.contains(where: { axVisibleText($0).contains("Accessibility") })' script/acceptance_evidence.swift >/dev/null || {
+  echo "Selection source evidence does not inspect every AX element carrying the source badge identifier" >&2
+  exit 1
+}
+
+rg -F '"ocr_result_display_1", "ocr_result_display_2"' script/acceptance_evidence.swift >/dev/null || {
+  echo "Computer Use OCR result evidence is not bound to the floating panel AX window" >&2
+  exit 1
+}
+
+rg -F 'grep -Fxf "$SCENARIOS" "$AVAILABLE_SCENARIOS"' script/verify.sh >/dev/null || {
+  echo "targeted GUI scenarios are not restored to canonical execution order" >&2
+  exit 1
+}
+
 mkdir -p "$WORK_DIR/screenshots"
 cp LexiRay/Resources/Assets.xcassets/AppIcon.appiconset/LexiRay-256.png \
   "$WORK_DIR/screenshots/example.png"

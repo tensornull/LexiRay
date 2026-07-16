@@ -22,10 +22,13 @@ SOURCE_PATHS=(
 
 COMPUTER_USE_REQUIRED_SCENARIOS=(
   launch
+  selection_hotkey
   source_editor
   language_direction
   speech_controls
   panel_visual_states
+  ocr_result_display_1
+  ocr_result_display_2
   ocr_multi_display
 )
 
@@ -39,6 +42,7 @@ commands:
   l3-path
   l3-valid
   record-l3 <xcresult-bundle>
+  validate-gui-artifact <app> <artifact-dir> <contact-sheet>
   write-candidate <app> <passed|not-required> [artifact-dir] [contact-sheet]
   require-automated-candidate
   require-candidate
@@ -334,6 +338,177 @@ require_candidate_gui_evidence_paths() {
   }
 }
 
+validate_gui_scenario_set() {
+  [[ $# -eq 2 ]] || return 1
+  local scenarios_csv="$1"
+  local context="$2"
+
+  if ! GUI_SCENARIO_CSV="$scenarios_csv" /usr/bin/awk '
+    BEGIN {
+      csv = ENVIRON["GUI_SCENARIO_CSV"]
+      if (csv == "" || index(csv, "\n") > 0 ||
+          csv ~ /^,/ || csv ~ /,$/ || csv ~ /,,/) {
+        invalid = 1
+      }
+      actual_count = split(csv, actual, ",")
+      for (i = 1; i <= actual_count; i++) {
+        name = actual[i]
+        if (name == "" || actual_seen[name]++) {
+          invalid = 1
+        }
+      }
+    }
+    {
+      name = $0
+      if (name == "" || expected[name]++) {
+        invalid = 1
+      }
+      expected_count++
+    }
+    END {
+      if (expected_count == 0 || actual_count != expected_count) {
+        invalid = 1
+      }
+      for (i = 1; i <= actual_count; i++) {
+        if (!(actual[i] in expected)) {
+          invalid = 1
+        }
+      }
+      for (name in expected) {
+        if (!(name in actual_seen)) {
+          invalid = 1
+        }
+      }
+      exit invalid ? 1 : 0
+    }
+  ' < <("$ROOT_DIR/script/ui/run.sh" --list); then
+    echo "$context scenario manifest is not the exact canonical GUI scenario set." >&2
+    return 1
+  fi
+}
+
+validate_gui_results() {
+  [[ $# -eq 2 ]] || return 1
+  local results_file="$1"
+  local context="$2"
+
+  if ! /usr/bin/awk '
+    FNR == NR {
+      name = $0
+      if (name == "" || expected[name]++) {
+        invalid = 1
+      }
+      expected_count++
+      next
+    }
+    {
+      if (substr($0, 1, 6) != "PASS  ") {
+        invalid = 1
+      }
+      name = substr($0, 7)
+      if (name == "" || !(name in expected) || passed[name]++) {
+        invalid = 1
+      }
+      result_count++
+    }
+    END {
+      if (expected_count == 0 || result_count != expected_count) {
+        invalid = 1
+      }
+      for (name in expected) {
+        if (!(name in passed)) {
+          invalid = 1
+        }
+      }
+      exit invalid ? 1 : 0
+    }
+  ' - "$results_file" < <("$ROOT_DIR/script/ui/run.sh" --list); then
+    echo "$context results do not contain exactly one PASS for every canonical GUI scenario." >&2
+    return 1
+  fi
+}
+
+validate_gui_scenario_evidence() {
+  [[ $# -eq 3 ]] || return 1
+  validate_gui_scenario_set "$1" "$3" || return 1
+  validate_gui_results "$2" "$3"
+}
+
+validate_gui_artifact() {
+  [[ $# -eq 3 ]] || usage
+  local app="$1"
+  local artifact_dir="$2"
+  local contact_sheet="$3"
+  local fingerprint results_file gui_manifest screenshots_manifest screenshot_count
+  local manifest_scenarios results_hash screenshots_manifest_hash contact_sheet_hash
+  local rebuilt_contact_sheet
+
+  fingerprint="$(source_fingerprint)"
+  results_file="$artifact_dir/results.txt"
+  gui_manifest="$artifact_dir/gui-run.json"
+  screenshots_manifest="$artifact_dir/gui-screenshots.sha256"
+  require_candidate_gui_evidence_paths \
+    "$artifact_dir" "$contact_sheet" "$results_file" "$gui_manifest" \
+    "$screenshots_manifest" || {
+    echo "Reusable GUI artifact has unsafe or incomplete evidence paths." >&2
+    return 1
+  }
+  verify_app "$app"
+  [[ -f "$app.source-fingerprint" && "$(<"$app.source-fingerprint")" == "$fingerprint" ]] || {
+    echo "Reusable GUI artifact app is not attested for the current source." >&2
+    return 1
+  }
+  validate_plist "$gui_manifest" || {
+    echo "Reusable GUI run manifest is malformed." >&2
+    return 1
+  }
+  manifest_scenarios="$(plist_value "$gui_manifest" scenarios)"
+  validate_gui_scenario_evidence \
+    "$manifest_scenarios" "$results_file" "Reusable GUI" || return 1
+  results_hash="$(sha256_file "$results_file")"
+  screenshots_manifest_hash="$(plist_value "$gui_manifest" screenshots_manifest_sha256)"
+  screenshot_count="$(plist_value "$gui_manifest" screenshot_count)"
+  contact_sheet_hash="$(sha256_file "$contact_sheet")"
+  [[ "$screenshot_count" =~ ^[1-9][0-9]*$ &&
+    "$(plist_value "$gui_manifest" screenshots_manifest)" == "$screenshots_manifest" &&
+    "$(sha256_file "$screenshots_manifest")" == "$screenshots_manifest_hash" ]] || {
+    echo "Reusable GUI screenshot evidence is missing or stale." >&2
+    return 1
+  }
+  verify_screenshot_manifest "$screenshots_manifest" "$screenshot_count" "$artifact_dir" || {
+    echo "Reusable GUI raw screenshots do not match their manifest." >&2
+    return 1
+  }
+  rebuilt_contact_sheet="$(mktemp "${TMPDIR:-/tmp}/lexiray-gui-contact-sheet.XXXXXX")"
+  if ! rebuild_gui_contact_sheet \
+    "$screenshots_manifest" "$artifact_dir" "$rebuilt_contact_sheet" ||
+    [[ "$(sha256_file "$rebuilt_contact_sheet")" != "$contact_sheet_hash" ]] ||
+    ! cmp -s "$rebuilt_contact_sheet" "$contact_sheet"; then
+    rm -f "$rebuilt_contact_sheet"
+    echo "Reusable GUI contact sheet is not derived from its sealed raw screenshots." >&2
+    return 1
+  fi
+  rm -f "$rebuilt_contact_sheet"
+  [[ "$(plist_value "$gui_manifest" kind)" == gui-run &&
+    "$(plist_value "$gui_manifest" source_fingerprint)" == "$fingerprint" &&
+    "$(plist_value "$gui_manifest" app_path)" == "$app" &&
+    "$(plist_value "$gui_manifest" app_cdhash)" == "$(app_cdhash "$app")" &&
+    "$(plist_value "$gui_manifest" app_executable_sha256)" == "$(app_executable_sha256 "$app")" &&
+    "$(plist_value "$gui_manifest" app_certificate_sha256)" == "$(app_certificate_sha256 "$app")" &&
+    "$(plist_value "$gui_manifest" app_designated_requirement_sha256)" == \
+      "$(app_designated_requirement_sha256 "$app")" &&
+    "$(plist_value "$gui_manifest" app_entitlements_sha256)" == "$(app_entitlements_sha256 "$app")" &&
+    "$(plist_value "$gui_manifest" scenarios)" == "$manifest_scenarios" &&
+    "$(plist_value "$gui_manifest" results_sha256)" == "$results_hash" &&
+    "$(plist_value "$gui_manifest" screenshots_manifest)" == "$screenshots_manifest" &&
+    "$(plist_value "$gui_manifest" screenshots_manifest_sha256)" == "$screenshots_manifest_hash" &&
+    "$(plist_value "$gui_manifest" screenshot_count)" == "$screenshot_count" &&
+    "$(source_fingerprint)" == "$fingerprint" ]] || {
+    echo "Reusable GUI artifact is not bound to the current source and app." >&2
+    return 1
+  }
+}
+
 write_candidate() {
   [[ $# -ge 2 && $# -le 4 ]] || usage
   local app="$1"
@@ -343,9 +518,9 @@ write_candidate() {
   local fingerprint_before fingerprint_after receipt tmp_plist tmp_json
   local authority cdhash version build bundle_id executable_hash certificate_hash
   local designated_requirement designated_requirement_hash entitlements_hash
-  local git_head git_branch created_at scenario_names screenshot_count results_hash contact_sheet_hash
+  local git_head git_branch created_at scenario_names manifest_scenarios screenshot_count results_hash contact_sheet_hash
   local results_file gui_manifest gui_manifest_hash gui_screenshots_manifest gui_screenshots_manifest_hash
-  local -a expected_scenarios=()
+  local rebuilt_contact_sheet
 
   case "$gui_status" in
     passed|not-required) ;;
@@ -395,23 +570,15 @@ write_candidate() {
       echo "GUI artifact bundle has unsafe or incomplete evidence paths." >&2
       exit 1
     }
-    IFS=',' read -r -a expected_scenarios <<<"$scenario_names"
-    for scenario in "${expected_scenarios[@]}"; do
-      grep -Fx "PASS  $scenario" "$results_file" >/dev/null || {
-        echo "GUI result manifest does not prove PASS for $scenario." >&2
-        exit 1
-      }
-    done
-    if grep -E '^(FAIL|BLOCK)' "$results_file" >/dev/null; then
-      echo "GUI result manifest contains a failure or blocker." >&2
-      exit 1
-    fi
     results_hash="$(sha256_file "$results_file")"
     contact_sheet_hash="$(sha256_file "$contact_sheet")"
     validate_plist "$gui_manifest" || {
       echo "GUI run manifest is malformed." >&2
       exit 1
     }
+    manifest_scenarios="$(plist_value "$gui_manifest" scenarios)"
+    validate_gui_scenario_evidence \
+      "$manifest_scenarios" "$results_file" "GUI artifact" || exit 1
     gui_screenshots_manifest_hash="$(plist_value "$gui_manifest" screenshots_manifest_sha256)"
     screenshot_count="$(plist_value "$gui_manifest" screenshot_count)"
     [[ "$screenshot_count" =~ ^[1-9][0-9]*$ &&
@@ -424,6 +591,16 @@ write_candidate() {
       echo "GUI raw screenshots do not match their manifest." >&2
       exit 1
     }
+    rebuilt_contact_sheet="$(mktemp "${TMPDIR:-/tmp}/lexiray-gui-contact-sheet.XXXXXX")"
+    if ! rebuild_gui_contact_sheet \
+      "$gui_screenshots_manifest" "$artifact_dir" "$rebuilt_contact_sheet" ||
+      [[ "$(sha256_file "$rebuilt_contact_sheet")" != "$contact_sheet_hash" ]] ||
+      ! cmp -s "$rebuilt_contact_sheet" "$contact_sheet"; then
+      rm -f "$rebuilt_contact_sheet"
+      echo "GUI contact sheet is not derived from the sealed raw screenshots." >&2
+      exit 1
+    fi
+    rm -f "$rebuilt_contact_sheet"
     [[ "$(plist_value "$gui_manifest" kind)" == gui-run &&
       "$(plist_value "$gui_manifest" source_fingerprint)" == "$fingerprint_before" &&
       "$(plist_value "$gui_manifest" app_path)" == "$app" &&
@@ -432,7 +609,7 @@ write_candidate() {
       "$(plist_value "$gui_manifest" app_certificate_sha256)" == "$certificate_hash" &&
       "$(plist_value "$gui_manifest" app_designated_requirement_sha256)" == "$designated_requirement_hash" &&
       "$(plist_value "$gui_manifest" app_entitlements_sha256)" == "$entitlements_hash" &&
-      "$(plist_value "$gui_manifest" scenarios)" == "$scenario_names" &&
+      "$(plist_value "$gui_manifest" scenarios)" == "$manifest_scenarios" &&
       "$(plist_value "$gui_manifest" results_sha256)" == "$results_hash" &&
       "$(plist_value "$gui_manifest" screenshots_manifest)" == "$gui_screenshots_manifest" &&
       "$(plist_value "$gui_manifest" screenshots_manifest_sha256)" == "$gui_screenshots_manifest_hash" &&
@@ -644,6 +821,8 @@ require_candidate() {
   case "$(plist_value "$receipt" verification.gui)" in
     passed)
       local artifact_dir contact_sheet screenshot_count results_file gui_manifest gui_screenshots_manifest
+      local manifest_scenarios
+      local rebuilt_contact_sheet
       artifact_dir="$(plist_value "$receipt" verification.gui_artifact_dir)"
       contact_sheet="$(plist_value "$receipt" verification.contact_sheet)"
       screenshot_count="$(plist_value "$receipt" verification.screenshot_count)"
@@ -664,6 +843,12 @@ require_candidate() {
         echo "Candidate GUI manifest is malformed." >&2
         return 1
       }
+      manifest_scenarios="$(plist_value "$gui_manifest" scenarios)"
+      validate_gui_scenario_evidence \
+        "$manifest_scenarios" "$results_file" "Candidate GUI" || return 1
+      validate_gui_scenario_set \
+        "$(plist_value "$receipt" verification.gui_scenarios)" \
+        "Candidate receipt GUI" || return 1
       [[ "$(sha256_file "$results_file")" == "$(plist_value "$receipt" verification.gui_results_sha256)" &&
         "$(sha256_file "$contact_sheet")" == "$(plist_value "$receipt" verification.contact_sheet_sha256)" &&
         "$(sha256_file "$gui_manifest")" == "$(plist_value "$receipt" verification.gui_manifest_sha256)" &&
@@ -676,6 +861,17 @@ require_candidate() {
         echo "Candidate GUI raw screenshots no longer match their manifest." >&2
         return 1
       }
+      rebuilt_contact_sheet="$(mktemp "${TMPDIR:-/tmp}/lexiray-gui-contact-sheet.XXXXXX")"
+      if ! rebuild_gui_contact_sheet \
+        "$gui_screenshots_manifest" "$artifact_dir" "$rebuilt_contact_sheet" ||
+        [[ "$(sha256_file "$rebuilt_contact_sheet")" != \
+          "$(plist_value "$receipt" verification.contact_sheet_sha256)" ]] ||
+        ! cmp -s "$rebuilt_contact_sheet" "$contact_sheet"; then
+        rm -f "$rebuilt_contact_sheet"
+        echo "Candidate GUI contact sheet is not derived from its sealed raw screenshots." >&2
+        return 1
+      fi
+      rm -f "$rebuilt_contact_sheet"
       [[ "$(plist_value "$gui_manifest" kind)" == gui-run &&
         "$(plist_value "$gui_manifest" source_fingerprint)" == "$fingerprint" &&
         "$(plist_value "$gui_manifest" app_cdhash)" == "$(plist_value "$receipt" app.cdhash)" &&
@@ -683,6 +879,7 @@ require_candidate() {
         "$(plist_value "$gui_manifest" app_certificate_sha256)" == "$(plist_value "$receipt" app.certificate_sha256)" &&
         "$(plist_value "$gui_manifest" app_designated_requirement_sha256)" == "$(plist_value "$receipt" app.designated_requirement_sha256)" &&
         "$(plist_value "$gui_manifest" app_entitlements_sha256)" == "$(plist_value "$receipt" app.entitlements_sha256)" &&
+        "$(plist_value "$gui_manifest" scenarios)" == "$manifest_scenarios" &&
         "$(plist_value "$gui_manifest" results_sha256)" == "$(plist_value "$receipt" verification.gui_results_sha256)" &&
         "$(plist_value "$gui_manifest" screenshots_manifest)" == "$gui_screenshots_manifest" &&
         "$(plist_value "$gui_manifest" screenshots_manifest_sha256)" == "$(plist_value "$receipt" verification.gui_screenshots_manifest_sha256)" &&
@@ -1106,6 +1303,44 @@ verify_screenshot_manifest() {
   done <"$manifest"
   [[ "$count" -eq "$expected_count" && "$count" -gt 0 ]] || return 1
   /usr/bin/swift "$EVIDENCE_HELPER" png "${screenshots[@]}" >/dev/null
+}
+
+rebuild_gui_contact_sheet() {
+  [[ $# -eq 3 ]] || return 1
+  local screenshots_manifest="$1"
+  local artifact_dir="$2"
+  local output="$3"
+  local input_dir line screenshot basename count=0
+
+  require_gui_artifact_directory "$artifact_dir" >/dev/null || return 1
+  input_dir="$(mktemp -d "${TMPDIR:-/tmp}/lexiray-gui-contact-verify.XXXXXX")"
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    screenshot="${line#*  }"
+    basename="${screenshot##*/}"
+    [[ "$screenshot" != "$line" &&
+      "$screenshot" == "$artifact_dir/$basename" &&
+      "$basename" == *.png &&
+      "$basename" != contact-sheet.png &&
+      ! -e "$input_dir/$basename" ]] || {
+      rm -rf "$input_dir"
+      return 1
+    }
+    cp "$screenshot" "$input_dir/$basename" || {
+      rm -rf "$input_dir"
+      return 1
+    }
+    count=$((count + 1))
+  done <"$screenshots_manifest"
+  [[ "$count" -gt 0 ]] || {
+    rm -rf "$input_dir"
+    return 1
+  }
+  "$ROOT_DIR/script/make_contact_sheet.swift" "$input_dir" "$output" >/dev/null || {
+    rm -rf "$input_dir"
+    return 1
+  }
+  rm -rf "$input_dir"
 }
 
 rebuild_computer_use_contact_sheet() {
@@ -1702,6 +1937,7 @@ case "$command" in
   l3-path) [[ $# -eq 0 ]] || usage; l3_path ;;
   l3-valid) [[ $# -eq 0 ]] || usage; l3_valid ;;
   record-l3) record_l3 "$@" ;;
+  validate-gui-artifact) validate_gui_artifact "$@" ;;
   write-candidate) write_candidate "$@" ;;
   require-automated-candidate) [[ $# -eq 0 ]] || usage; require_candidate 0 ;;
   require-candidate) [[ $# -eq 0 ]] || usage; require_candidate 1 ;;

@@ -74,6 +74,9 @@ final class OCRSelectionOverlayController: OCRRegionSelecting {
   }
 
   func close() {
+    guard !panels.isEmpty || escapeMonitor != nil || completion != nil else {
+      return
+    }
     if let escapeMonitor {
       NSEvent.removeMonitor(escapeMonitor)
       self.escapeMonitor = nil

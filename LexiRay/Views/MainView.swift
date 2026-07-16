@@ -78,6 +78,7 @@ struct MainView: View {
       VStack(alignment: .leading, spacing: 4) {
         Text("LexiRay")
           .font(.largeTitle.weight(.semibold))
+          .accessibilityIdentifier("DashboardLexiRayTitle")
 
         Text(activeProviderSummary)
           .font(.callout)
@@ -215,9 +216,18 @@ struct MainView: View {
             compact: true,
             copyToastSurface: .mainWindow
           )
-        case let .error(message):
-          ContentUnavailableView("No Translation", systemImage: "exclamationmark.triangle", description: Text(message))
-            .frame(maxWidth: .infinity, minHeight: 120)
+        case let .error(error):
+          VStack(spacing: 10) {
+            ContentUnavailableView(error.title, systemImage: "exclamationmark.triangle", description: Text(error.message))
+            if let recoveryAction = error.recoveryAction {
+              Button(recoveryAction.title) {
+                controller.performPanelRecovery(recoveryAction)
+              }
+              .accessibilityIdentifier("DashboardErrorRecoveryButton")
+              .accessibilityLabel(recoveryAction.title)
+            }
+          }
+          .frame(maxWidth: .infinity, minHeight: 120)
         }
       }
     }

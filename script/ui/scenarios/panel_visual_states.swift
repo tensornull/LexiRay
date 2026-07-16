@@ -10,6 +10,21 @@ resetToBaseline()
 openBlankComposer()
 captureVisualState("panel-light-key")
 
+if let captureError = snapPanelWithOpenLanguageMenu(
+  "panel-light-menu-open",
+  containing: "Always",
+  pickerIdentifier: "TargetLanguagePicker",
+  timeout: 3
+) {
+  fail(captureError)
+}
+
+recordPanelMenuOpenBorderEvidence(
+  "panel-light-menu-open",
+  referenceImageName: "panel-light-key"
+)
+require(dismissLexiRayLanguageMenu(timeout: 2), "target language menu did not dismiss")
+
 require(pressLexiRayButton(description: "Pin"), "pin button was not reachable in light appearance")
 captureVisualState("panel-light-pinned-key")
 

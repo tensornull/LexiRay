@@ -7,10 +7,42 @@ import Vision
 
 @MainActor
 protocol OCRRecognizing: AnyObject {
-  func captureAndRecognizeText(in rect: CGRect) async throws -> String
+  func captureAndRecognizeText(in rect: CGRect) async throws -> OCRRecognitionResult
+}
+
+struct OCRRecognitionResult: Equatable {
+  let text: String
+  let captureDisplayIndices: [Int]
+}
+
+enum OCRError: LocalizedError, Equatable {
+  case screenRecordingPermissionRequired
+  case selectionTooSmall
+  case unsupportedSystem
+  case captureFailed(String)
+  case noTextRecognized
+  case recognitionFailed(String)
+
+  var errorDescription: String? {
+    switch self {
+    case .screenRecordingPermissionRequired:
+      "Screen Recording permission is required for OCR."
+    case .selectionTooSmall:
+      "Select a larger OCR region."
+    case .unsupportedSystem:
+      "OCR capture requires macOS 15.2 or newer."
+    case let .captureFailed(message):
+      "Screen capture failed: \(message)"
+    case .noTextRecognized:
+      "No text was recognized in the selected region."
+    case let .recognitionFailed(message):
+      "Text recognition failed: \(message)"
+    }
+  }
 }
 
 struct OCRCaptureDisplay: Equatable {
+  let displayIndex: Int
   let appKitFrame: CGRect
   let displayBounds: CGRect
 }
@@ -18,10 +50,17 @@ struct OCRCaptureDisplay: Equatable {
 struct OCRCaptureRectConversion: Equatable {
   let rect: CGRect
   let displayCount: Int
+  let displayIndices: [Int]
 }
 
 @MainActor
 final class OCRService: OCRRecognizing {
+  private let permissionChecker: PermissionChecking
+
+  init(permissionChecker: PermissionChecking = SystemPermissionChecker()) {
+    self.permissionChecker = permissionChecker
+  }
+
   struct RecognizedTextCandidate: Equatable {
     let text: String
     let boundingBox: CGRect
@@ -41,17 +80,18 @@ final class OCRService: OCRRecognizing {
     }
   }
 
-  func captureAndRecognizeText(in rect: CGRect) async throws -> String {
+  func captureAndRecognizeText(in rect: CGRect) async throws -> OCRRecognitionResult {
     guard rect.width >= 8, rect.height >= 8 else {
-      throw TranslationError.ocrUnavailable("Select a larger OCR region")
+      throw OCRError.selectionTooSmall
     }
 
-    guard PermissionService.requestScreenCaptureIfNeeded() else {
-      throw TranslationError.ocrUnavailable("Screen Recording permission is required for OCR")
+    guard permissionChecker.isScreenCaptureTrusted else {
+      AppLog.ocr.error("OCR capture blocked because Screen Recording permission is unavailable")
+      throw OCRError.screenRecordingPermissionRequired
     }
 
     let conversion = Self.captureRectConversion(for: rect, displays: Self.currentCaptureDisplays())
-      ?? OCRCaptureRectConversion(rect: rect, displayCount: 0)
+      ?? OCRCaptureRectConversion(rect: rect, displayCount: 0, displayIndices: [])
     AppLog.ocr.info(
       """
       OCR capture rect appKit=\(Self.describe(rect), privacy: .public) \
@@ -60,8 +100,26 @@ final class OCRService: OCRRecognizing {
       """
     )
 
-    let image = try await captureImage(in: conversion.rect)
-    return try await recognizeText(in: image)
+    AppLog.ocr.info("OCR screenshot capture started")
+    let image: CGImage
+    do {
+      image = try await captureImage(in: conversion.rect)
+    } catch {
+      AppLog.ocr.error("OCR screenshot capture failed: \(error.localizedDescription, privacy: .public)")
+      throw error
+    }
+    AppLog.ocr.info("OCR screenshot capture completed")
+    do {
+      let text = try await recognizeText(in: image)
+      AppLog.ocr.info("OCR recognition succeeded characters=\(text.count)")
+      return OCRRecognitionResult(
+        text: text,
+        captureDisplayIndices: conversion.displayIndices
+      )
+    } catch {
+      AppLog.ocr.error("OCR recognition failed: \(error.localizedDescription, privacy: .public)")
+      throw error
+    }
   }
 
   func recognizeText(in image: CGImage) async throws -> String {
@@ -88,10 +146,13 @@ final class OCRService: OCRRecognizing {
       }
 
       if let lastError {
-        throw lastError
+        if let ocrError = lastError as? OCRError {
+          throw ocrError
+        }
+        throw OCRError.recognitionFailed(lastError.localizedDescription)
       }
 
-      throw TranslationError.ocrUnavailable("No text was recognized in the selected region")
+      throw OCRError.noTextRecognized
     }.value
   }
 
@@ -144,7 +205,7 @@ final class OCRService: OCRRecognizing {
     displays: [OCRCaptureDisplay]
   ) -> OCRCaptureRectConversion? {
     var convertedRect = CGRect.null
-    var displayCount = 0
+    var displayIndices: [Int] = []
 
     for display in displays {
       let intersection = appKitRect.intersection(display.appKitFrame)
@@ -159,30 +220,44 @@ final class OCRService: OCRRecognizing {
         height: intersection.height
       )
       convertedRect = convertedRect.union(converted)
-      displayCount += 1
+      displayIndices.append(display.displayIndex)
     }
 
-    guard displayCount > 0, !convertedRect.isNull, !convertedRect.isEmpty else {
+    guard !displayIndices.isEmpty, !convertedRect.isNull, !convertedRect.isEmpty else {
       return nil
     }
 
-    return OCRCaptureRectConversion(rect: convertedRect.integral, displayCount: displayCount)
+    return OCRCaptureRectConversion(
+      rect: convertedRect.integral,
+      displayCount: displayIndices.count,
+      displayIndices: displayIndices
+    )
+  }
+
+  nonisolated static func captureError(from error: Error) -> OCRError {
+    let error = error as NSError
+    if error.domain == SCStreamErrorDomain,
+       error.code == SCStreamError.userDeclined.rawValue
+    {
+      return .screenRecordingPermissionRequired
+    }
+    return .captureFailed(error.localizedDescription)
   }
 
   private func captureImage(in rect: CGRect) async throws -> CGImage {
     guard #available(macOS 15.2, *) else {
-      throw TranslationError.ocrUnavailable("OCR capture requires macOS 15.2 or newer")
+      throw OCRError.unsupportedSystem
     }
 
     return try await withCheckedThrowingContinuation { continuation in
       SCScreenshotManager.captureImage(in: rect) { image, error in
         if let error {
-          continuation.resume(throwing: TranslationError.ocrUnavailable(error.localizedDescription))
+          continuation.resume(throwing: Self.captureError(from: error))
           return
         }
 
         guard let image else {
-          continuation.resume(throwing: TranslationError.ocrUnavailable("Screen capture returned no image"))
+          continuation.resume(throwing: OCRError.captureFailed("Screen capture returned no image"))
           return
         }
 
@@ -209,7 +284,7 @@ final class OCRService: OCRRecognizing {
     }
 
     guard let text = normalizedText(from: candidates).nonEmptyTrimmed else {
-      throw TranslationError.ocrUnavailable("No text was recognized in the selected region")
+      throw OCRError.noTextRecognized
     }
 
     let averageConfidence = candidates.isEmpty
@@ -219,12 +294,13 @@ final class OCRService: OCRRecognizing {
   }
 
   private static func currentCaptureDisplays() -> [OCRCaptureDisplay] {
-    NSScreen.screens.compactMap { screen in
+    NSScreen.screens.enumerated().compactMap { offset, screen in
       guard let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
         return nil
       }
 
       return OCRCaptureDisplay(
+        displayIndex: offset + 1,
         appKitFrame: screen.frame,
         displayBounds: CGDisplayBounds(CGDirectDisplayID(screenNumber.uint32Value))
       )

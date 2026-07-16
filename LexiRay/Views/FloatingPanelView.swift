@@ -123,8 +123,8 @@ struct FloatingPanelView: View {
       batchView(batch)
     case let .result(result):
       resultView(result)
-    case let .error(message):
-      errorView(message)
+    case let .error(error):
+      errorView(error)
     }
   }
 
@@ -194,6 +194,10 @@ struct FloatingPanelView: View {
 
       if controller.lastSelectionSource != .unavailable {
         PanelPill(title: controller.lastSelectionSource.displayName, systemName: sourceIcon, color: sourceColor)
+          .accessibilityElement(children: .combine)
+          .accessibilityLabel(controller.lastSelectionSource.displayName)
+          .accessibilityIdentifier("FloatingPanelSelectionSource")
+          .accessibilityValue(controller.selectionSourceAccessibilityValue)
       }
 
       Spacer(minLength: 8)
@@ -315,19 +319,29 @@ struct FloatingPanelView: View {
     .frame(maxWidth: .infinity, alignment: .topLeading)
   }
 
-  private func errorView(_ message: String) -> some View {
+  private func errorView(_ error: PanelErrorState) -> some View {
     VStack(alignment: .leading, spacing: 10) {
       HStack(spacing: 8) {
         Image(systemName: "exclamationmark.triangle.fill")
           .foregroundStyle(.orange)
-        Text("No Translation")
+        Text(error.title)
           .font(.body.weight(.medium))
+          .accessibilityIdentifier("FloatingPanelErrorTitle")
       }
 
-      Text(message)
+      Text(error.message)
         .font(.body)
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
+        .accessibilityIdentifier("FloatingPanelErrorMessage")
+
+      if let recoveryAction = error.recoveryAction {
+        Button(recoveryAction.title) {
+          controller.performPanelRecovery(recoveryAction)
+        }
+        .accessibilityIdentifier("FloatingPanelErrorRecoveryButton")
+        .accessibilityLabel(recoveryAction.title)
+      }
     }
     .frame(maxWidth: .infinity, alignment: .topLeading)
   }

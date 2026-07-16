@@ -7,6 +7,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-16
+
+### Fixed
+
+- Restored missing login-item registration after reinstall when Start at Login
+  was previously enabled, while continuing to respect macOS approval and disable
+  decisions.
+- Checked Screen Recording permission before opening OCR selection, added clear
+  recovery actions, and hardened real two-display OCR result handling.
+- Reported global hotkey conflicts independently and kept both the selection
+  translation popup and OCR shortcut wired during login startup.
+- Cleared the rectangular AppKit frame backing around the floating panel so its
+  transparent rounded corners and key-window outline render without stray edges.
+
 ## [0.4.0] - 2026-07-08
 
 ### Added

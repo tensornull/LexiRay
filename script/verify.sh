@@ -209,7 +209,10 @@ collect_targeted_scenarios() {
         add_scenario manual_resize_preserved
         add_scenario panel_visual_states
         ;;
-      *OCR*) add_scenario ocr_multi_display ;;
+      *OCR*)
+        add_scenario ocr_permission_gate
+        add_scenario ocr_multi_display
+        ;;
       *Provider*|*TranslationPipeline*|*HTTPClient*)
         add_scenario providers
         add_scenario streaming_growth
@@ -225,7 +228,7 @@ collect_targeted_scenarios() {
   done <"$CHANGED_FILES"
 
   LC_ALL=C sort -u "$SCENARIOS" -o "$SCENARIOS"
-  grep -Fxf "$AVAILABLE_SCENARIOS" "$SCENARIOS" >"$SCENARIOS.available" || true
+  grep -Fxf "$SCENARIOS" "$AVAILABLE_SCENARIOS" >"$SCENARIOS.available" || true
   mv "$SCENARIOS.available" "$SCENARIOS"
   if [[ ! -s "$SCENARIOS" ]]; then
     for scenario in launch panel_blank; do
@@ -243,6 +246,32 @@ make_contact_sheet() {
     return 1
   }
   printf '%s\n' "$output"
+}
+
+resolve_reusable_gui_artifact() {
+  local requested="${LEXIRAY_REUSE_GUI_ARTIFACT_DIR:-}"
+  local artifact_root requested_real required_file
+  [[ -n "$requested" ]] || return 1
+  [[ -d "$requested" && ! -L "$requested" ]] || {
+    echo "Reusable GUI artifact is missing or symlinked: $requested" >&2
+    return 2
+  }
+  artifact_root="$(cd "$ROOT_DIR/build/ui-artifacts" && pwd -P)"
+  requested_real="$(cd "$requested" && pwd -P)"
+  case "$requested_real/" in
+    "$artifact_root"/*) ;;
+    *)
+      echo "Reusable GUI artifact must stay below $artifact_root" >&2
+      return 2
+      ;;
+  esac
+  for required_file in gui-run.json results.txt gui-screenshots.sha256 contact-sheet.png; do
+    [[ -f "$requested_real/$required_file" && ! -L "$requested_real/$required_file" ]] || {
+      echo "Reusable GUI artifact is missing $required_file" >&2
+      return 2
+    }
+  done
+  printf '%s\n' "$requested_real"
 }
 
 run_targeted_gui() {
@@ -330,16 +359,29 @@ case "$MODE" in
   candidate)
     "$ROOT_DIR/script/context_lint.sh"
     run_script_tests
-    if [[ "${LEXIRAY_FORCE_VERIFY:-0}" != 1 ]] &&
+    if [[ -z "${LEXIRAY_REUSE_GUI_ARTIFACT_DIR:-}" ]] &&
+      [[ "${LEXIRAY_FORCE_VERIFY:-0}" != 1 ]] &&
       "$ROOT_DIR/script/acceptance_receipt.sh" require-automated-candidate >/dev/null 2>&1 &&
       "$ROOT_DIR/script/acceptance_receipt.sh" l3-valid >/dev/null 2>&1; then
       receipt="$("$ROOT_DIR/script/acceptance_receipt.sh" require-automated-candidate)"
       echo "VERIFY_REUSED[candidate]=$receipt"
       exit 0
     fi
+    reusable_gui_artifact=""
+    if (ui_required_for_changes || [[ "$changed_count" -eq 0 ]]) &&
+      [[ -n "${LEXIRAY_REUSE_GUI_ARTIFACT_DIR:-}" ]]; then
+      reusable_gui_artifact="$(resolve_reusable_gui_artifact)" || exit $?
+      "$ROOT_DIR/script/acceptance_receipt.sh" validate-gui-artifact \
+        "$APP_BUNDLE" "$reusable_gui_artifact" "$reusable_gui_artifact/contact-sheet.png"
+    fi
     run_l3
-    echo "--- Signed workspace candidate build"
-    "$ROOT_DIR/script/build_and_run.sh" build
+    if [[ -n "$reusable_gui_artifact" ]]; then
+      echo "--- Signed workspace candidate build reused with exact GUI-tested bundle"
+      /usr/bin/codesign --verify --deep --strict "$APP_BUNDLE"
+    else
+      echo "--- Signed workspace candidate build"
+      "$ROOT_DIR/script/build_and_run.sh" build
+    fi
     verify_source_unchanged "$fingerprint_before"
     echo "--- Acceptance-profile data safety (normal/failure/SIGINT/SIGKILL)"
     "$ROOT_DIR/script/test_acceptance_data_safety.sh" "$APP_BUNDLE"
@@ -349,12 +391,18 @@ case "$MODE" in
     contact_sheet=""
     if ui_required_for_changes || [[ "$changed_count" -eq 0 ]]; then
       gui_status=passed
-      artifact_dir="$ROOT_DIR/build/ui-artifacts/candidate-${fingerprint_before:0:12}-$(date '+%Y%m%d-%H%M%S')"
-      mkdir -p "$artifact_dir"
-      echo "--- GUI scenarios (full suite)"
-      LEXIRAY_UI_ARTIFACT_DIR="$artifact_dir" \
-        "$ROOT_DIR/script/ui/run.sh" --skip-build
-      contact_sheet="$(make_contact_sheet "$artifact_dir")"
+      if [[ -n "$reusable_gui_artifact" ]]; then
+        artifact_dir="$reusable_gui_artifact"
+        contact_sheet="$artifact_dir/contact-sheet.png"
+        echo "--- GUI scenarios reused from current-source full-suite evidence"
+      else
+        artifact_dir="$ROOT_DIR/build/ui-artifacts/candidate-${fingerprint_before:0:12}-$(date '+%Y%m%d-%H%M%S')"
+        mkdir -p "$artifact_dir"
+        echo "--- GUI scenarios (full suite)"
+        LEXIRAY_UI_ARTIFACT_DIR="$artifact_dir" \
+          "$ROOT_DIR/script/ui/run.sh" --skip-build
+        contact_sheet="$(make_contact_sheet "$artifact_dir")"
+      fi
       echo "GUI_ARTIFACT_DIR=$artifact_dir"
       echo "GUI_CONTACT_SHEET=$contact_sheet"
     fi

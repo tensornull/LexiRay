@@ -42,11 +42,11 @@ final class ControllerInteractionTests: XCTestCase {
 
     await waitUntil { !panel.events.isEmpty }
 
-    guard case let .error(message) = controller.panelState else {
+    guard case let .error(error) = controller.panelState else {
       return XCTFail("Expected error state")
     }
 
-    XCTAssertTrue(message.contains("Grant Accessibility permission"))
+    XCTAssertTrue(error.message.contains("Grant Accessibility permission"))
     XCTAssertEqual(permissions.promptRequests, [true])
     XCTAssertEqual(panel.events.first, .show(activating: false, repositioning: false))
   }
@@ -100,6 +100,63 @@ final class ControllerInteractionTests: XCTestCase {
       XCTFail("Expected retained batch content, got \(controller.panelState)")
     }
     XCTAssertEqual(panel.events.last, .show(activating: true, repositioning: false))
+  }
+
+  func testReSummonWithoutSelectionKeepsInFlightProviderBatchRunning() async {
+    let panel = MockFloatingPanelPresenter()
+    let defaults = makeScratchDefaults()
+    let settings = SettingsStore(
+      defaults: defaults,
+      providerFileStore: makeProviderFileStore(),
+      allowsMockProvider: true
+    )
+    enableOnly([.mock, .systemDictionary], in: settings)
+    let pipeline = TranslationPipeline(settings: settings, providerFactory: { configuration in
+      switch configuration.providerID {
+      case .mock:
+        DelayedAutoCopyProvider(providerID: .mock, delay: 0, translatedText: "first result")
+      case .systemDictionary:
+        DelayedAutoCopyProvider(
+          providerID: .systemDictionary,
+          delay: 250_000_000,
+          translatedText: "second result"
+        )
+      default:
+        DelayedAutoCopyProvider(providerID: configuration.providerID, delay: 0, translatedText: "unused")
+      }
+    })
+    let controller = LexiRayController(
+      settings: settings,
+      selectionService: ImmediateSelectionReader(
+        result: SelectionReadResult(text: nil, source: .unavailable, failureReason: .copyFailed)
+      ),
+      permissionChecker: MockPermissionChecker(isAccessibilityTrusted: true),
+      floatingPanelFactory: { _ in panel },
+      pipeline: pipeline,
+      historyStore: makeHistoryStore()
+    )
+
+    controller.translateManualText("keep streaming")
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      let first = batch.entries.first(where: { $0.providerID == .mock })
+      let second = batch.entries.first(where: { $0.providerID == .systemDictionary })
+      return first?.result?.translatedText == "first result" && second?.result == nil
+    }
+
+    let eventsBefore = panel.events.count
+    controller.translateCurrentSelection()
+    await waitUntil { panel.events.count > eventsBefore }
+
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      return batch.entries.first(where: { $0.providerID == .systemDictionary })?
+        .result?.translatedText == "second result"
+    }
   }
 
   func testReSummonWithoutSelectionAfterRetentionWindowShowsBlankComposer() async {
@@ -306,15 +363,15 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertFalse(selectionReader.didStart)
     XCTAssertTrue(permissions.promptRequests.isEmpty)
     XCTAssertEqual(panel.events.first, .show(activating: false, repositioning: false))
-    guard case let .error(message) = controller.panelState else {
+    guard case let .error(error) = controller.panelState else {
       return XCTFail("Expected error state")
     }
-    XCTAssertTrue(message.contains("unstable app identity"))
+    XCTAssertTrue(error.message.contains("unstable app identity"))
   }
 
   func testOCRSelectionRecognizesAndTranslatesRegion() async {
     let panel = MockFloatingPanelPresenter()
-    let ocrService = MockOCRService(result: .success("screen text"))
+    let ocrService = MockOCRService(result: .success("screen text"), captureDisplayIndices: [2])
     let overlay = MockOCRSelectionOverlay()
     let controller = makeController(
       selectionReader: ImmediateSelectionReader(result: .unavailable),
@@ -341,7 +398,63 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(ocrService.capturedRects, [rect])
     XCTAssertEqual(controller.lastSelectionSource, .ocr)
     XCTAssertEqual(controller.panelSourceText, "screen text")
+    XCTAssertEqual(controller.lastOCRCaptureDisplayIndices, [2])
+    XCTAssertEqual(controller.selectionSourceAccessibilityValue, "OCR capture displays: 2")
     XCTAssertEqual(panel.events.last, .show(activating: false, repositioning: false))
+  }
+
+  func testOCRMissingPermissionDoesNotShowOverlay() {
+    let panel = MockFloatingPanelPresenter()
+    let permissions = MockPermissionChecker(
+      isAccessibilityTrusted: true,
+      isScreenCaptureTrusted: false,
+      screenCaptureRequestResult: false
+    )
+    let overlay = MockOCRSelectionOverlay()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      permissions: permissions,
+      ocrSelectionOverlay: overlay
+    )
+
+    controller.translateOCRRegion()
+
+    XCTAssertEqual(overlay.beginCount, 0)
+    XCTAssertEqual(permissions.screenCaptureRequestCount, 1)
+    guard case let .error(error) = controller.panelState else {
+      return XCTFail("Expected permission error")
+    }
+    XCTAssertEqual(error.recoveryAction, .openScreenRecordingSettings)
+    XCTAssertEqual(panel.events.last, .show(activating: false, repositioning: false))
+  }
+
+  func testOCRPermissionGrantedRequiresFreshTrigger() {
+    let panel = MockFloatingPanelPresenter()
+    let permissions = MockPermissionChecker(
+      isAccessibilityTrusted: true,
+      isScreenCaptureTrusted: false,
+      screenCaptureRequestResult: true
+    )
+    let overlay = MockOCRSelectionOverlay()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      permissions: permissions,
+      ocrSelectionOverlay: overlay
+    )
+
+    controller.translateOCRRegion()
+
+    XCTAssertEqual(overlay.beginCount, 0)
+    guard case let .error(error) = controller.panelState else {
+      return XCTFail("Expected granted guidance")
+    }
+    XCTAssertEqual(error.title, "Screen Recording Enabled")
+    XCTAssertTrue(error.message.contains("again"))
+
+    controller.translateOCRRegion()
+    XCTAssertEqual(overlay.beginCount, 1)
   }
 
   func testOCRSelectionCancelHidesPanel() {
@@ -364,7 +477,7 @@ final class ControllerInteractionTests: XCTestCase {
 
   func testOCRFailureShowsError() async {
     let panel = MockFloatingPanelPresenter()
-    let ocrService = MockOCRService(result: .failure(TranslationError.ocrUnavailable("No text was recognized")))
+    let ocrService = MockOCRService(result: .failure(OCRError.noTextRecognized))
     let overlay = MockOCRSelectionOverlay()
     let controller = makeController(
       selectionReader: ImmediateSelectionReader(result: .unavailable),
@@ -379,14 +492,131 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertTrue(panel.events.isEmpty)
 
     await waitUntil {
-      guard case let .error(message) = controller.panelState else {
+      guard case let .error(error) = controller.panelState else {
         return false
       }
-      return message.contains("No text was recognized")
+      return error.message.contains("No text was recognized")
     }
 
     XCTAssertEqual(panel.hideCount, 1)
     XCTAssertEqual(panel.events.last, .show(activating: false, repositioning: false))
+    guard case let .error(error) = controller.panelState else {
+      return XCTFail("Expected OCR error")
+    }
+    XCTAssertEqual(error.recoveryAction, .reselectOCRRegion)
+  }
+
+  func testUnsupportedOCRDoesNotOfferASelectionRetryLoop() async {
+    let panel = MockFloatingPanelPresenter()
+    let ocrService = MockOCRService(result: .failure(OCRError.unsupportedSystem))
+    let overlay = MockOCRSelectionOverlay()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      ocrService: ocrService,
+      ocrSelectionOverlay: overlay
+    )
+
+    controller.translateOCRRegion()
+    overlay.complete(with: CGRect(x: 10, y: 20, width: 120, height: 40))
+
+    await waitUntil {
+      guard case let .error(error) = controller.panelState else {
+        return false
+      }
+      return error.title == "OCR Unavailable"
+    }
+
+    guard case let .error(error) = controller.panelState else {
+      return XCTFail("Expected unsupported OCR error")
+    }
+    XCTAssertNil(error.recoveryAction)
+  }
+
+  func testOCRPermissionLostAfterSelectionOffersSystemSettings() async {
+    let panel = MockFloatingPanelPresenter()
+    let ocrService = MockOCRService(result: .failure(OCRError.screenRecordingPermissionRequired))
+    let overlay = MockOCRSelectionOverlay()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      ocrService: ocrService,
+      ocrSelectionOverlay: overlay
+    )
+
+    controller.translateOCRRegion()
+    overlay.complete(with: CGRect(x: 10, y: 20, width: 120, height: 40))
+
+    await waitUntil {
+      guard case let .error(error) = controller.panelState else {
+        return false
+      }
+      return error.recoveryAction == .openScreenRecordingSettings
+    }
+
+    guard case let .error(error) = controller.panelState else {
+      return XCTFail("Expected permission error")
+    }
+    XCTAssertEqual(error.title, "Screen Recording Required")
+  }
+
+  func testCancelledOCRDoesNotOverwriteNewSelectionState() async {
+    let panel = MockFloatingPanelPresenter()
+    let ocrService = SuspendedOCRService()
+    let overlay = MockOCRSelectionOverlay()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      ocrService: ocrService,
+      ocrSelectionOverlay: overlay
+    )
+
+    controller.translateOCRRegion()
+    overlay.complete(with: CGRect(x: 10, y: 20, width: 120, height: 40))
+    await waitUntil { ocrService.didStart }
+
+    controller.translateOCRRegion()
+    try? await Task.sleep(nanoseconds: 50_000_000)
+
+    guard case let .loading(state) = controller.panelState else {
+      return XCTFail("Cancelled OCR replaced the new selection state")
+    }
+    XCTAssertEqual(state.title, "Drag to select an OCR region...")
+    XCTAssertEqual(overlay.beginCount, 2)
+  }
+
+  func testSelectionWorkflowClosesActiveOCROverlayAndInvalidatesItsCompletion() async {
+    let selectionReader = BlockingSelectionReader()
+    let panel = MockFloatingPanelPresenter()
+    let ocrService = MockOCRService(result: .success("stale OCR text"))
+    let overlay = MockOCRSelectionOverlay()
+    let controller = makeController(
+      selectionReader: selectionReader,
+      panel: panel,
+      ocrService: ocrService,
+      ocrSelectionOverlay: overlay
+    )
+
+    controller.translateOCRRegion()
+    XCTAssertTrue(overlay.hasActiveSelection)
+
+    controller.translateCurrentSelection()
+
+    XCTAssertEqual(overlay.closeCount, 1)
+    XCTAssertFalse(overlay.hasActiveSelection)
+    await waitUntil { selectionReader.didStart }
+    overlay.complete(with: CGRect(x: 10, y: 20, width: 120, height: 40))
+    selectionReader.resume(with: SelectionReadResult(text: "fresh selection", source: .accessibility))
+
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      return batch.request.text == "fresh selection"
+    }
+
+    XCTAssertTrue(ocrService.capturedRects.isEmpty)
+    XCTAssertEqual(controller.lastSelectionSource, .accessibility)
   }
 
   func testDuplicateAppIdentityBlocksOCRBeforeOverlayStarts() {
@@ -406,10 +636,10 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(overlay.beginCount, 0)
     XCTAssertEqual(panel.hideCount, 0)
     XCTAssertEqual(panel.events.first, .show(activating: false, repositioning: false))
-    guard case let .error(message) = controller.panelState else {
+    guard case let .error(error) = controller.panelState else {
       return XCTFail("Expected error state")
     }
-    XCTAssertTrue(message.contains("Multiple LexiRay copies"))
+    XCTAssertTrue(error.message.contains("Multiple LexiRay copies"))
   }
 
   func testPinnedAndCloseActionsReachPanelPresenter() {
@@ -1808,6 +2038,53 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(hotKeys.registrations.last?.ocrHotKey, .defaultOCR)
   }
 
+  func testHotKeyRegistrationReportsPartialConflict() {
+    let panel = MockFloatingPanelPresenter()
+    let hotKeys = MockHotKeyService(
+      results: HotKeyRegistrationResults(translate: .registered, ocr: .conflict)
+    )
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      hotKeyService: hotKeys
+    )
+
+    controller.startForTesting()
+
+    XCTAssertEqual(controller.hotKeyRegistrationResults?.translate, .registered)
+    XCTAssertEqual(controller.hotKeyRegistrationResults?.ocr, .conflict)
+    XCTAssertEqual(hotKeys.registrations.count, 1)
+  }
+
+  func testFreshStartWiresBothHotKeyActions() async {
+    let panel = MockFloatingPanelPresenter()
+    let hotKeys = MockHotKeyService()
+    let overlay = MockOCRSelectionOverlay()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(
+        result: SelectionReadResult(text: "startup selection", source: .accessibility)
+      ),
+      panel: panel,
+      hotKeyService: hotKeys,
+      ocrSelectionOverlay: overlay
+    )
+
+    controller.startForTesting()
+    hotKeys.triggerTranslate()
+
+    await waitUntil {
+      guard case let .batch(batch) = controller.panelState else {
+        return false
+      }
+      return batch.request.text == "startup selection"
+    }
+
+    hotKeys.triggerOCR()
+
+    XCTAssertEqual(hotKeys.registrations.count, 1)
+    XCTAssertEqual(overlay.beginCount, 1)
+  }
+
   func testAppRuntimeDetectsXCTest() {
     XCTAssertTrue(AppRuntime.isRunningTests)
   }
@@ -2245,17 +2522,35 @@ private final class MockFloatingPanelPresenter: FloatingPanelPresenting {
 @MainActor
 private final class MockHotKeyService: HotKeyRegistering {
   private(set) var registrations: [Registration] = []
+  private let results: HotKeyRegistrationResults
+  private var translateAction: (@MainActor () -> Void)?
+  private var ocrAction: (@MainActor () -> Void)?
+
+  init(results: HotKeyRegistrationResults = .registered) {
+    self.results = results
+  }
 
   func registerDefaultHotKeys(
     translateHotKey: HotKeyConfiguration,
     ocrHotKey: HotKeyConfiguration,
-    translate _: @escaping @MainActor () -> Void,
-    ocr _: @escaping @MainActor () -> Void
-  ) {
+    translate: @escaping @MainActor () -> Void,
+    ocr: @escaping @MainActor () -> Void
+  ) -> HotKeyRegistrationResults {
     registrations.append(Registration(translateHotKey: translateHotKey, ocrHotKey: ocrHotKey))
+    translateAction = translate
+    ocrAction = ocr
+    return results
   }
 
   func unregister() {}
+
+  func triggerTranslate() {
+    translateAction?()
+  }
+
+  func triggerOCR() {
+    ocrAction?()
+  }
 
   struct Registration {
     let translateHotKey: HotKeyConfiguration
@@ -2265,17 +2560,32 @@ private final class MockHotKeyService: HotKeyRegistering {
 
 private final class MockPermissionChecker: PermissionChecking {
   let isAccessibilityTrusted: Bool
-  let isScreenCaptureTrusted: Bool
+  private(set) var isScreenCaptureTrusted: Bool
+  private let screenCaptureRequestResult: Bool
   private(set) var promptRequests: [Bool] = []
+  private(set) var screenCaptureRequestCount = 0
 
-  init(isAccessibilityTrusted: Bool, isScreenCaptureTrusted: Bool = false) {
+  init(
+    isAccessibilityTrusted: Bool,
+    isScreenCaptureTrusted: Bool = true,
+    screenCaptureRequestResult: Bool? = nil
+  ) {
     self.isAccessibilityTrusted = isAccessibilityTrusted
     self.isScreenCaptureTrusted = isScreenCaptureTrusted
+    self.screenCaptureRequestResult = screenCaptureRequestResult ?? isScreenCaptureTrusted
   }
 
   func requestAccessibilityIfNeeded(prompt: Bool) -> Bool {
     promptRequests.append(prompt)
     return isAccessibilityTrusted
+  }
+
+  func requestScreenCaptureIfNeeded() -> Bool {
+    screenCaptureRequestCount += 1
+    if screenCaptureRequestResult {
+      isScreenCaptureTrusted = true
+    }
+    return screenCaptureRequestResult
   }
 }
 
@@ -2302,15 +2612,31 @@ private struct MockAppIdentityChecker: AppIdentityChecking {
 @MainActor
 private final class MockOCRService: OCRRecognizing {
   private let result: Result<String, Error>
+  private let captureDisplayIndices: [Int]
   private(set) var capturedRects: [CGRect] = []
 
-  init(result: Result<String, Error>) {
+  init(result: Result<String, Error>, captureDisplayIndices: [Int] = [1]) {
     self.result = result
+    self.captureDisplayIndices = captureDisplayIndices
   }
 
-  func captureAndRecognizeText(in rect: CGRect) async throws -> String {
+  func captureAndRecognizeText(in rect: CGRect) async throws -> OCRRecognitionResult {
     capturedRects.append(rect)
-    return try result.get()
+    return try OCRRecognitionResult(
+      text: result.get(),
+      captureDisplayIndices: captureDisplayIndices
+    )
+  }
+}
+
+@MainActor
+private final class SuspendedOCRService: OCRRecognizing {
+  private(set) var didStart = false
+
+  func captureAndRecognizeText(in _: CGRect) async throws -> OCRRecognitionResult {
+    didStart = true
+    try await Task.sleep(nanoseconds: 10_000_000_000)
+    return OCRRecognitionResult(text: "stale OCR text", captureDisplayIndices: [1])
   }
 }
 
@@ -2320,18 +2646,27 @@ private final class MockOCRSelectionOverlay: OCRRegionSelecting {
   private(set) var closeCount = 0
   private var completion: ((CGRect?) -> Void)?
 
+  var hasActiveSelection: Bool {
+    completion != nil
+  }
+
   func beginSelection(onComplete: @escaping (CGRect?) -> Void) {
     beginCount += 1
     completion = onComplete
   }
 
   func close() {
+    guard completion != nil else {
+      return
+    }
     closeCount += 1
+    completion = nil
   }
 
   func complete(with rect: CGRect?) {
-    completion?(rect)
+    let currentCompletion = completion
     completion = nil
+    currentCompletion?(rect)
   }
 }
 

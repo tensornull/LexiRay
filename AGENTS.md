@@ -33,7 +33,9 @@
 
 1. Run `./script/preflight.sh change` and define a concrete acceptance matrix.
 2. Implement the smallest complete change in small edit batches.
-3. Run `./script/verify.sh changed` after each batch.
+3. During debugging, run the narrowest affected tests and explicit GUI
+   scenarios. Run `./script/verify.sh changed` only after a stable edit batch;
+   do not use it as the reproduction loop.
 4. Run `./script/verify.sh candidate` when the change is ready.
 5. For app-binary changes, install only through the canonical install skill.
 6. Use Computer Use on `/Applications/LexiRay.app` with the same acceptance
@@ -43,6 +45,27 @@
 Use evidence states exactly: `compiled`, `unit verified`, `GUI verified`,
 `installed verified`, `Computer Use verified`, and `released verified`.
 Never replace missing evidence with “perfect”, “done”, or “fully fixed”.
+
+### Verification Loop Discipline
+
+- Full suites are gates, not debuggers. Reproduce with the smallest unit/GUI scenario and inspect its screenshot first.
+- Before `verify.sh changed`, inspect its selected scenarios. If a `script/ui/`,
+  project, or harness edit expands it to the full suite, iterate with explicit
+  `script/ui/run.sh <scenario>...` and run `changed` once when stable.
+- Complete P0/P1 adversarial review before candidate, install, or Computer Use,
+  then freeze fingerprinted inputs; a source-changing review means not final.
+- Run at most one full automated GUI suite per fingerprint. If `changed` already
+  covers the exact candidate bundle, candidate must reuse it through
+  `LEXIRAY_REUSE_GUI_ARTIFACT_DIR`; rerun only after a recorded rejection.
+- Computer Use is resumable per scenario. Read the fingerprint, install
+  transaction, and sealed captures, then execute only missing or failed states;
+  an interruption never justifies reinstalling or recapturing passed states.
+- Keep fixture and acceptance-PID cleanup separate. While the receipt PID is
+  live, write and inspect the manifest, mark Computer Use, and require handoff;
+  only then quit it, even when cleanup is requested.
+- Make transient states survive capture and confirm AX semantics; retry only that scenario.
+- On a GUI defect, stop broad gates and return to the failing scenario. Call a
+  run final only after freeze/review, naming its layer and remaining matrix.
 
 ## Data and Credential Safety
 
