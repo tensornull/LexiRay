@@ -413,8 +413,12 @@ select {
   display: grid;
   place-items: center;
   border-radius: 4px;
-  background: var(--accent);
+  background: rgba(255, 255, 255, 0.12);
   color: white;
+}
+
+.check-row span.is-checked {
+  background: var(--accent);
 }
 
 .recent-result {

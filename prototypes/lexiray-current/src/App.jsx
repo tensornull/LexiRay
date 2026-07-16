@@ -187,7 +187,7 @@ function Dashboard({
         </div>
         <label className="check-row">
           <input type="checkbox" checked={autoSwitch} onChange={(event) => setAutoSwitch(event.target.checked)} />
-          <span><Check size={13} weight="bold" /></span>
+          <span className={autoSwitch ? "is-checked" : ""}>{autoSwitch ? <Check size={13} weight="bold" /> : null}</span>
           Auto switch
         </label>
       </SectionCard>
