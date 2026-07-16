@@ -214,7 +214,7 @@ function Providers({ providers, setProviders }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const addProvider = (catalogItem) => {
     const id = `${catalogItem.kind.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
-    setProviders((items) => [...items, { ...catalogItem, id, enabled: true, builtIn: false, apiKey: "" }]);
+    setProviders((items) => [...items, { ...catalogItem, id, enabled: true, builtIn: false }]);
     setMenuOpen(false);
   };
 
@@ -282,8 +282,8 @@ function Providers({ providers, setProviders }) {
               <>
                 <label>Base URL<input value={provider.baseURL} onChange={(event) => updateProvider(provider.id, { baseURL: event.target.value })} /></label>
                 <label>Model<input value={provider.model} onChange={(event) => updateProvider(provider.id, { model: event.target.value })} /></label>
-                <label>API key<input type="password" placeholder="Not saved in this prototype" value={provider.apiKey} onChange={(event) => updateProvider(provider.id, { apiKey: event.target.value })} /></label>
-                <p className={`key-state ${provider.apiKey ? "saved" : ""}`}>{provider.apiKey ? "Key saved for this session" : "No key"}</p>
+                <label>API key<input type="password" value="mock-provider-key" readOnly aria-readonly="true" /></label>
+                <p className="key-state saved">Mock key configured</p>
               </>
             )}
           </section>
@@ -294,21 +294,24 @@ function Providers({ providers, setProviders }) {
 }
 
 function Settings({ settings, setSettings }) {
+  const [notice, setNotice] = useState("");
   const patch = (value) => setSettings((current) => ({ ...current, ...value }));
+  const reportMockAction = (message) => setNotice(message);
   const hotKeyStatusDetail = (status) => ({
     registered: "Registered",
     conflict: "Shortcut is already in use.",
     invalid: "Shortcut is invalid.",
     systemError: "Registration failed.",
   })[status];
-  const hotKeyRow = (title, shortcut, status, testId) => (
+  const hotKeyRow = (title, shortcut, status, testId, onReset) => (
     <div className="setting-stack">
-      <div className="setting-line"><span>{title}</span><button className="button hotkey">{shortcut}</button><button className="button compact">Reset</button></div>
+      <div className="setting-line"><span>{title}</span><button className="button hotkey" onClick={() => reportMockAction(`${title} shortcut editor opened (mock).`)}>{shortcut}</button><button className="button compact" onClick={onReset}>Reset</button></div>
       <p className={`setting-detail ${status === "registered" ? "" : "warning"}`} data-testid={testId}>{hotKeyStatusDetail(status)}</p>
     </div>
   );
   return (
     <div className="page settings-page" data-testid="settings-page">
+      {notice ? <p className="setting-detail" role="status" data-testid="settings-action-status">{notice}</p> : null}
       <SectionCard title="App" icon={AppWindow}>
         <Toggle label="Show menu bar icon" checked={settings.menuBar} onChange={(menuBar) => patch({ menuBar })} />
         <Toggle label="Start at login" checked={settings.startAtLogin} onChange={(startAtLogin) => patch({ startAtLogin })} />
@@ -320,9 +323,9 @@ function Settings({ settings, setSettings }) {
       </SectionCard>
 
       <SectionCard title="Hotkeys" icon={Keyboard}>
-        {hotKeyRow("Translate selection", "Control-Option-Shift-A", settings.selectionHotKeyStatus, "selection-hotkey-status")}
-        {hotKeyRow("OCR region", "Control-Option-Shift-S", settings.ocrHotKeyStatus, "ocr-hotkey-status")}
-        <button className="button">Restore Default Hotkeys</button>
+        {hotKeyRow("Translate selection", "Control-Option-Shift-A", settings.selectionHotKeyStatus, "selection-hotkey-status", () => { patch({ selectionHotKeyStatus: "registered" }); reportMockAction("Selection hotkey reset."); })}
+        {hotKeyRow("OCR region", "Control-Option-Shift-S", settings.ocrHotKeyStatus, "ocr-hotkey-status", () => { patch({ ocrHotKeyStatus: "registered" }); reportMockAction("OCR hotkey reset."); })}
+        <button className="button" onClick={() => { patch({ selectionHotKeyStatus: "registered", ocrHotKeyStatus: "registered" }); reportMockAction("Default hotkeys restored."); }}>Restore Default Hotkeys</button>
       </SectionCard>
 
       <SectionCard title="Floating Panel" icon={AppWindow}>
@@ -336,7 +339,7 @@ function Settings({ settings, setSettings }) {
       <SectionCard title="App Identity" icon={ShieldCheck}>
         <div className="identity-status"><CheckCircle size={20} weight="fill" /><div><strong>Stable</strong><p>LexiRay Local Development</p></div></div>
         <dl><div><dt>Authority</dt><dd>LexiRay Local Development</dd></div><div><dt>Path</dt><dd>/Applications/LexiRay.app</dd></div></dl>
-        <div className="button-row"><button className="button">Open Install Location</button><button className="button">Open Privacy Settings</button><button className="button">Copy Diagnostics</button></div>
+        <div className="button-row"><button className="button" onClick={() => reportMockAction("Install location opened (mock).")}>Open Install Location</button><button className="button" onClick={() => reportMockAction("Privacy settings opened (mock).")}>Open Privacy Settings</button><button className="button" onClick={() => reportMockAction("Mock diagnostics copied.")}>Copy Diagnostics</button></div>
       </SectionCard>
 
       <SectionCard title="Permissions" icon={ShieldCheck}>
@@ -344,12 +347,12 @@ function Settings({ settings, setSettings }) {
           ["Accessibility", true],
           ["Screen Recording", true],
           ["Automation", false],
-        ].map(([name, granted]) => <div className="permission-line" key={name}><span>{name}</span><Pill tone={granted ? "success" : "warning"}>{granted ? "Granted" : "Not granted"}</Pill>{!granted ? <button className="button compact">Open</button> : null}</div>)}
+        ].map(([name, granted]) => <div className="permission-line" key={name}><span>{name}</span><Pill tone={granted ? "success" : "warning"}>{granted ? "Granted" : "Not granted"}</Pill>{!granted ? <button className="button compact" onClick={() => reportMockAction(`${name} settings opened (mock).`)}>Open</button> : null}</div>)}
       </SectionCard>
 
       <SectionCard title="Advanced" icon={Wrench}>
         <label className="setting-line"><span>Last source</span><select><option>Manual</option><option>Selection</option><option>OCR</option></select></label>
-        <button className="button">Reset Provider Settings</button>
+        <button className="button" onClick={() => reportMockAction("Provider settings reset (mock).")}>Reset Provider Settings</button>
       </SectionCard>
     </div>
   );
@@ -378,8 +381,20 @@ function FloatingPanel({
   const [toast, setToast] = useState("");
   const [historyIndex, setHistoryIndex] = useState(null);
   const translationTimer = useRef(null);
+  const toastTimer = useRef(null);
 
-  useEffect(() => () => window.clearTimeout(translationTimer.current), []);
+  useEffect(() => () => {
+    window.clearTimeout(translationTimer.current);
+    window.clearTimeout(toastTimer.current);
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      window.clearTimeout(toastTimer.current);
+      toastTimer.current = null;
+      setToast("");
+    }
+  }, [open]);
 
   if (!open) return null;
 
@@ -426,7 +441,8 @@ function FloatingPanel({
       // product feedback remains testable without persisting any user data.
     }
     setToast("Copied");
-    window.setTimeout(() => setToast(""), 1300);
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(""), 1300);
   };
 
   return (

@@ -2,32 +2,32 @@
 
 ## Comparison Target
 
-- Source visual truth: `/Users/xmx/workspace/LexiRay/build/ui-artifacts/candidate-a4d00eada15d-20260712-205225/contact-sheet.png`
+- Source visual truth: `build/ui-artifacts/candidate-a4d00eada15d-20260712-205225/contact-sheet.png`
 - Source screens:
-  - `/Users/xmx/workspace/LexiRay/build/ui-artifacts/candidate-a4d00eada15d-20260712-205225/dashboard.png`
-  - `/Users/xmx/workspace/LexiRay/build/ui-artifacts/candidate-a4d00eada15d-20260712-205225/providers.png`
-  - `/Users/xmx/workspace/LexiRay/build/ui-artifacts/candidate-a4d00eada15d-20260712-205225/settings-app-identity.png`
-  - `/Users/xmx/workspace/LexiRay/build/ui-artifacts/candidate-a4d00eada15d-20260712-205225/language-english-to-simplified-chinese.png`
+  - `build/ui-artifacts/candidate-a4d00eada15d-20260712-205225/dashboard.png`
+  - `build/ui-artifacts/candidate-a4d00eada15d-20260712-205225/providers.png`
+  - `build/ui-artifacts/candidate-a4d00eada15d-20260712-205225/settings-app-identity.png`
+  - `build/ui-artifacts/candidate-a4d00eada15d-20260712-205225/language-english-to-simplified-chinese.png`
 - Implementation screenshots:
-  - `/Users/xmx/workspace/LexiRay/build/prototype-qa/dashboard-final.png`
-  - `/Users/xmx/workspace/LexiRay/build/prototype-qa/providers-final.png`
-  - `/Users/xmx/workspace/LexiRay/build/prototype-qa/settings-final.png`
-  - `/Users/xmx/workspace/LexiRay/build/prototype-qa/panel-final.png`
+  - `build/prototype-qa/dashboard-final.png`
+  - `build/prototype-qa/providers-final.png`
+  - `build/prototype-qa/settings-final.png`
+  - `build/prototype-qa/panel-final.png`
 - Viewport: `1271 × 672` for main-window comparisons; `660px` panel width for the focused floating-panel comparison.
 - State: dark appearance, key main window, System Dictionary enabled, dashboard idle, Providers selected, Settings scrolled to Hotkeys/Floating Panel/History/App Identity, and a focused translated floating panel.
 
 ## Full-view Comparison Evidence
 
-- Dashboard: `/Users/xmx/workspace/LexiRay/build/prototype-qa/dashboard-comparison.png`
-- Providers: `/Users/xmx/workspace/LexiRay/build/prototype-qa/providers-comparison.png`
-- Settings: `/Users/xmx/workspace/LexiRay/build/prototype-qa/settings-comparison.png`
+- Dashboard: `build/prototype-qa/dashboard-comparison.png`
+- Providers: `build/prototype-qa/providers-comparison.png`
+- Settings: `build/prototype-qa/settings-comparison.png`
 
 The paired images place source on the left and prototype on the right at the same normalized viewport. Window bounds, titlebar height, sidebar width, content padding, card grid, section order, card radii, and dark semantic surfaces are aligned.
 
 ## Focused Comparison Evidence
 
-- Floating panel: `/Users/xmx/workspace/LexiRay/build/prototype-qa/panel-comparison.png`
-- App Identity region: `/Users/xmx/workspace/LexiRay/build/prototype-qa/settings-identity-comparison.png`
+- Floating panel: `build/prototype-qa/panel-comparison.png`
+- App Identity region: `build/prototype-qa/settings-identity-comparison.png`
 
 Focused comparison was needed because the panel toolbar, language controls, result actions, and identity metadata are too small to judge reliably in the main-window full views.
 
@@ -59,10 +59,10 @@ Fixes made:
 
 Post-fix evidence:
 
-- `/Users/xmx/workspace/LexiRay/build/prototype-qa/providers-comparison.png`
-- `/Users/xmx/workspace/LexiRay/build/prototype-qa/settings-comparison.png`
-- `/Users/xmx/workspace/LexiRay/build/prototype-qa/panel-comparison.png`
-- `/Users/xmx/workspace/LexiRay/build/prototype-qa/panel-compact-900-final.png`
+- `build/prototype-qa/providers-comparison.png`
+- `build/prototype-qa/settings-comparison.png`
+- `build/prototype-qa/panel-comparison.png`
+- `build/prototype-qa/panel-compact-900-final.png`
 
 ### Iteration 2 — passed
 
