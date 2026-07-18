@@ -17,12 +17,15 @@ Do not use `codex/<task>` or another agent-specific prefix.
 - `dev` task PRs must run the `build-test` check from `.github/workflows/ci.yml`;
   configure it as required when branch protection is available.
 - `main` must require CI and conversation resolution, but CodeQL remains
-  scheduled/manual and non-blocking. `required_linear_history` must be disabled
-  so the release PR can create its required merge commit.
-- `script/release.sh doctor` reads the effective branch rules and fails closed
-  when they cannot be verified or still require linear history. Changing GitHub
-  protection is an explicit repository administration action, not part of
-  ordinary local implementation.
+  scheduled/manual and non-blocking. Keep `required_linear_history` enabled
+  except for the shortest possible release-merge window; preserve all other
+  protection, restore linear history immediately after the merge, and verify
+  the restored state.
+- `script/release.sh doctor` verifies that the release tag points at a
+  two-parent `dev`-to-`main` merge commit. It must not require branch protection
+  to remain weakened after that merge. Changing GitHub protection is an
+  explicit repository administration action, not part of ordinary local
+  implementation.
 
 ## Release
 

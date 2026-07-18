@@ -341,8 +341,12 @@ doctor() {
   local dirty
   local plist_build
   local plist_version
+  local remote_dev
   local remote_main
-  local applicable_rules
+  local release_commit
+  local release_parent_one=""
+  local release_parent_two=""
+  local release_extra_parent=""
   local workflow_state
 
   require_command git
@@ -370,10 +374,21 @@ doctor() {
 
   remote_main="$(gh api "repos/$REPOSITORY/commits/main" --jq '.sha' 2>/dev/null || true)"
   [[ -n "$remote_main" ]] || die "Could not resolve $REMOTE/main."
+  remote_dev="$(gh api "repos/$REPOSITORY/commits/dev" --jq '.sha' 2>/dev/null || true)"
+  [[ -n "$remote_dev" ]] || die "Could not resolve $REMOTE/dev."
   [[ "$TAG_COMMIT" == "$remote_main" ]] ||
     die "$TAG must point at $REMOTE/main before publication ($TAG_COMMIT != $remote_main)."
   [[ "$SOURCE_COMMIT" == "$TAG_COMMIT" ]] ||
     die "Local HEAD must match $TAG ($SOURCE_COMMIT != $TAG_COMMIT)."
+
+  release_commit="$(git rev-list --parents -n 1 "$TAG_COMMIT")"
+  read -r release_commit release_parent_one release_parent_two release_extra_parent \
+    <<<"$release_commit"
+  [[ "$release_commit" == "$TAG_COMMIT" && -n "$release_parent_one" &&
+    -n "$release_parent_two" && -z "$release_extra_parent" ]] ||
+    die "$TAG must point at a two-parent dev-to-main release merge commit."
+  [[ "$release_parent_two" == "$remote_dev" || "$TAG_COMMIT" == "$remote_dev" ]] ||
+    die "$TAG merge second parent must match $REMOTE/dev, or dev must already be synced to $TAG."
 
   branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
   if [[ -n "$branch" && "$branch" != "main" ]]; then
@@ -396,13 +411,6 @@ doctor() {
   STATE_KEY="${TAG}-${SOURCE_COMMIT:0:12}"
   STATE_FILE="$(state_path_for_commit "$SOURCE_COMMIT")"
   acquire_publish_lock
-  if ! applicable_rules="$(
-    gh api "repos/$REPOSITORY/rules/branches/main" --jq '.[].type' 2>/dev/null
-  )"; then
-    die "Could not verify the effective GitHub rules for main; refusing to assume merge commits are allowed."
-  fi
-  ! /usr/bin/grep -Fx required_linear_history <<<"$applicable_rules" >/dev/null ||
-    die "main requires linear history, which blocks the required dev-to-main merge commit."
   require_successful_workflow ci.yml CI
   CI_RUN_ID="$GATE_RUN_ID"
   CI_RUN_URL="$GATE_RUN_URL"
