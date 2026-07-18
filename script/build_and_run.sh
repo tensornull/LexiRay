@@ -5,6 +5,7 @@ MODE="${1:-run}"
 APP_NAME="LexiRay"
 BUNDLE_ID="io.github.tensornull.lexiray"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/script/development_identity.sh"
 DERIVED_DATA="$ROOT_DIR/build/DerivedData"
 PROJECT="$ROOT_DIR/LexiRay.xcodeproj"
 BUILT_APP_BUNDLE="$DERIVED_DATA/Build/Products/Debug/$APP_NAME.app"
@@ -13,7 +14,7 @@ BUILD_FINGERPRINT_FILE="$BUILT_APP_BUNDLE.source-fingerprint"
 # Installing into /Applications is a separate, receipt-gated workflow.
 APP_BUNDLE="$BUILT_APP_BUNDLE"
 APP_EXECUTABLE="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
-CODE_SIGN_IDENTITY="${LEXIRAY_CODE_SIGN_IDENTITY:-LexiRay Local Development}"
+CODE_SIGN_IDENTITY="$LEXIRAY_DEVELOPMENT_CERT_SHA1"
 SOURCE_FINGERPRINT_BEFORE="$("$ROOT_DIR/script/acceptance_receipt.sh" fingerprint)"
 
 cd "$ROOT_DIR"
@@ -64,13 +65,9 @@ canonical_app_is_running() {
 
 verify_app_signature() {
   local bundle="$1"
-  local signature
-  signature="$(/usr/bin/codesign -dvvv "$bundle" 2>&1)"
-
-  if /usr/bin/grep -F "Signature=adhoc" <<<"$signature" >/dev/null ||
-    ! /usr/bin/grep -F "Authority=$CODE_SIGN_IDENTITY" <<<"$signature" >/dev/null; then
-    echo "Expected $bundle to be signed by \"$CODE_SIGN_IDENTITY\"." >&2
-    echo "$signature" >&2
+  if ! lexiray_verify_development_app_identity "$bundle"; then
+    echo "Expected $bundle to use the fixed LexiRay development identity." >&2
+    /usr/bin/codesign -dvvv "$bundle" 2>&1 || true
     exit 1
   fi
 }
@@ -79,7 +76,7 @@ kill_development_apps
 "$ROOT_DIR/script/clean_dev_apps.sh" --apply
 rm -rf "$BUILT_APP_BUNDLE"
 rm -f "$BUILD_FINGERPRINT_FILE"
-"$ROOT_DIR/script/ensure_local_codesign_identity.sh" "$CODE_SIGN_IDENTITY"
+"$ROOT_DIR/script/ensure_local_codesign_identity.sh"
 
 xcodegen generate
 xcodebuild \

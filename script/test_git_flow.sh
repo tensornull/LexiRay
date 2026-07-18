@@ -7,6 +7,24 @@ trap 'rm -rf "$TMP_ROOT"' EXIT
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REMOTE="$TMP_ROOT/remote.git"
 WORK="$TMP_ROOT/work"
+FLOW_SWIFTFORMAT_TOOL="$TMP_ROOT/swiftformat"
+
+cat >"$FLOW_SWIFTFORMAT_TOOL" <<'SWIFTFORMAT'
+#!/usr/bin/env bash
+if [[ "${1:-}" == --version ]]; then
+  echo "0.62.1"
+fi
+SWIFTFORMAT
+chmod +x "$FLOW_SWIFTFORMAT_TOOL"
+
+install_preflight_fixture() {
+  local fixture_root="$1"
+  mkdir -p "$fixture_root/script"
+  cp "$ROOT_DIR/script/preflight.sh" "$fixture_root/script/preflight.sh"
+  cp "$ROOT_DIR/script/swiftformat_tool.sh" "$fixture_root/script/swiftformat_tool.sh"
+  chmod +x "$fixture_root/script/preflight.sh" "$fixture_root/script/swiftformat_tool.sh"
+}
+
 git init --bare -q "$REMOTE"
 git init -q -b main "$WORK"
 git -C "$WORK" config user.name "LexiRay Flow Test"
@@ -56,12 +74,14 @@ git -C "$WORK" commit -qam 'chore: remote integration'
 git -C "$WORK" push -qu origin dev
 git -C "$WORK" switch -q main
 git -C "$WORK" branch -f dev "$stale_dev"
-git -C "$WORK" switch -qc chore/stale-dev "$stale_dev"
-mkdir -p "$WORK/script"
-cp "$ROOT_DIR/script/preflight.sh" "$WORK/script/preflight.sh"
-chmod +x "$WORK/script/preflight.sh"
+git -C "$WORK" branch chore/stale-dev "$stale_dev"
+install_preflight_fixture "$WORK"
+git -C "$WORK" branch -f chore/stale-dev "$stale_dev"
+git -C "$WORK" worktree add -q "$TMP_ROOT/stale-task" chore/stale-dev
+install_preflight_fixture "$TMP_ROOT/stale-task"
 
-if (cd "$WORK" && ./script/preflight.sh change >"$TMP_ROOT/stale-preflight.log" 2>&1); then
+if (cd "$TMP_ROOT/stale-task" && LEXIRAY_SWIFTFORMAT_TOOL="$FLOW_SWIFTFORMAT_TOOL" \
+  ./script/preflight.sh change >"$TMP_ROOT/stale-preflight.log" 2>&1); then
   echo "preflight accepted a task branch based on stale local dev" >&2
   exit 1
 fi
@@ -73,7 +93,38 @@ rg -F 'local dev is behind or divergent from the currently known origin/dev' \
 }
 
 git -C "$WORK" branch -f dev origin/dev
-git -C "$WORK" switch -qc chore/current-dev dev
-(cd "$WORK" && ./script/preflight.sh change >/dev/null)
+git -C "$WORK" branch chore/current-dev dev
+git -C "$WORK" worktree add -q "$TMP_ROOT/current-task" chore/current-dev
+install_preflight_fixture "$TMP_ROOT/current-task"
+(cd "$TMP_ROOT/current-task" && LEXIRAY_SWIFTFORMAT_TOOL="$FLOW_SWIFTFORMAT_TOOL" \
+  ./script/preflight.sh change >/dev/null)
 
-echo "GIT_FLOW_PASS: task->dev squash, dev->main merge commit, main->dev fast-forward, hotfix backflow, stale-dev rejection"
+git -C "$WORK" switch -qc chore/primary-check dev
+install_preflight_fixture "$WORK"
+if (cd "$WORK" && LEXIRAY_SWIFTFORMAT_TOOL="$FLOW_SWIFTFORMAT_TOOL" \
+  ./script/preflight.sh change >"$TMP_ROOT/primary-preflight.log" 2>&1); then
+  echo "preflight accepted ordinary work in the primary checkout" >&2
+  exit 1
+fi
+rg -F 'ordinary changes require a dedicated linked worktree' \
+  "$TMP_ROOT/primary-preflight.log" >/dev/null || {
+  cat "$TMP_ROOT/primary-preflight.log" >&2
+  echo "preflight did not report the primary-checkout cause" >&2
+  exit 1
+}
+
+git -C "$WORK" worktree add -q --detach "$TMP_ROOT/detached-task" dev
+install_preflight_fixture "$TMP_ROOT/detached-task"
+if (cd "$TMP_ROOT/detached-task" && LEXIRAY_SWIFTFORMAT_TOOL="$FLOW_SWIFTFORMAT_TOOL" \
+  ./script/preflight.sh change >"$TMP_ROOT/detached-preflight.log" 2>&1); then
+  echo "preflight accepted a detached linked worktree" >&2
+  exit 1
+fi
+rg -F 'detached HEAD is not a supported working state' \
+  "$TMP_ROOT/detached-preflight.log" >/dev/null || {
+  cat "$TMP_ROOT/detached-preflight.log" >&2
+  echo "preflight did not report the detached-worktree cause" >&2
+  exit 1
+}
+
+echo "GIT_FLOW_PASS: topology, stale-dev rejection, linked-worktree enforcement"

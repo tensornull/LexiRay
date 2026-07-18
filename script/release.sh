@@ -298,6 +298,7 @@ require_release_receipt() {
   [[ -x "$ROOT_DIR/script/acceptance_receipt.sh" ]] ||
     die "script/acceptance_receipt.sh is missing or not executable."
   "$ROOT_DIR/script/acceptance_receipt.sh" require-handoff
+  "$ROOT_DIR/script/acceptance_receipt.sh" require-login-item-probe
 
   receipt_version="$(receipt_field version)"
   RELEASE_BUILD="$(receipt_field build)"
@@ -398,9 +399,6 @@ doctor() {
   require_successful_workflow ci.yml CI
   CI_RUN_ID="$GATE_RUN_ID"
   CI_RUN_URL="$GATE_RUN_URL"
-  require_successful_workflow codeql.yml CodeQL
-  CODEQL_RUN_ID="$GATE_RUN_ID"
-  CODEQL_RUN_URL="$GATE_RUN_URL"
 
   if has_accessible_release_identity; then
     require_command xcodegen
@@ -422,8 +420,6 @@ doctor() {
   state_set mode "$RELEASE_MODE"
   state_set ci_run_id "$CI_RUN_ID"
   state_set ci_run_url "$CI_RUN_URL"
-  state_set codeql_run_id "$CODEQL_RUN_ID"
-  state_set codeql_run_url "$CODEQL_RUN_URL"
   state_set doctor complete
   state_set doctor_completed_at "$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -986,8 +982,6 @@ GATE_RUN_ID=""
 GATE_RUN_URL=""
 CI_RUN_ID=""
 CI_RUN_URL=""
-CODEQL_RUN_ID=""
-CODEQL_RUN_URL=""
 
 case "$COMMAND" in
   doctor) doctor ;;

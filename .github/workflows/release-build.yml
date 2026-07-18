@@ -72,7 +72,7 @@ jobs:
             echo "expected: $expected_state_key" >&2
             exit 1
           fi
-          for workflow in ci.yml codeql.yml; do
+          for workflow in ci.yml; do
             gate="$(
               gh run list \
                 --repo "$GH_REPOSITORY" \

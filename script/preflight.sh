@@ -22,13 +22,15 @@ warn() {
 
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail "not inside a git worktree"
 
-required_tools=(git rg xcodebuild xcodegen swiftformat codesign shasum)
+required_tools=(git rg xcodebuild xcodegen codesign shasum)
 missing_tools=()
 for tool in "${required_tools[@]}"; do
   command -v "$tool" >/dev/null 2>&1 || missing_tools+=("$tool")
 done
 [[ ${#missing_tools[@]} -eq 0 ]] || fail "missing tools: ${missing_tools[*]}"
 [[ -x /usr/libexec/PlistBuddy ]] || fail "/usr/libexec/PlistBuddy is unavailable"
+"$ROOT_DIR/script/swiftformat_tool.sh" --version >/dev/null ||
+  fail "the repository-pinned SwiftFormat toolchain is unavailable"
 
 for state_dir in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
   state_path="$(git rev-parse --git-path "$state_dir")"
@@ -37,6 +39,10 @@ done
 
 branch="$(git symbolic-ref --quiet --short HEAD || true)"
 [[ -n "$branch" ]] || fail "detached HEAD is not a supported working state"
+
+if [[ "$MODE" == change && ! -f "$ROOT_DIR/.git" ]]; then
+  fail "ordinary changes require a dedicated linked worktree; keep the primary checkout for sync and release work"
+fi
 
 require_current_local_dev() {
   git rev-parse --verify dev >/dev/null 2>&1 || fail "local dev is unavailable"

@@ -246,7 +246,7 @@ final class AcceptanceProfileTests: XCTestCase {
     let paths = try makeAcceptanceRoot(name: "installed")
     let profile = try XCTUnwrap(
       AcceptanceProfile.resolve(
-        environment: [:],
+        environment: acceptancePreferencesEnvironment(paths: paths),
         arguments: [
           AcceptanceProfile.enabledArgument,
           AcceptanceProfile.workspaceRootArgument, paths.workspace.path,
@@ -265,13 +265,13 @@ final class AcceptanceProfileTests: XCTestCase {
     let suite = "io.github.tensornull.lexiray.acceptance.matching"
     let profile = try XCTUnwrap(
       AcceptanceProfile.resolve(
-        environment: [
+        environment: acceptancePreferencesEnvironment(paths: paths).merging([
           AcceptanceProfile.enabledEnvironmentKey: "1",
           AcceptanceProfile.workspaceRootEnvironmentKey: paths.workspace.path,
           AcceptanceProfile.dataRootEnvironmentKey: paths.dataRoot.path,
           AcceptanceProfile.defaultsSuiteEnvironmentKey: suite,
           AcceptanceProfile.selectionFixturePIDEnvironmentKey: "4321"
-        ],
+        ]) { _, configuration in configuration },
         arguments: [
           AcceptanceProfile.enabledArgument,
           AcceptanceProfile.workspaceRootArgument, paths.workspace.path,
@@ -298,13 +298,13 @@ final class AcceptanceProfileTests: XCTestCase {
       AcceptanceProfile.defaultsSuiteArgument, suite,
       AcceptanceProfile.selectionFixturePIDArgument, "4321"
     ]
-    let matchingEnvironment = [
+    let matchingEnvironment = acceptancePreferencesEnvironment(paths: current).merging([
       AcceptanceProfile.enabledEnvironmentKey: "1",
       AcceptanceProfile.workspaceRootEnvironmentKey: current.workspace.path,
       AcceptanceProfile.dataRootEnvironmentKey: current.dataRoot.path,
       AcceptanceProfile.defaultsSuiteEnvironmentKey: suite,
       AcceptanceProfile.selectionFixturePIDEnvironmentKey: "4321"
-    ]
+    ]) { _, configuration in configuration }
     let conflicts = [
       (AcceptanceProfile.workspaceRootEnvironmentKey, stale.workspace.path, AcceptanceProfile.workspaceRootArgument),
       (AcceptanceProfile.dataRootEnvironmentKey, stale.dataRoot.path, AcceptanceProfile.dataRootArgument),
@@ -371,6 +371,48 @@ final class AcceptanceProfileTests: XCTestCase {
     }
   }
 
+  func testProfileRejectsUnisolatedPreferencesHome() throws {
+    let paths = try makeAcceptanceRoot(name: "unsafe-preferences-home")
+    let outside = paths.container.appending(path: "unisolated-home", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+    var environment = acceptanceEnvironment(paths: paths)
+
+    for (key, value) in [
+      (AcceptanceProfile.homeEnvironmentKey, outside.path),
+      (AcceptanceProfile.fixedUserHomeEnvironmentKey, outside.path)
+    ] {
+      var unsafeEnvironment = environment
+      unsafeEnvironment[key] = value
+      XCTAssertThrowsError(
+        try AcceptanceProfile.resolve(environment: unsafeEnvironment, arguments: [])
+      ) { error in
+        XCTAssertEqual(error as? AcceptanceProfile.ConfigurationError, .unsafePreferencesHome)
+      }
+    }
+
+    environment.removeValue(forKey: AcceptanceProfile.fixedUserHomeEnvironmentKey)
+    XCTAssertThrowsError(
+      try AcceptanceProfile.resolve(environment: environment, arguments: [])
+    ) { error in
+      XCTAssertEqual(error as? AcceptanceProfile.ConfigurationError, .unsafePreferencesHome)
+    }
+  }
+
+  func testProfileRequiresPreferencesDaemonIsolation() throws {
+    let paths = try makeAcceptanceRoot(name: "preferences-daemon")
+    var environment = acceptanceEnvironment(paths: paths)
+    environment.removeValue(forKey: AcceptanceProfile.preferencesAvoidDaemonEnvironmentKey)
+
+    XCTAssertThrowsError(
+      try AcceptanceProfile.resolve(environment: environment, arguments: [])
+    ) { error in
+      XCTAssertEqual(
+        error as? AcceptanceProfile.ConfigurationError,
+        .preferencesDaemonIsolationRequired
+      )
+    }
+  }
+
   func testAcceptanceStoresWriteOnlyToIsolatedPaths() throws {
     let paths = try makeAcceptanceRoot()
     let home = paths.container.appending(path: "home", directoryHint: .isDirectory)
@@ -411,19 +453,29 @@ final class AcceptanceProfileTests: XCTestCase {
   private let acceptanceSuite = "io.github.tensornull.lexiray.acceptance.tests"
 
   private func acceptanceEnvironment(
-    paths: (container: URL, workspace: URL, dataRoot: URL)
+    paths: (container: URL, workspace: URL, dataRoot: URL, preferencesHome: URL)
   ) -> [String: String] {
-    [
+    acceptancePreferencesEnvironment(paths: paths).merging([
       AcceptanceProfile.enabledEnvironmentKey: "1",
       AcceptanceProfile.workspaceRootEnvironmentKey: paths.workspace.path,
       AcceptanceProfile.dataRootEnvironmentKey: paths.dataRoot.path,
       AcceptanceProfile.defaultsSuiteEnvironmentKey: acceptanceSuite + ".\(UUID().uuidString)"
+    ]) { _, configuration in configuration }
+  }
+
+  private func acceptancePreferencesEnvironment(
+    paths: (container: URL, workspace: URL, dataRoot: URL, preferencesHome: URL)
+  ) -> [String: String] {
+    [
+      AcceptanceProfile.homeEnvironmentKey: paths.preferencesHome.path,
+      AcceptanceProfile.fixedUserHomeEnvironmentKey: paths.preferencesHome.path,
+      AcceptanceProfile.preferencesAvoidDaemonEnvironmentKey: "1"
     ]
   }
 
   private func makeAcceptanceRoot(
     name: String = "run"
-  ) throws -> (container: URL, workspace: URL, dataRoot: URL) {
+  ) throws -> (container: URL, workspace: URL, dataRoot: URL, preferencesHome: URL) {
     let container = FileManager.default.temporaryDirectory
       .appending(path: "lexiray-acceptance-tests-\(UUID().uuidString)", directoryHint: .isDirectory)
     let workspace = container.appending(path: "workspace", directoryHint: .isDirectory)
@@ -431,6 +483,11 @@ final class AcceptanceProfileTests: XCTestCase {
       .appending(path: "build/acceptance-data", directoryHint: .isDirectory)
       .appending(path: name, directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: dataRoot, withIntermediateDirectories: true)
+    let preferencesHome = dataRoot.appending(
+      path: AcceptanceProfile.preferencesHomeDirectoryName,
+      directoryHint: .isDirectory
+    )
+    try FileManager.default.createDirectory(at: preferencesHome, withIntermediateDirectories: true)
     try AcceptanceProfile.markerContents.write(
       to: dataRoot.appending(path: AcceptanceProfile.markerFileName),
       atomically: true,
@@ -439,6 +496,6 @@ final class AcceptanceProfileTests: XCTestCase {
     try Data("{}\n".utf8).write(to: dataRoot.appending(path: "providers.json"))
     try Data("[]\n".utf8).write(to: dataRoot.appending(path: "history.json"))
     addTeardownBlock { try? FileManager.default.removeItem(at: container) }
-    return (container, workspace, dataRoot)
+    return (container, workspace, dataRoot, preferencesHome)
   }
 }

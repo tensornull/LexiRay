@@ -14,6 +14,7 @@ SCREENSHOTS_MANIFEST="$EVIDENCE_DIR/computer-use-screenshots-$fingerprint-$trans
 CONTACT_SHEET="$EVIDENCE_DIR/computer-use-contact-sheet-$fingerprint-$transaction_id.png"
 MANIFEST="$EVIDENCE_DIR/computer-use-$fingerprint-$transaction_id.json"
 INPUT_DIR="$EVIDENCE_DIR/contact-input"
+PORTABLE_CONTROL_PLANE_TESTS="${LEXIRAY_PORTABLE_CONTROL_PLANE_TESTS:-0}"
 trap 'rm -rf "$EVIDENCE_DIR"' EXIT
 
 mkdir -p "$CAPTURE_ROOT" "$INPUT_DIR"
@@ -36,6 +37,7 @@ expected_arguments=(
   --lexiray-acceptance-workspace-root "$ROOT_DIR"
   --lexiray-acceptance-root "$installed_root"
   --lexiray-acceptance-defaults-suite "$installed_suite"
+  --lexiray-acceptance-login-item-status notFound
 )
 arguments_hash="$(/usr/bin/swift "$ROOT_DIR/script/acceptance_evidence.swift" \
   arguments-hash -- "${expected_arguments[@]}")"
@@ -47,7 +49,7 @@ import Foundation
 
 let outputDirectory = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
 let scenarios = [
-  "launch", "selection_hotkey", "source_editor", "language_direction", "speech_controls",
+  "launch", "login_item_settings", "selection_hotkey", "source_editor", "language_direction", "speech_controls",
   "panel_visual_states", "ocr_result_display_1", "ocr_result_display_2",
   "ocr_multi_display"
 ]
@@ -103,6 +105,14 @@ make_receipt() {
   /usr/bin/plutil -insert verification.installed_defaults_suite -string "$installed_suite" -- "$RECEIPT"
   /usr/bin/plutil -insert verification.install_transaction_id -string "$transaction_id" -- "$RECEIPT"
   /usr/bin/plutil -insert verification.installed_at -string "$installed_at" -- "$RECEIPT"
+  local required_scenarios
+  if [[ "$PORTABLE_CONTROL_PLANE_TESTS" == 1 ]]; then
+    required_scenarios="launch,login_item_settings,selection_hotkey,source_editor,language_direction,speech_controls,panel_visual_states"
+  else
+    required_scenarios="$(computer_use_catalog_csv)"
+  fi
+  /usr/bin/plutil -insert verification.computer_use_required_scenarios \
+    -string "$required_scenarios" -- "$RECEIPT"
   for key in \
     computer_use computer_use_evidence computer_use_evidence_sha256 computer_use_scenarios \
     computer_use_screenshots_manifest computer_use_screenshots_sha256 computer_use_contact_sheet \
@@ -138,6 +148,11 @@ start_provenance() {
   case "$scenario" in
     launch)
       /usr/bin/plutil -insert state_assertions.values.main_window -string present -- "$output"
+      ;;
+    login_item_settings)
+      /usr/bin/plutil -insert state_assertions.values.registration_action -string toggle -- "$output"
+      /usr/bin/plutil -insert state_assertions.values.status -string notFound -- "$output"
+      /usr/bin/plutil -insert state_assertions.values.toggle_enabled -string true -- "$output"
       ;;
     source_editor)
       /usr/bin/plutil -insert state_assertions.values.editor_focused -string true -- "$output"
@@ -196,7 +211,7 @@ add_capture() {
   local png="$CAPTURE_ROOT/$scenario-window-$window_identifier.png"
   local window_role
   case "$scenario" in
-    launch) window_role=main ;;
+    launch|login_item_settings) window_role=main ;;
     ocr_multi_display) window_role=ocr-overlay ;;
     *) window_role=panel ;;
   esac
@@ -230,6 +245,10 @@ start_provenance launch "$display_count"
 add_capture launch 0 100 LexiRay 0 100 100 820 560
 finish_provenance launch
 
+start_provenance login_item_settings "$display_count"
+add_capture login_item_settings 0 109 Settings 0 100 100 820 560
+finish_provenance login_item_settings
+
 window_identifier=101
 for scenario in selection_hotkey source_editor language_direction speech_controls panel_visual_states; do
   start_provenance "$scenario" "$display_count"
@@ -238,34 +257,37 @@ for scenario in selection_hotkey source_editor language_direction speech_control
   window_identifier=$((window_identifier + 1))
 done
 
-display_index=0
-while IFS=$'\t' read -r x y width height; do
-  if [[ "$display_index" -lt 2 ]]; then
-    scenario="ocr_result_display_$((display_index + 1))"
-    panel_x="$(awk -v value="$x" 'BEGIN { printf "%.0f", value + 100 }')"
-    panel_y="$(awk -v value="$y" 'BEGIN { printf "%.0f", value + 100 }')"
-    start_provenance "$scenario" "$display_count"
-    add_capture "$scenario" 0 "$window_identifier" "LexiRay Floating Panel" 3 \
-      "$panel_x" "$panel_y" 420 300
-    finish_provenance "$scenario"
-    window_identifier=$((window_identifier + 1))
-  fi
-  display_index=$((display_index + 1))
-done < <(/usr/bin/swift "$ROOT_DIR/script/acceptance_evidence.swift" displays)
-[[ "$display_index" -ge 2 ]]
+if [[ "$PORTABLE_CONTROL_PLANE_TESTS" != 1 ]]; then
+  display_index=0
+  while IFS=$'\t' read -r x y width height; do
+    if [[ "$display_index" -lt 2 ]]; then
+      scenario="ocr_result_display_$((display_index + 1))"
+      panel_x="$(awk -v value="$x" 'BEGIN { printf "%.0f", value + 100 }')"
+      panel_y="$(awk -v value="$y" 'BEGIN { printf "%.0f", value + 100 }')"
+      start_provenance "$scenario" "$display_count"
+      add_capture "$scenario" 0 "$window_identifier" "LexiRay Floating Panel" 3 \
+        "$panel_x" "$panel_y" 420 300
+      finish_provenance "$scenario"
+      window_identifier=$((window_identifier + 1))
+    fi
+    display_index=$((display_index + 1))
+  done < <(/usr/bin/swift "$ROOT_DIR/script/acceptance_evidence.swift" displays)
+  [[ "$display_index" -ge 2 ]]
 
-start_provenance ocr_multi_display "$display_count"
-/usr/bin/plutil -replace display_count -integer "$display_count" -- "$CAPTURE_ROOT/ocr_multi_display.plist"
-capture_index=0
-while IFS=$'\t' read -r x y width height; do
-  add_capture ocr_multi_display "$capture_index" "$((200 + capture_index))" "" 1000 \
-    "$x" "$y" "$width" "$height"
-  capture_index=$((capture_index + 1))
-done < <(/usr/bin/swift "$ROOT_DIR/script/acceptance_evidence.swift" displays)
-[[ "$capture_index" -eq "$display_count" ]]
-finish_provenance ocr_multi_display
+  start_provenance ocr_multi_display "$display_count"
+  /usr/bin/plutil -replace display_count -integer "$display_count" -- "$CAPTURE_ROOT/ocr_multi_display.plist"
+  capture_index=0
+  while IFS=$'\t' read -r x y width height; do
+    add_capture ocr_multi_display "$capture_index" "$((200 + capture_index))" "" 1000 \
+      "$x" "$y" "$width" "$height"
+    capture_index=$((capture_index + 1))
+  done < <(/usr/bin/swift "$ROOT_DIR/script/acceptance_evidence.swift" displays)
+  [[ "$capture_index" -eq "$display_count" ]]
+  finish_provenance ocr_multi_display
+fi
 
 make_receipt
+load_computer_use_required_scenarios "$RECEIPT"
 
 rebuild_hash_manifests() {
   local scenario png index=0
@@ -400,6 +422,7 @@ eval "$(declare -f original_validate_installed_acceptance_process |
 # Every canonical state predicate is required independently; a scenario label
 # plus a generic panel image cannot stand in for the live AX/window state.
 while IFS='|' read -r scenario key invalid_value; do
+  [[ -f "$CAPTURE_ROOT/$scenario.json" ]] || continue
   cp "$CAPTURE_ROOT/$scenario.json" "$EVIDENCE_DIR/state-backup.json"
   /usr/bin/plutil -replace "state_assertions.values.$key" -string "$invalid_value" \
     -- "$CAPTURE_ROOT/$scenario.json"
@@ -411,6 +434,7 @@ while IFS='|' read -r scenario key invalid_value; do
   mv "$EVIDENCE_DIR/state-backup.json" "$CAPTURE_ROOT/$scenario.json"
 done <<'STATE_CASES'
 launch|main_window|missing
+login_item_settings|status|enabled
 selection_hotkey|source_kind|Manual
 source_editor|editor_focused|false
 language_direction|mock_direction|Direction: en -> ja
@@ -423,30 +447,34 @@ STATE_CASES
 
 # OCR result evidence must seal source_kind=OCR; omitting the field entirely
 # cannot be replaced by a generic translated floating-panel capture.
-cp "$CAPTURE_ROOT/ocr_result_display_1.json" "$EVIDENCE_DIR/ocr-source-kind-backup.json"
-/usr/bin/plutil -remove state_assertions.values.source_kind \
-  -- "$CAPTURE_ROOT/ocr_result_display_1.json"
-if verify_computer_use_provenance \
-  "$RECEIPT" "$CAPTURE_ROOT/ocr_result_display_1.json" \
-  ocr_result_display_1 0 0 >/dev/null 2>&1; then
-  echo "Computer Use provenance accepted OCR result evidence without source_kind=OCR" >&2
-  exit 1
+if [[ -f "$CAPTURE_ROOT/ocr_result_display_1.json" ]]; then
+  cp "$CAPTURE_ROOT/ocr_result_display_1.json" "$EVIDENCE_DIR/ocr-source-kind-backup.json"
+  /usr/bin/plutil -remove state_assertions.values.source_kind \
+    -- "$CAPTURE_ROOT/ocr_result_display_1.json"
+  if verify_computer_use_provenance \
+    "$RECEIPT" "$CAPTURE_ROOT/ocr_result_display_1.json" \
+    ocr_result_display_1 0 0 >/dev/null 2>&1; then
+    echo "Computer Use provenance accepted OCR result evidence without source_kind=OCR" >&2
+    exit 1
+  fi
+  mv "$EVIDENCE_DIR/ocr-source-kind-backup.json" "$CAPTURE_ROOT/ocr_result_display_1.json"
 fi
-mv "$EVIDENCE_DIR/ocr-source-kind-backup.json" "$CAPTURE_ROOT/ocr_result_display_1.json"
 
 # Moving a display-1 OCR result panel onto display 2 must not manufacture
 # display-2 capture provenance. The live panel geometry may match display 2,
 # but its sealed OCR source remains display 1 and must be rejected.
-cp "$CAPTURE_ROOT/ocr_result_display_2.json" "$EVIDENCE_DIR/ocr-capture-display-backup.json"
-/usr/bin/plutil -replace state_assertions.values.capture_display_index -string 1 \
-  -- "$CAPTURE_ROOT/ocr_result_display_2.json"
-if verify_computer_use_provenance \
-  "$RECEIPT" "$CAPTURE_ROOT/ocr_result_display_2.json" \
-  ocr_result_display_2 0 0 >/dev/null 2>&1; then
-  echo "Computer Use provenance accepted a display-1 OCR result moved onto display 2" >&2
-  exit 1
+if [[ -f "$CAPTURE_ROOT/ocr_result_display_2.json" ]]; then
+  cp "$CAPTURE_ROOT/ocr_result_display_2.json" "$EVIDENCE_DIR/ocr-capture-display-backup.json"
+  /usr/bin/plutil -replace state_assertions.values.capture_display_index -string 1 \
+    -- "$CAPTURE_ROOT/ocr_result_display_2.json"
+  if verify_computer_use_provenance \
+    "$RECEIPT" "$CAPTURE_ROOT/ocr_result_display_2.json" \
+    ocr_result_display_2 0 0 >/dev/null 2>&1; then
+    echo "Computer Use provenance accepted a display-1 OCR result moved onto display 2" >&2
+    exit 1
+  fi
+  mv "$EVIDENCE_DIR/ocr-capture-display-backup.json" "$CAPTURE_ROOT/ocr_result_display_2.json"
 fi
-mv "$EVIDENCE_DIR/ocr-capture-display-backup.json" "$CAPTURE_ROOT/ocr_result_display_2.json"
 
 # Evidence from the same source but a different installation transaction must
 # never be replayed, even if every app hash and PID-shaped field still matches.
@@ -521,6 +549,26 @@ if validate_computer_use_manifest "$RECEIPT" "$MANIFEST" 0 >/dev/null 2>&1; then
 fi
 make_manifest
 
+# A change-scoped matrix is valid only when it is frozen in the candidate
+# receipt. Handoff must require every frozen entry and reject later narrowing.
+full_matrix="$(computer_use_matrix_csv)"
+scoped_matrix="launch,login_item_settings"
+/usr/bin/plutil -replace verification.computer_use_required_scenarios \
+  -string "$scoped_matrix" -- "$RECEIPT"
+load_computer_use_required_scenarios "$RECEIPT"
+refresh_fixture
+validate_computer_use_manifest "$RECEIPT" "$MANIFEST" 0
+/usr/bin/plutil -replace scenarios -string launch -- "$MANIFEST"
+/usr/bin/plutil -replace scenario_count -integer 1 -- "$MANIFEST"
+if validate_computer_use_manifest "$RECEIPT" "$MANIFEST" 0 >/dev/null 2>&1; then
+  echo "Computer Use manifest narrowed the receipt-frozen matrix" >&2
+  exit 1
+fi
+/usr/bin/plutil -replace verification.computer_use_required_scenarios \
+  -string "$full_matrix" -- "$RECEIPT"
+load_computer_use_required_scenarios "$RECEIPT"
+refresh_fixture
+
 # A separately rehashed PNG cannot replace the contact sheet derived from the
 # exact sealed scenario screenshots.
 cp "$CONTACT_SHEET" "$EVIDENCE_DIR/contact-sheet-backup.png"
@@ -575,3 +623,6 @@ if rg -n 'CGRequestScreenCaptureAccess[[:space:]]*\(' \
 fi
 
 echo "COMPUTER_USE_MANIFEST_TEST_PASS"
+if [[ "$PORTABLE_CONTROL_PLANE_TESTS" == 1 ]]; then
+  echo "COMPUTER_USE_MANIFEST_TEST_NOTE: multi-display OCR fixtures are covered only by the local hardware lane"
+fi

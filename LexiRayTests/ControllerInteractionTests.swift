@@ -84,7 +84,9 @@ final class ControllerInteractionTests: XCTestCase {
     // First summon: real selection produces a batch with content.
     controller.translateCurrentSelection()
     await waitUntil {
-      if case .batch = controller.panelState { return true }
+      if case .batch = controller.panelState {
+        return true
+      }
       return false
     }
     XCTAssertEqual(controller.panelSourceText, "你好世界")
@@ -169,7 +171,9 @@ final class ControllerInteractionTests: XCTestCase {
 
     controller.translateCurrentSelection()
     await waitUntil {
-      if case .batch = controller.panelState { return true }
+      if case .batch = controller.panelState {
+        return true
+      }
       return false
     }
 
@@ -195,7 +199,9 @@ final class ControllerInteractionTests: XCTestCase {
     // First summon: translate "你好世界"
     controller.translateCurrentSelection()
     await waitUntil {
-      if case .batch = controller.panelState { return true }
+      if case .batch = controller.panelState {
+        return true
+      }
       return false
     }
     XCTAssertEqual(controller.panelSourceText, "你好世界")
@@ -255,7 +261,9 @@ final class ControllerInteractionTests: XCTestCase {
 
     controller.translateCurrentSelection()
     await waitUntil {
-      if case .batch = controller.panelState { return true }
+      if case .batch = controller.panelState {
+        return true
+      }
       return false
     }
     controller.swapPanelDirection()

@@ -98,7 +98,13 @@ final class RichTranslationRendererTests: XCTestCase {
     XCTAssertEqual(rebuilt, "gemini-3.1-pro-preview-all 是同一Gemini3.1ProPreview系列的备用路由版本入口。它并不表示更新或质量更高的模型，除非你明确想尝试该备用路由，否则我们不建议切换到它。")
     XCTAssertGreaterThan(textTokens.count, 10)
     XCTAssertFalse(textTokens.contains("。"))
-    XCTAssertTrue(content.tokens.contains { if case .code("gemini-3.1-pro-preview-all") = $0.value { true } else { false } })
+    XCTAssertTrue(content.tokens.contains {
+      if case .code("gemini-3.1-pro-preview-all") = $0.value {
+        true
+      } else {
+        false
+      }
+    })
   }
 
   func testLongUnspacedInlineTextBuildsBoundedLayoutTokens() throws {
@@ -185,10 +191,34 @@ final class RichTranslationRendererTests: XCTestCase {
     ```
     """)
 
-    XCTAssertTrue(blocks.contains { if case .heading(2, _) = $0 { true } else { false } })
-    XCTAssertEqual(blocks.count(where: { if case .listItem = $0 { true } else { false } }), 2)
-    XCTAssertTrue(blocks.contains { if case .quote = $0 { true } else { false } })
-    XCTAssertTrue(blocks.contains { if case .code("json", #"{"ok": true}"#) = $0 { true } else { false } })
+    XCTAssertTrue(blocks.contains {
+      if case .heading(2, _) = $0 {
+        true
+      } else {
+        false
+      }
+    })
+    XCTAssertEqual(blocks.count(where: {
+      if case .listItem = $0 {
+        true
+      } else {
+        false
+      }
+    }), 2)
+    XCTAssertTrue(blocks.contains {
+      if case .quote = $0 {
+        true
+      } else {
+        false
+      }
+    })
+    XCTAssertTrue(blocks.contains {
+      if case .code("json", #"{"ok": true}"#) = $0 {
+        true
+      } else {
+        false
+      }
+    })
   }
 
   func testCollapsedChangelogMarkdownBuildsBlockModel() {
@@ -197,10 +227,34 @@ final class RichTranslationRendererTests: XCTestCase {
     let blocks = RichTranslationRenderer.blocks(for: markdown)
     let plain = RichTranslationRenderer.plainString(for: markdown)
 
-    XCTAssertTrue(blocks.contains { if case let .heading(1, text) = $0 { String(text.characters) == "更新日志" } else { false } })
-    XCTAssertTrue(blocks.contains { if case .heading(2, _) = $0 { true } else { false } })
-    XCTAssertTrue(blocks.contains { if case .heading(3, _) = $0 { true } else { false } })
-    XCTAssertEqual(blocks.count(where: { if case .listItem = $0 { true } else { false } }), 2)
+    XCTAssertTrue(blocks.contains {
+      if case let .heading(1, text) = $0 {
+        String(text.characters) == "更新日志"
+      } else {
+        false
+      }
+    })
+    XCTAssertTrue(blocks.contains {
+      if case .heading(2, _) = $0 {
+        true
+      } else {
+        false
+      }
+    })
+    XCTAssertTrue(blocks.contains {
+      if case .heading(3, _) = $0 {
+        true
+      } else {
+        false
+      }
+    })
+    XCTAssertEqual(blocks.count(where: {
+      if case .listItem = $0 {
+        true
+      } else {
+        false
+      }
+    }), 2)
     XCTAssertTrue(plain.contains("Keep a Changelog"))
     XCTAssertTrue(plain.contains("models 现在默认读取公共模型目录。"))
     XCTAssertFalse(plain.contains("# 更新日志"))
@@ -239,8 +293,20 @@ final class RichTranslationRendererTests: XCTestCase {
     let blocks = RichTranslationRenderer.blocks(for: markdown)
     let plain = RichTranslationRenderer.plainString(for: markdown)
 
-    XCTAssertEqual(blocks.count(where: { if case .listItem = $0 { true } else { false } }), 4)
-    XCTAssertEqual(blocks.count(where: { if case .code("bash", _) = $0 { true } else { false } }), 2)
+    XCTAssertEqual(blocks.count(where: {
+      if case .listItem = $0 {
+        true
+      } else {
+        false
+      }
+    }), 4)
+    XCTAssertEqual(blocks.count(where: {
+      if case .code("bash", _) = $0 {
+        true
+      } else {
+        false
+      }
+    }), 2)
     XCTAssertTrue(plain.contains("doubao-seedance-2-0"))
     XCTAssertTrue(plain.contains("POST /v1/videos"))
     XCTAssertTrue(plain.contains("curl -sS"))
@@ -275,8 +341,20 @@ final class RichTranslationRendererTests: XCTestCase {
       }
     """)
 
-    XCTAssertTrue(blocks.contains { if case .listItem = $0 { true } else { false } })
-    XCTAssertTrue(blocks.contains { if case let .code("json", code) = $0 { code.contains(#""type": "error""#) } else { false } })
+    XCTAssertTrue(blocks.contains {
+      if case .listItem = $0 {
+        true
+      } else {
+        false
+      }
+    })
+    XCTAssertTrue(blocks.contains {
+      if case let .code("json", code) = $0 {
+        code.contains(#""type": "error""#)
+      } else {
+        false
+      }
+    })
   }
 
   func testMarkdownFenceContentIsNotHardBreakRewritten() {

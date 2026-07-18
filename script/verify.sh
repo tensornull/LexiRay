@@ -91,6 +91,10 @@ ui_required_for_changes() {
   has_app_binary_changes || path_matches '^script/ui/'
 }
 
+login_item_probe_required_for_changes() {
+  path_matches '(^|/)(LoginItem|AppRuntime|AcceptanceProfile|AppDelegate|SettingsView|LexiRayController)|^script/(development_identity|ensure_local_codesign_identity|build_and_run|install_applications|login_item_system_probe|acceptance_receipt|release|sign_release)|^\.github/workflows/release-build\.yml$'
+}
+
 lint_changed_swift() {
   local files=()
   local path
@@ -103,7 +107,7 @@ lint_changed_swift() {
   done <"$CHANGED_FILES"
   if [[ ${#files[@]} -gt 0 ]]; then
     echo "--- SwiftFormat (changed paths)"
-    swiftformat "${files[@]}" --lint
+    "$ROOT_DIR/script/swiftformat_tool.sh" "${files[@]}" --lint
   fi
 }
 
@@ -302,16 +306,7 @@ run_l3() {
 }
 
 run_script_tests() {
-  local test_script ran=0
-  for test_script in "$ROOT_DIR"/script/tests/*_test.sh; do
-    [[ -x "$test_script" ]] || continue
-    ran=1
-    echo "--- Script test: ${test_script#$ROOT_DIR/}"
-    "$test_script"
-  done
-  if [[ "$ran" == 0 ]]; then
-    echo "--- Script tests: none registered"
-  fi
+  "$ROOT_DIR/script/run_control_plane_tests.sh"
 }
 
 verify_source_unchanged() {
@@ -326,10 +321,12 @@ verify_source_unchanged() {
 
 collect_changed_files
 fingerprint_before="$("$ROOT_DIR/script/acceptance_receipt.sh" fingerprint)"
+computer_use_required_scenarios="$("$ROOT_DIR/script/computer_use_scope.sh" "$CHANGED_FILES")"
 changed_count="$(wc -l <"$CHANGED_FILES" | tr -d ' ')"
 echo "VERIFY_MODE=$MODE"
 echo "SOURCE_FINGERPRINT=$fingerprint_before"
 echo "CHANGED_PATHS=$changed_count"
+echo "COMPUTER_USE_REQUIRED_SCENARIOS=$computer_use_required_scenarios"
 if [[ "$changed_count" -gt 0 ]]; then
   sed 's/^/  /' "$CHANGED_FILES"
 fi
@@ -362,6 +359,8 @@ case "$MODE" in
     if [[ -z "${LEXIRAY_REUSE_GUI_ARTIFACT_DIR:-}" ]] &&
       [[ "${LEXIRAY_FORCE_VERIFY:-0}" != 1 ]] &&
       "$ROOT_DIR/script/acceptance_receipt.sh" require-automated-candidate >/dev/null 2>&1 &&
+      [[ "$("$ROOT_DIR/script/acceptance_receipt.sh" field \
+        verification.computer_use_required_scenarios)" == "$computer_use_required_scenarios" ]] &&
       "$ROOT_DIR/script/acceptance_receipt.sh" l3-valid >/dev/null 2>&1; then
       receipt="$("$ROOT_DIR/script/acceptance_receipt.sh" require-automated-candidate)"
       echo "VERIFY_REUSED[candidate]=$receipt"
@@ -407,7 +406,13 @@ case "$MODE" in
       echo "GUI_CONTACT_SHEET=$contact_sheet"
     fi
     verify_source_unchanged "$fingerprint_before"
-    receipt="$("$ROOT_DIR/script/acceptance_receipt.sh" write-candidate \
+    login_item_probe_required=0
+    if login_item_probe_required_for_changes; then
+      login_item_probe_required=1
+    fi
+    receipt="$(LEXIRAY_LOGIN_ITEM_PROBE_REQUIRED="$login_item_probe_required" \
+      LEXIRAY_COMPUTER_USE_REQUIRED_SCENARIOS="$computer_use_required_scenarios" \
+      "$ROOT_DIR/script/acceptance_receipt.sh" write-candidate \
       "$APP_BUNDLE" "$gui_status" "$artifact_dir" "$contact_sheet")"
     echo "ACCEPTANCE_RECEIPT=$receipt"
     if [[ "$gui_status" == passed ]]; then
