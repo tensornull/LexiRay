@@ -9,6 +9,7 @@ ACCEPTANCE_WORKSPACE="$WORK_DIR/workspace"
 SYNTHETIC_HOME="$WORK_DIR/home"
 PRODUCTION_DATA="$SYNTHETIC_HOME/.lexiray"
 PRODUCTION_DEFAULTS="io.github.tensornull.lexiray"
+PRODUCTION_DEFAULTS_FILE="$SYNTHETIC_HOME/Library/Preferences/$PRODUCTION_DEFAULTS.plist"
 PROVIDER_SENTINEL="$WORK_DIR/provider-sentinel"
 HISTORY_SENTINEL="$WORK_DIR/history-sentinel"
 DEFAULTS_BEFORE="$WORK_DIR/defaults-before.plist"
@@ -38,14 +39,14 @@ printf '%s\n' 'synthetic-real-history-data' >"$PRODUCTION_DATA/history.json"
 cp "$PRODUCTION_DATA/providers.json" "$PROVIDER_SENTINEL"
 cp "$PRODUCTION_DATA/history.json" "$HISTORY_SENTINEL"
 
-env HOME="$SYNTHETIC_HOME" CFFIXED_USER_HOME="$SYNTHETIC_HOME" \
-  defaults write "$PRODUCTION_DEFAULTS" DataSafetySentinel -string 'synthetic-real-defaults'
-env HOME="$SYNTHETIC_HOME" CFFIXED_USER_HOME="$SYNTHETIC_HOME" \
-  defaults export "$PRODUCTION_DEFAULTS" "$DEFAULTS_BEFORE" >/dev/null
+mkdir -p "$(dirname "$PRODUCTION_DEFAULTS_FILE")"
+/usr/bin/plutil -create xml1 "$PRODUCTION_DEFAULTS_FILE"
+/usr/bin/plutil -insert DataSafetySentinel -string 'synthetic-real-defaults' \
+  "$PRODUCTION_DEFAULTS_FILE"
+cp "$PRODUCTION_DEFAULTS_FILE" "$DEFAULTS_BEFORE"
 
 assert_production_unchanged() {
   local mode="$1"
-  local defaults_after="$WORK_DIR/defaults-after-$mode.plist"
   cmp -s "$PROVIDER_SENTINEL" "$PRODUCTION_DATA/providers.json" || {
     echo "DATA_SAFETY_FAIL[$mode]: production-shaped providers changed" >&2
     [[ -f "$PRODUCTION_DATA/providers.json" ]] &&
@@ -58,9 +59,7 @@ assert_production_unchanged() {
       /usr/bin/shasum -a 256 "$HISTORY_SENTINEL" "$PRODUCTION_DATA/history.json" >&2
     return 1
   }
-  env HOME="$SYNTHETIC_HOME" CFFIXED_USER_HOME="$SYNTHETIC_HOME" \
-    defaults export "$PRODUCTION_DEFAULTS" "$defaults_after" >/dev/null
-  cmp -s "$DEFAULTS_BEFORE" "$defaults_after" || {
+  cmp -s "$DEFAULTS_BEFORE" "$PRODUCTION_DEFAULTS_FILE" || {
     echo "DATA_SAFETY_FAIL[$mode]: production-shaped defaults changed" >&2
     return 1
   }
@@ -108,14 +107,18 @@ SWIFT
 launch_valid_profile() {
   local mode="$1"
   local root="$ACCEPTANCE_WORKSPACE/build/acceptance-data/$mode"
+  local preferences_home="$root/preferences-home"
   local suite="io.github.tensornull.lexiray.acceptance.data-safety.$mode.$$"
-  mkdir -p "$root"
+  mkdir -p "$preferences_home"
   printf '%s\n' 'LexiRay acceptance root v1' >"$root/.lexiray-acceptance-root"
   cp "$ROOT_DIR/script/ui/fixtures/providers.json" "$root/providers.json"
   cp "$ROOT_DIR/script/ui/fixtures/history.json" "$root/history.json"
   (
     trap - EXIT HUP INT TERM
-    exec env HOME="$SYNTHETIC_HOME" CFFIXED_USER_HOME="$SYNTHETIC_HOME" \
+    exec env \
+      HOME="$preferences_home" \
+      CFFIXED_USER_HOME="$preferences_home" \
+      CFPREFERENCES_AVOID_DAEMON=1 \
       "$EXECUTABLE" \
       --lexiray-acceptance-profile \
       --lexiray-acceptance-workspace-root "$ACCEPTANCE_WORKSPACE" \
@@ -131,7 +134,10 @@ launch_valid_profile() {
 
 # Normal app termination: ask AppKit to terminate the exact child process.
 launch_valid_profile normal
-request_app_termination "$ACTIVE_PID"
+request_app_termination "$ACTIVE_PID" || {
+  echo "DATA_SAFETY_FAIL[normal]: AppKit could not terminate the exact acceptance child" >&2
+  exit 1
+}
 wait_until_stopped "$ACTIVE_PID" || {
   echo "DATA_SAFETY_FAIL[normal]: app did not terminate" >&2
   exit 1
@@ -144,7 +150,10 @@ assert_production_unchanged normal
 unsafe_root="$PRODUCTION_DATA/acceptance"
 (
   trap - EXIT HUP INT TERM
-  exec env HOME="$SYNTHETIC_HOME" CFFIXED_USER_HOME="$SYNTHETIC_HOME" \
+  exec env \
+    HOME="$unsafe_root/preferences-home" \
+    CFFIXED_USER_HOME="$unsafe_root/preferences-home" \
+    CFPREFERENCES_AVOID_DAEMON=1 \
     "$EXECUTABLE" \
     --lexiray-acceptance-profile \
     --lexiray-acceptance-workspace-root "$ACCEPTANCE_WORKSPACE" \

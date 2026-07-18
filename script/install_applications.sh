@@ -75,7 +75,8 @@ installed_acceptance_process_matches() {
     --lexiray-acceptance-profile \
     --lexiray-acceptance-workspace-root "$ROOT_DIR" \
     --lexiray-acceptance-root "$acceptance_root" \
-    --lexiray-acceptance-defaults-suite "$defaults_suite" >/dev/null 2>&1
+    --lexiray-acceptance-defaults-suite "$defaults_suite" \
+    --lexiray-acceptance-login-item-status notFound >/dev/null 2>&1
 }
 
 find_installed_acceptance_pid() {
@@ -715,8 +716,11 @@ $RECEIPT_TOOL verify-app-match "$APP_DST" >/dev/null || die "installed app does 
 
 create_installed_acceptance_root "$ROOT_DIR" "$fingerprint" "$TRANSACTION_ID"
 acceptance_root="$ACCEPTANCE_ROOT"
+preferences_home="$acceptance_root/preferences-home"
 defaults_suite="$(installed_acceptance_defaults_suite "$fingerprint" "$TRANSACTION_ID")" ||
   die "could not derive a transaction-owned defaults suite"
+/bin/mkdir -m 700 -- "$preferences_home" ||
+  die "could not create the isolated acceptance preferences home"
 printf '%s\n' 'LexiRay acceptance root v1' >"$acceptance_root/.lexiray-acceptance-root"
 cp "$ROOT_DIR/script/ui/fixtures/computer-use-providers.json" "$acceptance_root/providers.json"
 cp "$ROOT_DIR/script/ui/fixtures/history.json" "$acceptance_root/history.json"
@@ -728,13 +732,29 @@ bundle_matches_object \
   "$acceptance_root" "$ACCEPTANCE_ROOT_DEVICE" "$ACCEPTANCE_ROOT_INODE" ||
   die "acceptance root was replaced while writing fixtures"
 
-/usr/bin/open -n "$APP_DST" --args \
+login_item_probe_status="$($RECEIPT_TOOL field verification.login_item_system_probe)"
+if [[ "$login_item_probe_status" == pending || "${LEXIRAY_REQUIRE_LOGIN_ITEM_PROBE:-0}" == 1 ]]; then
+  "$ROOT_DIR/script/login_item_system_probe.sh" \
+    --install "$APP_DST" "$acceptance_root" "$defaults_suite" ||
+    die "real Login Item system probe did not pass"
+fi
+
+installed_executable="$APP_DST/Contents/MacOS/$APP_NAME"
+acceptance_log="$acceptance_root/installed-acceptance.log"
+/usr/bin/open -n \
+  --env "HOME=$preferences_home" \
+  --env "CFFIXED_USER_HOME=$preferences_home" \
+  --env CFPREFERENCES_AVOID_DAEMON=1 \
+  --stdout "$acceptance_log" \
+  --stderr "$acceptance_log" \
+  "$APP_DST" \
+  --args \
   --lexiray-acceptance-profile \
   --lexiray-acceptance-workspace-root "$ROOT_DIR" \
   --lexiray-acceptance-root "$acceptance_root" \
-  --lexiray-acceptance-defaults-suite "$defaults_suite"
+  --lexiray-acceptance-defaults-suite "$defaults_suite" \
+  --lexiray-acceptance-login-item-status notFound
 
-installed_executable="$APP_DST/Contents/MacOS/$APP_NAME"
 running_pid=""
 deadline=$((SECONDS + 10))
 while ((SECONDS < deadline)); do
@@ -743,7 +763,8 @@ while ((SECONDS < deadline)); do
   [[ -n "$running_pid" ]] && break
   sleep 0.2
 done
-[[ -n "$running_pid" ]] || die "installed app did not launch with the acceptance profile"
+[[ -n "$running_pid" ]] ||
+  die "installed app did not launch with the acceptance profile; see $acceptance_log"
 
 $RECEIPT_TOOL verify-app-match "$APP_DST" >/dev/null || die "installed app became stale before acceptance launch"
 set_transaction_state validated

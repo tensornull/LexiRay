@@ -5,6 +5,7 @@ progressively loaded detail:
 
 - `runbooks/`: executable project procedures for verification, GUI acceptance,
   data safety, installation, Git/CI, and release.
+- `adr/`: durable technical decisions and shared domain terminology.
 - `skills/`: narrow reusable capabilities discovered by supported agents.
 - `prompts/`: optional task starters; they must defer to `AGENTS.md` and the
   runbooks instead of duplicating policy.

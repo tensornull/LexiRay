@@ -188,6 +188,10 @@ rg -F 'ref: ${{ steps.resolve.outputs.sha }}' "$workflow" >/dev/null
 rg -F 'uses: actions/upload-artifact@v6' "$workflow" >/dev/null
 rg -F 'name: LexiRay-release-${{ inputs.state_key }}-${{ inputs.dispatch_id }}' "$workflow" >/dev/null
 rg -F 'WORKFLOW="release-build.yml"' "$ROOT_DIR/script/release.sh" >/dev/null
+if rg -F 'codeql.yml' "$workflow" "$ROOT_DIR/script/release.sh" >/dev/null; then
+  echo "CodeQL remains a blocking exact-commit release gate" >&2
+  exit 1
+fi
 if rg -F 'LEXIRAY_RELEASE_WORKFLOW' "$ROOT_DIR/script/release.sh" >/dev/null; then
   echo "production release workflow remains environment-overridable" >&2
   exit 1

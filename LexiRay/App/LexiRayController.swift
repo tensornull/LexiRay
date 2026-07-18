@@ -543,6 +543,7 @@ final class LexiRayController: ObservableObject {
     refreshAppIdentity()
     let diagnostics = [
       appIdentity.diagnosticsText,
+      loginItemCoordinator.diagnosticsText,
       "Accessibility trusted: \(PermissionService.isAccessibilityTrusted)",
       "Screen Recording trusted: \(PermissionService.isScreenCaptureTrusted)"
     ].joined(separator: "\n")

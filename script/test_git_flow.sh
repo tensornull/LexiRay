@@ -56,12 +56,17 @@ git -C "$WORK" commit -qam 'chore: remote integration'
 git -C "$WORK" push -qu origin dev
 git -C "$WORK" switch -q main
 git -C "$WORK" branch -f dev "$stale_dev"
-git -C "$WORK" switch -qc chore/stale-dev "$stale_dev"
+git -C "$WORK" branch chore/stale-dev "$stale_dev"
 mkdir -p "$WORK/script"
 cp "$ROOT_DIR/script/preflight.sh" "$WORK/script/preflight.sh"
 chmod +x "$WORK/script/preflight.sh"
+git -C "$WORK" branch -f chore/stale-dev "$stale_dev"
+git -C "$WORK" worktree add -q "$TMP_ROOT/stale-task" chore/stale-dev
+mkdir -p "$TMP_ROOT/stale-task/script"
+cp "$ROOT_DIR/script/preflight.sh" "$TMP_ROOT/stale-task/script/preflight.sh"
+chmod +x "$TMP_ROOT/stale-task/script/preflight.sh"
 
-if (cd "$WORK" && ./script/preflight.sh change >"$TMP_ROOT/stale-preflight.log" 2>&1); then
+if (cd "$TMP_ROOT/stale-task" && ./script/preflight.sh change >"$TMP_ROOT/stale-preflight.log" 2>&1); then
   echo "preflight accepted a task branch based on stale local dev" >&2
   exit 1
 fi
@@ -73,7 +78,41 @@ rg -F 'local dev is behind or divergent from the currently known origin/dev' \
 }
 
 git -C "$WORK" branch -f dev origin/dev
-git -C "$WORK" switch -qc chore/current-dev dev
-(cd "$WORK" && ./script/preflight.sh change >/dev/null)
+git -C "$WORK" branch chore/current-dev dev
+git -C "$WORK" worktree add -q "$TMP_ROOT/current-task" chore/current-dev
+mkdir -p "$TMP_ROOT/current-task/script"
+cp "$ROOT_DIR/script/preflight.sh" "$TMP_ROOT/current-task/script/preflight.sh"
+chmod +x "$TMP_ROOT/current-task/script/preflight.sh"
+(cd "$TMP_ROOT/current-task" && ./script/preflight.sh change >/dev/null)
 
-echo "GIT_FLOW_PASS: task->dev squash, dev->main merge commit, main->dev fast-forward, hotfix backflow, stale-dev rejection"
+git -C "$WORK" switch -qc chore/primary-check dev
+mkdir -p "$WORK/script"
+cp "$ROOT_DIR/script/preflight.sh" "$WORK/script/preflight.sh"
+chmod +x "$WORK/script/preflight.sh"
+if (cd "$WORK" && ./script/preflight.sh change >"$TMP_ROOT/primary-preflight.log" 2>&1); then
+  echo "preflight accepted ordinary work in the primary checkout" >&2
+  exit 1
+fi
+rg -F 'ordinary changes require a dedicated linked worktree' \
+  "$TMP_ROOT/primary-preflight.log" >/dev/null || {
+  cat "$TMP_ROOT/primary-preflight.log" >&2
+  echo "preflight did not report the primary-checkout cause" >&2
+  exit 1
+}
+
+git -C "$WORK" worktree add -q --detach "$TMP_ROOT/detached-task" dev
+mkdir -p "$TMP_ROOT/detached-task/script"
+cp "$ROOT_DIR/script/preflight.sh" "$TMP_ROOT/detached-task/script/preflight.sh"
+chmod +x "$TMP_ROOT/detached-task/script/preflight.sh"
+if (cd "$TMP_ROOT/detached-task" && ./script/preflight.sh change >"$TMP_ROOT/detached-preflight.log" 2>&1); then
+  echo "preflight accepted a detached linked worktree" >&2
+  exit 1
+fi
+rg -F 'detached HEAD is not a supported working state' \
+  "$TMP_ROOT/detached-preflight.log" >/dev/null || {
+  cat "$TMP_ROOT/detached-preflight.log" >&2
+  echo "preflight did not report the detached-worktree cause" >&2
+  exit 1
+}
+
+echo "GIT_FLOW_PASS: topology, stale-dev rejection, linked-worktree enforcement"

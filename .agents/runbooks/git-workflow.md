@@ -5,8 +5,8 @@ The long-lived integration branch is `dev`; `main` represents released source.
 ## Normal task
 
 1. Ensure `dev` contains the latest `main` release commit.
-2. Branch from `dev` as `feat/<task>`, `fix/<task>`, `chore/<task>`, or
-   `docs/<task>`.
+2. Create a dedicated linked worktree from `dev` as `feat/<task>`, `fix/<task>`,
+   `chore/<task>`, or `docs/<task>`; primary checkout changes are rejected.
 3. Keep one smallest-complete task per branch.
 4. Open the task PR to `dev` and squash merge after local and PR gates pass.
 
@@ -16,9 +16,9 @@ Do not use `codex/<task>` or another agent-specific prefix.
 
 - `dev` task PRs must run the `build-test` check from `.github/workflows/ci.yml`;
   configure it as required when branch protection is available.
-- `main` must require CI/CodeQL and conversation resolution, but
-  `required_linear_history` must be disabled so the release PR can create its
-  required merge commit.
+- `main` must require CI and conversation resolution, but CodeQL remains
+  scheduled/manual and non-blocking. `required_linear_history` must be disabled
+  so the release PR can create its required merge commit.
 - `script/release.sh doctor` reads the effective branch rules and fails closed
   when they cannot be verified or still require linear history. Changing GitHub
   protection is an explicit repository administration action, not part of

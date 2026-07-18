@@ -119,10 +119,13 @@ for branch in main dev; do
   workflow_event_has_branch .github/workflows/ci.yml pull_request "$branch" ||
     fail ".github/workflows/ci.yml does not run for PRs targeting $branch"
 done
-workflow_event_has_branch .github/workflows/codeql.yml push main ||
-  fail ".github/workflows/codeql.yml does not run for main pushes"
-workflow_event_has_branch .github/workflows/codeql.yml pull_request main ||
-  fail ".github/workflows/codeql.yml does not run for PRs targeting main"
+rg -F '  workflow_dispatch:' .github/workflows/codeql.yml >/dev/null 2>&1 ||
+  fail ".github/workflows/codeql.yml must support manual runs"
+rg -F '  schedule:' .github/workflows/codeql.yml >/dev/null 2>&1 ||
+  fail ".github/workflows/codeql.yml must run on a schedule"
+if rg -n '^  (push|pull_request):' .github/workflows/codeql.yml >/dev/null 2>&1; then
+  fail ".github/workflows/codeql.yml must not block pushes or pull requests"
+fi
 rg -F './script/context_lint.sh' .github/workflows/ci.yml >/dev/null 2>&1 ||
   fail ".github/workflows/ci.yml does not run context lint"
 [[ -x script/tests/git_flow_test.sh ]] ||

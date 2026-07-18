@@ -36,6 +36,7 @@ expected_arguments=(
   --lexiray-acceptance-workspace-root "$ROOT_DIR"
   --lexiray-acceptance-root "$installed_root"
   --lexiray-acceptance-defaults-suite "$installed_suite"
+  --lexiray-acceptance-login-item-status notFound
 )
 arguments_hash="$(/usr/bin/swift "$ROOT_DIR/script/acceptance_evidence.swift" \
   arguments-hash -- "${expected_arguments[@]}")"
@@ -47,7 +48,7 @@ import Foundation
 
 let outputDirectory = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
 let scenarios = [
-  "launch", "selection_hotkey", "source_editor", "language_direction", "speech_controls",
+  "launch", "login_item_settings", "selection_hotkey", "source_editor", "language_direction", "speech_controls",
   "panel_visual_states", "ocr_result_display_1", "ocr_result_display_2",
   "ocr_multi_display"
 ]
@@ -103,6 +104,8 @@ make_receipt() {
   /usr/bin/plutil -insert verification.installed_defaults_suite -string "$installed_suite" -- "$RECEIPT"
   /usr/bin/plutil -insert verification.install_transaction_id -string "$transaction_id" -- "$RECEIPT"
   /usr/bin/plutil -insert verification.installed_at -string "$installed_at" -- "$RECEIPT"
+  /usr/bin/plutil -insert verification.computer_use_required_scenarios \
+    -string "$(computer_use_catalog_csv)" -- "$RECEIPT"
   for key in \
     computer_use computer_use_evidence computer_use_evidence_sha256 computer_use_scenarios \
     computer_use_screenshots_manifest computer_use_screenshots_sha256 computer_use_contact_sheet \
@@ -138,6 +141,11 @@ start_provenance() {
   case "$scenario" in
     launch)
       /usr/bin/plutil -insert state_assertions.values.main_window -string present -- "$output"
+      ;;
+    login_item_settings)
+      /usr/bin/plutil -insert state_assertions.values.registration_action -string toggle -- "$output"
+      /usr/bin/plutil -insert state_assertions.values.status -string notFound -- "$output"
+      /usr/bin/plutil -insert state_assertions.values.toggle_enabled -string true -- "$output"
       ;;
     source_editor)
       /usr/bin/plutil -insert state_assertions.values.editor_focused -string true -- "$output"
@@ -196,7 +204,7 @@ add_capture() {
   local png="$CAPTURE_ROOT/$scenario-window-$window_identifier.png"
   local window_role
   case "$scenario" in
-    launch) window_role=main ;;
+    launch|login_item_settings) window_role=main ;;
     ocr_multi_display) window_role=ocr-overlay ;;
     *) window_role=panel ;;
   esac
@@ -229,6 +237,10 @@ display_count="$(/usr/bin/swift "$ROOT_DIR/script/acceptance_evidence.swift" dis
 start_provenance launch "$display_count"
 add_capture launch 0 100 LexiRay 0 100 100 820 560
 finish_provenance launch
+
+start_provenance login_item_settings "$display_count"
+add_capture login_item_settings 0 109 Settings 0 100 100 820 560
+finish_provenance login_item_settings
 
 window_identifier=101
 for scenario in selection_hotkey source_editor language_direction speech_controls panel_visual_states; do
@@ -411,6 +423,7 @@ while IFS='|' read -r scenario key invalid_value; do
   mv "$EVIDENCE_DIR/state-backup.json" "$CAPTURE_ROOT/$scenario.json"
 done <<'STATE_CASES'
 launch|main_window|missing
+login_item_settings|status|enabled
 selection_hotkey|source_kind|Manual
 source_editor|editor_focused|false
 language_direction|mock_direction|Direction: en -> ja
@@ -520,6 +533,26 @@ if validate_computer_use_manifest "$RECEIPT" "$MANIFEST" 0 >/dev/null 2>&1; then
   exit 1
 fi
 make_manifest
+
+# A change-scoped matrix is valid only when it is frozen in the candidate
+# receipt. Handoff must require every frozen entry and reject later narrowing.
+full_matrix="$(computer_use_catalog_csv)"
+scoped_matrix="launch,login_item_settings"
+/usr/bin/plutil -replace verification.computer_use_required_scenarios \
+  -string "$scoped_matrix" -- "$RECEIPT"
+load_computer_use_required_scenarios "$RECEIPT"
+refresh_fixture
+validate_computer_use_manifest "$RECEIPT" "$MANIFEST" 0
+/usr/bin/plutil -replace scenarios -string launch -- "$MANIFEST"
+/usr/bin/plutil -replace scenario_count -integer 1 -- "$MANIFEST"
+if validate_computer_use_manifest "$RECEIPT" "$MANIFEST" 0 >/dev/null 2>&1; then
+  echo "Computer Use manifest narrowed the receipt-frozen matrix" >&2
+  exit 1
+fi
+/usr/bin/plutil -replace verification.computer_use_required_scenarios \
+  -string "$full_matrix" -- "$RECEIPT"
+load_computer_use_required_scenarios "$RECEIPT"
+refresh_fixture
 
 # A separately rehashed PNG cannot replace the contact sheet derived from the
 # exact sealed scenario screenshots.

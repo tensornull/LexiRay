@@ -31,7 +31,7 @@
 
 ## Default Delivery Loop
 
-1. Run `./script/preflight.sh change` and define a concrete acceptance matrix.
+1. In a linked worktree, run `./script/preflight.sh change`; keep the primary checkout for sync/release.
 2. Implement the smallest complete change in small edit batches.
 3. During debugging, run the narrowest affected tests and explicit GUI
    scenarios. Run `./script/verify.sh changed` only after a stable edit batch;

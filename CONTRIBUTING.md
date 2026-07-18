@@ -6,7 +6,8 @@ with the clean-room goal.
 ## Development Rules
 
 - Create `feat/<task>`, `fix/<task>`, `chore/<task>`, or `docs/<task>` from the
-  latest `dev`. Only emergency hotfixes branch from `main`.
+  latest `dev` in a dedicated linked worktree. Only emergency hotfixes branch
+  from `main`; keep the primary checkout for synchronization and release.
 - Keep changes surgical. Do not include unrelated refactors or formatting churn.
 - Use SwiftUI for app surfaces and narrow AppKit bridges for macOS-specific
   edges.
@@ -57,13 +58,14 @@ stop without installation:
 gh run view <run-id> --log-failed
 ```
 
-Swift CodeQL failures usually include the manual build step. Treat those as build
-failures first, then rerun CodeQL only after the build cause is understood.
+Swift CodeQL runs weekly or on manual dispatch. Treat findings as follow-up
+security work; CodeQL is not a PR or release gate.
 
 ## Releases
 
-Release candidates must already have current installed-app Computer Use
-evidence. From the tagged `main` checkout, use the resumable orchestrator:
+Release candidates must already have a passing real Login Item probe and
+current installed-app Computer Use evidence. From the tagged `main` checkout,
+use the resumable orchestrator:
 
 ```bash
 ./script/release.sh doctor <version>

@@ -64,13 +64,20 @@ other path before reading or writing screenshot evidence.
 
 ## Installed-app Computer Use
 
+After canonical installation, target Computer Use by display name `LexiRay`,
+not by bundle ID or app path. Bundle/path resolution may launch a second
+non-acceptance instance. Receipt validation requires the installed acceptance
+PID to be the sole running LexiRay process before a capture or live handoff can
+pass.
+
 After candidate verification and canonical installation:
 
 1. Confirm the running executable is
    `/Applications/LexiRay.app/Contents/MacOS/LexiRay`.
 2. Launch the isolated acceptance profile, never the user's normal profile.
 3. The installer seals the `launch` main-window capture before returning, so a
-   manually opened window cannot impersonate automatic launch. Read the fixed
+   manually opened window cannot impersonate automatic launch. Read the
+   candidate-frozen, change-scoped
    matrix with `./script/acceptance_receipt.sh computer-use-matrix`, inspect the
    installed main window with Computer Use, then use Computer Use to perform
    every remaining scenario with real clicks, typing, focus changes, and
@@ -90,7 +97,9 @@ After candidate verification and canonical installation:
    use it as evidence; terminate only the newly created PID and choose a
    different unused fixture application.
    The capture helper independently reads the target PID's AX tree and CGWindow
-   state. Passing capture states are fixed: a main window for `launch`; a
+   state. Passing capture states are fixed: a main window for `launch`; an
+   enabled Start at Login toggle plus the actionable `.notFound` explanation
+   for `login_item_settings`; a
    selected `LexiRay` source text, Accessibility source badge, and mock result
    for `selection_hotkey`; a focused non-empty editor for `source_editor`; Japanese and English pickers
    plus `Direction: ja -> en` for `language_direction`; exactly one identified
@@ -115,7 +124,7 @@ After candidate verification and canonical installation:
    ```
 
    Arbitrary scenarios, generic notes, or external screenshots are not passing
-   evidence. The manifest binds the canonical matrix, source, installed
+   evidence. The manifest binds the receipt-frozen canonical matrix, source, installed
    path, PID plus kernel process start time, CDHash,
    executable/certificate/requirement/entitlements hashes, isolated root/suite,
    PID-owned windows, screenshot provenance, and generated contact-sheet hashes.

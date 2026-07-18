@@ -1,8 +1,13 @@
 import AppKit
+import Darwin
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationDidFinishLaunching(_: Notification) {
+    if AppRuntime.isRunningLoginItemSystemProbe {
+      runLoginItemSystemProbe()
+    }
+
     applyAcceptanceAppearance()
     installApplicationIcon()
     AppWindowPresenter.applyActivationPolicy(
@@ -17,6 +22,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     LexiRayController.shared.start()
     if AppRuntime.shouldPresentMainWindowAtLaunch() {
       AppWindowPresenter.bringMainWindowToFrontSoon(cancelsOnResign: false)
+    }
+  }
+
+  private func runLoginItemSystemProbe() -> Never {
+    guard let profile = AppRuntime.acceptanceProfile else {
+      FileHandle.standardError.write(Data("Login Item system probe requires the acceptance profile.\n".utf8))
+      Darwin.exit(78)
+    }
+    guard AppRuntime.isCanonicalInstalledApplication() else {
+      FileHandle.standardError.write(
+        Data("Login Item system probe requires /Applications/LexiRay.app.\n".utf8)
+      )
+      Darwin.exit(78)
+    }
+
+    let result = LoginItemSystemProbe.run(service: SystemLoginItemService())
+    do {
+      try LoginItemSystemProbe.write(result, to: profile.loginItemSystemProbeURL)
+    } catch {
+      FileHandle.standardError.write(Data("Could not write Login Item probe evidence: \(error)\n".utf8))
+      Darwin.exit(1)
+    }
+
+    switch result.outcome {
+    case .passed:
+      Darwin.exit(0)
+    case .blocked:
+      Darwin.exit(75)
+    case .failed:
+      Darwin.exit(1)
     }
   }
 

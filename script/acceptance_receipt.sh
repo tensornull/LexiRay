@@ -20,8 +20,9 @@ SOURCE_PATHS=(
   script
 )
 
-COMPUTER_USE_REQUIRED_SCENARIOS=(
+COMPUTER_USE_SCENARIO_CATALOG=(
   launch
+  login_item_settings
   selection_hotkey
   source_editor
   language_direction
@@ -31,6 +32,7 @@ COMPUTER_USE_REQUIRED_SCENARIOS=(
   ocr_result_display_2
   ocr_multi_display
 )
+COMPUTER_USE_REQUIRED_SCENARIOS=("${COMPUTER_USE_SCENARIO_CATALOG[@]}")
 
 usage() {
   cat >&2 <<'EOF'
@@ -49,6 +51,8 @@ commands:
   field <keypath>
   mark-gui-inspected <passed|failed> [evidence]
   mark-installed <app> <acceptance-pid> <transaction-id>
+  mark-login-item-probe <passed|failed|blocked> <manifest>
+  require-login-item-probe
   installed-transaction-valid <transaction-id> <app>
   verify-app-match <app>
   app-identity <app>
@@ -63,6 +67,47 @@ EOF
 
 sha256_file() {
   /usr/bin/shasum -a 256 "$1" | /usr/bin/awk '{print $1}'
+}
+
+valid_computer_use_scenario() {
+  local expected
+  for expected in "${COMPUTER_USE_SCENARIO_CATALOG[@]}"; do
+    [[ "$1" == "$expected" ]] && return 0
+  done
+  return 1
+}
+
+set_computer_use_required_scenarios() {
+  local csv="$1"
+  local scenario requested_index=0
+  local -a requested selected
+  IFS=',' read -r -a requested <<<"$csv"
+  [[ ${#requested[@]} -gt 0 && "${requested[0]}" == launch ]] || {
+    echo "Computer Use matrix must start with launch." >&2
+    return 1
+  }
+  for scenario in "${COMPUTER_USE_SCENARIO_CATALOG[@]}"; do
+    if [[ $requested_index -lt ${#requested[@]} &&
+      "${requested[$requested_index]}" == "$scenario" ]]; then
+      selected+=("$scenario")
+      requested_index=$((requested_index + 1))
+    fi
+  done
+  [[ $requested_index -eq ${#requested[@]} ]] || {
+    echo "Computer Use matrix has an unknown, duplicate, or out-of-order scenario: $csv" >&2
+    return 1
+  }
+  COMPUTER_USE_REQUIRED_SCENARIOS=("${selected[@]}")
+}
+
+load_computer_use_required_scenarios() {
+  local receipt="$1"
+  set_computer_use_required_scenarios \
+    "$(plist_value "$receipt" verification.computer_use_required_scenarios)"
+}
+
+computer_use_catalog_csv() {
+  printf '%s\n' "${COMPUTER_USE_SCENARIO_CATALOG[@]}" | paste -sd, -
 }
 
 source_fingerprint() {
@@ -521,11 +566,21 @@ write_candidate() {
   local git_head git_branch created_at scenario_names manifest_scenarios screenshot_count results_hash contact_sheet_hash
   local results_file gui_manifest gui_manifest_hash gui_screenshots_manifest gui_screenshots_manifest_hash
   local rebuilt_contact_sheet
+  local login_item_probe_status
+  local computer_use_required_scenarios
 
   case "$gui_status" in
     passed|not-required) ;;
     *) echo "GUI status must be passed or not-required." >&2; exit 2 ;;
   esac
+  case "${LEXIRAY_LOGIN_ITEM_PROBE_REQUIRED:-0}" in
+    0) login_item_probe_status=not-required ;;
+    1) login_item_probe_status=pending ;;
+    *) echo "LEXIRAY_LOGIN_ITEM_PROBE_REQUIRED must be 0 or 1." >&2; exit 2 ;;
+  esac
+  set_computer_use_required_scenarios \
+    "${LEXIRAY_COMPUTER_USE_REQUIRED_SCENARIOS:-$(computer_use_catalog_csv)}" || exit 2
+  computer_use_required_scenarios="$(computer_use_matrix_csv)"
 
   fingerprint_before="$(source_fingerprint)"
   l3_valid >/dev/null || {
@@ -626,7 +681,7 @@ write_candidate() {
   tmp_json="$(mktemp "$ACCEPTANCE_DIR/.candidate-json.XXXXXX")"
 
   /usr/bin/plutil -create xml1 "$tmp_plist"
-  /usr/bin/plutil -insert schema_version -integer 1 -- "$tmp_plist"
+  /usr/bin/plutil -insert schema_version -integer 3 -- "$tmp_plist"
   plist_insert_string "$tmp_plist" kind candidate
   plist_insert_string "$tmp_plist" source_fingerprint "$fingerprint_before"
   plist_insert_string "$tmp_plist" git_head "$git_head"
@@ -671,6 +726,10 @@ write_candidate() {
   fi
   plist_insert_string "$tmp_plist" verification.gui_visual_inspection_evidence ""
   plist_insert_string "$tmp_plist" verification.gui_visual_inspection_at ""
+  plist_insert_string "$tmp_plist" verification.login_item_system_probe "$login_item_probe_status"
+  plist_insert_string "$tmp_plist" verification.login_item_system_probe_manifest ""
+  plist_insert_string "$tmp_plist" verification.login_item_system_probe_manifest_sha256 ""
+  plist_insert_string "$tmp_plist" verification.login_item_system_probe_at ""
   plist_insert_string "$tmp_plist" verification.installed pending
   plist_insert_string "$tmp_plist" verification.installed_path ""
   plist_insert_string "$tmp_plist" verification.installed_cdhash ""
@@ -683,6 +742,8 @@ write_candidate() {
   plist_insert_string "$tmp_plist" verification.installed_defaults_suite ""
   plist_insert_string "$tmp_plist" verification.install_transaction_id ""
   plist_insert_string "$tmp_plist" verification.installed_at ""
+  plist_insert_string "$tmp_plist" verification.computer_use_required_scenarios \
+    "$computer_use_required_scenarios"
   plist_insert_string "$tmp_plist" verification.computer_use pending
   plist_insert_string "$tmp_plist" verification.computer_use_evidence ""
   plist_insert_string "$tmp_plist" verification.computer_use_evidence_sha256 ""
@@ -805,9 +866,17 @@ require_candidate() {
     echo "Acceptance receipt has the wrong kind: $receipt" >&2
     return 1
   }
+  [[ "$(plist_value "$receipt" schema_version)" == 3 ]] || {
+    echo "Candidate receipt schema is stale; rerun candidate verification." >&2
+    return 1
+  }
   recorded="$(plist_value "$receipt" source_fingerprint)"
   [[ "$recorded" == "$fingerprint" ]] || {
     echo "Candidate receipt source fingerprint is stale." >&2
+    return 1
+  }
+  load_computer_use_required_scenarios "$receipt" || {
+    echo "Candidate receipt has an invalid frozen Computer Use matrix." >&2
     return 1
   }
   local key expected
@@ -952,6 +1021,95 @@ require_candidate() {
   printf '%s\n' "$receipt"
 }
 
+mark_login_item_probe() {
+  [[ $# -eq 2 ]] || usage
+  local status="$1"
+  local manifest="$2"
+  local receipt outcome completed_at app
+  case "$status" in
+    passed|failed|blocked) ;;
+    *) echo "Login Item probe status must be passed, failed, or blocked." >&2; return 2 ;;
+  esac
+  receipt="$(require_candidate 1)"
+  require_evidence_file "$manifest" || return 1
+  validate_plist "$manifest" || { echo "Login Item probe manifest is malformed." >&2; return 1; }
+  outcome="$(plist_value "$manifest" outcome)"
+  completed_at="$(plist_value "$manifest" completed_at)"
+  app="$(plist_value "$receipt" app.path)"
+  [[ "$outcome" == "$status" &&
+    "$(plist_value "$manifest" schema_version)" == 1 &&
+    "$(plist_value "$manifest" kind)" == login-item-system-probe &&
+    "$(plist_value "$manifest" source_fingerprint)" == "$(plist_value "$receipt" source_fingerprint)" &&
+    "$(plist_value "$manifest" app_path)" == /Applications/LexiRay.app &&
+    "$(plist_value "$manifest" bundle_id)" == "$(plist_value "$receipt" app.bundle_id)" &&
+    "$(plist_value "$manifest" app_cdhash)" == "$(plist_value "$receipt" app.cdhash)" &&
+    "$(plist_value "$manifest" app_executable_sha256)" == "$(plist_value "$receipt" app.executable_sha256)" &&
+    "$(plist_value "$manifest" app_certificate_sha256)" == "$(plist_value "$receipt" app.certificate_sha256)" &&
+    "$(plist_value "$manifest" app_designated_requirement_sha256)" == "$(plist_value "$receipt" app.designated_requirement_sha256)" ]] || {
+    echo "Login Item probe manifest is not bound to the current candidate." >&2
+    return 1
+  }
+  valid_utc_timestamp "$completed_at" || {
+    echo "Login Item probe completion time is invalid." >&2
+    return 1
+  }
+  utc_timestamp_not_future "$completed_at" || {
+    echo "Login Item probe completion time is in the future." >&2
+    return 1
+  }
+  if [[ "$status" == passed || "$status" == blocked ]]; then
+    local initial_status registered_status final_status transition
+    initial_status="$(plist_value "$manifest" initial_status)"
+    registered_status="$(plist_value "$manifest" registered_status || true)"
+    final_status="$(plist_value "$manifest" final_status)"
+    transition="$initial_status:$registered_status:$final_status"
+    case "$status:$transition" in
+      passed:enabled::enabled | \
+        passed:notRegistered:enabled:notRegistered | \
+        passed:notRegistered:enabled:notFound | \
+        passed:notFound:enabled:notRegistered | \
+        passed:notFound:enabled:notFound | \
+        blocked:requiresApproval::requiresApproval | \
+        blocked:notRegistered:requiresApproval:notRegistered | \
+        blocked:notRegistered:requiresApproval:notFound | \
+        blocked:notFound:requiresApproval:notRegistered | \
+        blocked:notFound:requiresApproval:notFound) ;;
+      *)
+        echo "Login Item probe outcome does not match a real reversible state transition." >&2
+        return 1
+        ;;
+    esac
+  fi
+  app_matches_receipt "$receipt" /Applications/LexiRay.app || {
+    echo "Login Item probe did not run against the current installed candidate." >&2
+    return 1
+  }
+  update_receipt "$receipt" \
+    verification.login_item_system_probe "$status" \
+    verification.login_item_system_probe_manifest "$manifest" \
+    verification.login_item_system_probe_manifest_sha256 "$(sha256_file "$manifest")" \
+    verification.login_item_system_probe_at "$completed_at"
+  printf '%s\n' "$receipt"
+}
+
+require_login_item_probe() {
+  [[ $# -eq 0 ]] || usage
+  local receipt manifest
+  receipt="$(require_candidate 1)"
+  [[ "$(plist_value "$receipt" verification.login_item_system_probe)" == passed ]] || {
+    echo "Current candidate has no passing real Login Item system probe." >&2
+    return 1
+  }
+  manifest="$(plist_value "$receipt" verification.login_item_system_probe_manifest)"
+  require_evidence_file "$manifest" || return 1
+  [[ "$(sha256_file "$manifest")" == \
+    "$(plist_value "$receipt" verification.login_item_system_probe_manifest_sha256)" ]] || {
+    echo "Login Item probe evidence no longer matches its receipt." >&2
+    return 1
+  }
+  printf '%s\n' "$receipt"
+}
+
 mark_gui_inspected() {
   [[ $# -ge 1 && $# -le 2 ]] || usage
   local status="$1"
@@ -1004,6 +1162,17 @@ update_receipt() {
   chmod 600 "$receipt"
 }
 
+validate_sole_lexiray_process() {
+  local expected_pid="$1"
+  local observed_pid observed_count=0
+  while IFS= read -r observed_pid; do
+    [[ -n "$observed_pid" ]] || continue
+    observed_count=$((observed_count + 1))
+    [[ "$observed_pid" == "$expected_pid" ]] || return 1
+  done < <(pgrep -x LexiRay 2>/dev/null || true)
+  [[ "$observed_count" -eq 1 ]] || return 1
+}
+
 validate_installed_acceptance_process() {
   local installed="$1"
   local pid="$2"
@@ -1015,9 +1184,11 @@ validate_installed_acceptance_process() {
     --lexiray-acceptance-workspace-root "$ROOT_DIR"
     --lexiray-acceptance-root "$acceptance_root"
     --lexiray-acceptance-defaults-suite "$defaults_suite"
+    --lexiray-acceptance-login-item-status notFound
   )
   [[ "$pid" =~ ^[0-9]+$ ]] || return 1
   [[ -f "$EVIDENCE_HELPER" ]] || return 1
+  validate_sole_lexiray_process "$pid" || return 1
   if [[ -n "$expected_start_time" ]]; then
     [[ "$expected_start_time" =~ ^[1-9][0-9]*$ ]] || return 1
     /usr/bin/swift "$EVIDENCE_HELPER" process \
@@ -1039,6 +1210,7 @@ installed_acceptance_process_start_time() {
     --lexiray-acceptance-workspace-root "$ROOT_DIR"
     --lexiray-acceptance-root "$acceptance_root"
     --lexiray-acceptance-defaults-suite "$defaults_suite"
+    --lexiray-acceptance-login-item-status notFound
   )
   /usr/bin/swift "$EVIDENCE_HELPER" process-identity \
     "$pid" "$installed/Contents/MacOS/LexiRay" -- "${expected_arguments[@]}"
@@ -1063,6 +1235,7 @@ capture_installed_launch() {
     --lexiray-acceptance-workspace-root "$ROOT_DIR"
     --lexiray-acceptance-root "$acceptance_root"
     --lexiray-acceptance-defaults-suite "$defaults_suite"
+    --lexiray-acceptance-login-item-status notFound
   )
 
   case "$capture_root" in
@@ -1383,7 +1556,7 @@ computer_use_matrix_csv() {
   computer_use_matrix | paste -sd, -
 }
 
-valid_computer_use_scenario() {
+required_computer_use_scenario() {
   local expected
   for expected in "${COMPUTER_USE_REQUIRED_SCENARIOS[@]}"; do
     [[ "$1" == "$expected" ]] && return 0
@@ -1424,6 +1597,7 @@ verify_computer_use_provenance() {
     --lexiray-acceptance-workspace-root "$ROOT_DIR"
     --lexiray-acceptance-root "$installed_root"
     --lexiray-acceptance-defaults-suite "$installed_suite"
+    --lexiray-acceptance-login-item-status notFound
   )
   /usr/bin/swift "$EVIDENCE_HELPER" verify \
     "$provenance" "$installed_pid" "$installed_path/Contents/MacOS/LexiRay" \
@@ -1443,7 +1617,7 @@ capture_computer_use() {
   local transaction_id installed_at
   local -a expected_arguments helper_arguments
   valid_computer_use_scenario "$scenario" || {
-    echo "Computer Use scenario must be in the canonical installed matrix." >&2
+    echo "Unknown Computer Use scenario: $scenario" >&2
     return 1
   }
   [[ -z "$window_id" || "$window_id" =~ ^[1-9][0-9]*$ ]] || {
@@ -1451,6 +1625,11 @@ capture_computer_use() {
     return 1
   }
   receipt="$(require_candidate 1)"
+  load_computer_use_required_scenarios "$receipt" || return 1
+  required_computer_use_scenario "$scenario" || {
+    echo "Computer Use scenario is not required by this candidate: $scenario" >&2
+    return 1
+  }
   [[ "$(plist_value "$receipt" verification.installed)" == passed ]] || {
     echo "Computer Use capture requires an installed candidate." >&2
     return 1
@@ -1498,6 +1677,7 @@ capture_computer_use() {
     --lexiray-acceptance-workspace-root "$ROOT_DIR"
     --lexiray-acceptance-root "$installed_root"
     --lexiray-acceptance-defaults-suite "$installed_suite"
+    --lexiray-acceptance-login-item-status notFound
   )
   helper_arguments=(
     capture "$installed_pid" "$installed_path/Contents/MacOS/LexiRay"
@@ -1526,6 +1706,7 @@ validate_computer_use_manifest() {
   local rebuilt_contact_sheet
 
   require_evidence_file "$manifest" || return 1
+  load_computer_use_required_scenarios "$receipt" || return 1
   validate_plist "$manifest" || {
     echo "Computer Use manifest is malformed." >&2
     return 1
@@ -1693,6 +1874,7 @@ write_computer_use_manifest() {
   local contact_sheet contact_hash combined_hash manifest plist input_dir scenario provenance images image index=0
 
   receipt="$(require_candidate 1)"
+  load_computer_use_required_scenarios "$receipt" || return 1
   [[ "$(plist_value "$receipt" verification.installed)" == passed ]] || {
     echo "Computer Use evidence requires an installed candidate." >&2
     return 1
@@ -1922,6 +2104,9 @@ require_handoff() {
   }
   validate_computer_use_manifest \
     "$receipt" "$(plist_value "$receipt" verification.computer_use_evidence)" 0
+  if [[ "$(plist_value "$receipt" verification.login_item_system_probe)" != not-required ]]; then
+    require_login_item_probe >/dev/null
+  fi
   printf '%s\n' "$receipt"
 }
 
@@ -1949,11 +2134,18 @@ case "$command" in
     ;;
   mark-gui-inspected) mark_gui_inspected "$@" ;;
   app-identity) write_app_identity "$@" ;;
-  computer-use-matrix) [[ $# -eq 0 ]] || usage; computer_use_matrix ;;
+  computer-use-matrix)
+    [[ $# -eq 0 ]] || usage
+    receipt="$(require_candidate 0)"
+    load_computer_use_required_scenarios "$receipt"
+    computer_use_matrix
+    ;;
   capture-computer-use) capture_computer_use "$@" ;;
   write-computer-use-manifest) write_computer_use_manifest "$@" ;;
   verify-app-match) verify_app_match "$@" ;;
   mark-installed) mark_installed "$@" ;;
+  mark-login-item-probe) mark_login_item_probe "$@" ;;
+  require-login-item-probe) require_login_item_probe "$@" ;;
   installed-transaction-valid) installed_transaction_valid "$@" ;;
   mark-computer-use) mark_computer_use "$@" ;;
   require-handoff) require_handoff "$@" ;;

@@ -38,6 +38,10 @@ done
 branch="$(git symbolic-ref --quiet --short HEAD || true)"
 [[ -n "$branch" ]] || fail "detached HEAD is not a supported working state"
 
+if [[ "$MODE" == change && ! -f "$ROOT_DIR/.git" ]]; then
+  fail "ordinary changes require a dedicated linked worktree; keep the primary checkout for sync and release work"
+fi
+
 require_current_local_dev() {
   git rev-parse --verify dev >/dev/null 2>&1 || fail "local dev is unavailable"
   if git rev-parse --verify origin/dev >/dev/null 2>&1; then
