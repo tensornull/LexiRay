@@ -53,12 +53,14 @@ Requirements:
 - macOS 15+
 - Xcode 16.4+ or newer
 - XcodeGen
-- SwiftFormat
+- SwiftFormat 0.62.1 (repository-pinned)
 
 Install local tools:
 
 ```bash
-brew install xcodegen swiftformat
+brew install xcodegen
+./script/install_swiftformat.sh build/tools
+export LEXIRAY_SWIFTFORMAT_TOOL="$PWD/build/tools/swiftformat"
 ```
 
 Run the changed-scope gate while developing. Before pushing an app-binary

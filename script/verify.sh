@@ -107,7 +107,7 @@ lint_changed_swift() {
   done <"$CHANGED_FILES"
   if [[ ${#files[@]} -gt 0 ]]; then
     echo "--- SwiftFormat (changed paths)"
-    swiftformat "${files[@]}" --lint
+    "$ROOT_DIR/script/swiftformat_tool.sh" "${files[@]}" --lint
   fi
 }
 

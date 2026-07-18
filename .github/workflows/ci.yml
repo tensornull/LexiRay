@@ -51,7 +51,8 @@ jobs:
         run: |
           brew install ripgrep
           if [[ "${{ steps.scope.outputs.needs_xcode }}" == true ]]; then
-            brew install xcodegen swiftformat
+            brew install xcodegen
+            ./script/install_swiftformat.sh "$RUNNER_TEMP/lexiray-tools"
           fi
 
       - name: Context lint
@@ -63,7 +64,9 @@ jobs:
 
       - name: SwiftFormat lint
         if: steps.scope.outputs.needs_xcode == 'true'
-        run: swiftformat LexiRay LexiRayTests Package.swift --lint
+        env:
+          LEXIRAY_SWIFTFORMAT_TOOL: ${{ runner.temp }}/lexiray-tools/swiftformat
+        run: ./script/swiftformat_tool.sh LexiRay LexiRayTests Package.swift --lint
 
       - name: Script control-plane tests
         if: steps.scope.outputs.needs_script_tests == 'true'

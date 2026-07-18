@@ -9,6 +9,10 @@ superseded runs, and always executes `script/context_lint.sh`. Swift/build input
 changes run the full Xcode lane; script/workflow changes run control-plane
 tests; documentation and prototype-only changes do not start Xcode. A task PR
 to `dev` without `build-test` is a repository-configuration blocker.
+CI downloads the repository-pinned SwiftFormat release and verifies its
+published SHA-256 before use. Local gates use `script/swiftformat_tool.sh` and
+fail closed on a version mismatch; do not use an unpinned Homebrew latest binary
+as evidence.
 Branch protection on `dev` and `main` requires only `build-test`; CodeQL alerts
 are triaged asynchronously as repair work and are never added to the blocking
 merge or release chain.

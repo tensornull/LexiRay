@@ -18,11 +18,6 @@ command -v xcodegen >/dev/null 2>&1 || {
   exit 127
 }
 
-command -v swiftformat >/dev/null 2>&1 || {
-  echo "swiftformat is required. Install with: brew install swiftformat" >&2
-  exit 127
-}
-
 command -v rg >/dev/null 2>&1 || {
   echo "ripgrep is required. Install with: brew install ripgrep" >&2
   exit 127
@@ -32,7 +27,7 @@ cleanup
 xcodebuild -version
 "$ROOT_DIR/script/context_lint.sh"
 xcodegen generate
-swiftformat LexiRay LexiRayTests Package.swift --lint
+"$ROOT_DIR/script/swiftformat_tool.sh" LexiRay LexiRayTests Package.swift --lint
 fingerprint="$($ROOT_DIR/script/acceptance_receipt.sh fingerprint)"
 result_bundle="$ROOT_DIR/build/acceptance/l3-$fingerprint.xcresult"
 rm -rf "$result_bundle"

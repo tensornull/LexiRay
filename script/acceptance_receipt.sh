@@ -805,7 +805,7 @@ record_l3() {
     return 1
   }
   "$ROOT_DIR/script/context_lint.sh" >/dev/null
-  swiftformat LexiRay LexiRayTests Package.swift --lint >/dev/null
+  "$ROOT_DIR/script/swiftformat_tool.sh" LexiRay LexiRayTests Package.swift --lint >/dev/null
   mkdir -p "$ACCEPTANCE_DIR"
   receipt="$ACCEPTANCE_DIR/l3-$fingerprint.json"
   tmp_plist="$(mktemp "$ACCEPTANCE_DIR/.l3-plist.XXXXXX")"
