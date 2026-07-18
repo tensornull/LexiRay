@@ -341,6 +341,7 @@ doctor() {
   local dirty
   local plist_build
   local plist_version
+  local remote_dev
   local remote_main
   local release_commit
   local release_parent_one=""
@@ -373,6 +374,8 @@ doctor() {
 
   remote_main="$(gh api "repos/$REPOSITORY/commits/main" --jq '.sha' 2>/dev/null || true)"
   [[ -n "$remote_main" ]] || die "Could not resolve $REMOTE/main."
+  remote_dev="$(gh api "repos/$REPOSITORY/commits/dev" --jq '.sha' 2>/dev/null || true)"
+  [[ -n "$remote_dev" ]] || die "Could not resolve $REMOTE/dev."
   [[ "$TAG_COMMIT" == "$remote_main" ]] ||
     die "$TAG must point at $REMOTE/main before publication ($TAG_COMMIT != $remote_main)."
   [[ "$SOURCE_COMMIT" == "$TAG_COMMIT" ]] ||
@@ -384,6 +387,8 @@ doctor() {
   [[ "$release_commit" == "$TAG_COMMIT" && -n "$release_parent_one" &&
     -n "$release_parent_two" && -z "$release_extra_parent" ]] ||
     die "$TAG must point at a two-parent dev-to-main release merge commit."
+  [[ "$release_parent_two" == "$remote_dev" || "$TAG_COMMIT" == "$remote_dev" ]] ||
+    die "$TAG merge second parent must match $REMOTE/dev, or dev must already be synced to $TAG."
 
   branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
   if [[ -n "$branch" && "$branch" != "main" ]]; then

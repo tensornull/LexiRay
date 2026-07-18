@@ -255,6 +255,15 @@ rg -F 'must point at a two-parent dev-to-main release merge commit' \
   echo "release doctor does not fail closed for a non-merge release tag" >&2
   exit 1
 }
+rg -F 'repos/$REPOSITORY/commits/dev' "$ROOT_DIR/script/release.sh" >/dev/null || {
+  echo "release doctor does not resolve the live dev head" >&2
+  exit 1
+}
+rg -F '"$release_parent_two" == "$remote_dev" || "$TAG_COMMIT" == "$remote_dev"' \
+  "$ROOT_DIR/script/release.sh" >/dev/null || {
+  echo "release doctor does not bind the release merge to dev or its synced state" >&2
+  exit 1
+}
 if rg -F 'rules/branches/main' "$ROOT_DIR/script/release.sh" >/dev/null; then
   echo "release doctor still requires main protection to remain weakened after merge" >&2
   exit 1
