@@ -7,6 +7,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-07-19
+
+### Fixed
+
+- Fixed the secure release-lock bootstrap on the macOS system Bash 3.2 so
+  `release.sh doctor`, `publish`, and `status` no longer fail on empty arrays
+  under `set -u`.
+
 ## [0.4.2] - 2026-07-18
 
 ### Fixed
