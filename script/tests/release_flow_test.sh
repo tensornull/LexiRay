@@ -273,12 +273,19 @@ if LEXIRAY_RELEASE_ORCHESTRATED=local LEXIRAY_RELEASE_NO_UI=1 \
   exit 1
 fi
 grep -F "live, locked release.sh capability" "$WORK_DIR/forged-package.out" >/dev/null
-if LEXIRAY_RELEASE_ORCHESTRATED=local \
+if GITHUB_ACTIONS= LEXIRAY_RELEASE_ORCHESTRATED=local \
   "$ROOT_DIR/script/publish_release.sh" 0.4.0 >"$WORK_DIR/forged-publish.out" 2>&1; then
   echo "forged publish environment bypassed the locked capability" >&2
   exit 1
 fi
 grep -F "live, locked release.sh capability" "$WORK_DIR/forged-publish.out" >/dev/null
+if GITHUB_ACTIONS=true LEXIRAY_RELEASE_ORCHESTRATED=local \
+  "$ROOT_DIR/script/publish_release.sh" 0.4.0 >"$WORK_DIR/github-actions-publish.out" 2>&1; then
+  echo "GitHub fallback builder was allowed to publish a public release" >&2
+  exit 1
+fi
+grep -F "GitHub fallback builders may create artifacts, but cannot publish a public release" \
+  "$WORK_DIR/github-actions-publish.out" >/dev/null
 for helper in package_release_dmg.sh publish_release.sh release_check.sh verify_github_release_assets.sh; do
   set +e
   "$ROOT_DIR/script/$helper" '../outside' >"$WORK_DIR/$helper.out" 2>&1
