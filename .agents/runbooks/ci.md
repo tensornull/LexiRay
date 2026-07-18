@@ -9,6 +9,9 @@ superseded runs, and always executes `script/context_lint.sh`. Swift/build input
 changes run the full Xcode lane; script/workflow changes run control-plane
 tests; documentation and prototype-only changes do not start Xcode. A task PR
 to `dev` without `build-test` is a repository-configuration blocker.
+Script control-plane tests run through `script/run_control_plane_tests.sh` with
+four isolated workers by default; use the same runner locally so CI and local
+gates retain the same coverage without the former serial four-minute delay.
 CI downloads the repository-pinned SwiftFormat release and verifies its
 published SHA-256 before use. Local gates use `script/swiftformat_tool.sh` and
 fail closed on a version mismatch; do not use an unpinned Homebrew latest binary

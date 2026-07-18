@@ -306,16 +306,7 @@ run_l3() {
 }
 
 run_script_tests() {
-  local test_script ran=0
-  for test_script in "$ROOT_DIR"/script/tests/*_test.sh; do
-    [[ -x "$test_script" ]] || continue
-    ran=1
-    echo "--- Script test: ${test_script#$ROOT_DIR/}"
-    "$test_script"
-  done
-  if [[ "$ran" == 0 ]]; then
-    echo "--- Script tests: none registered"
-  fi
+  "$ROOT_DIR/script/run_control_plane_tests.sh"
 }
 
 verify_source_unchanged() {

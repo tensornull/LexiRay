@@ -12,6 +12,10 @@ pipeline. Verification evidence belongs to the current source fingerprint.
 ./script/verify.sh pr
 ```
 
+These gates run registered script control-plane tests through the bounded
+parallel `script/run_control_plane_tests.sh` entry point. Do not replace it with
+a serial per-test loop in CI or local verification.
+
 - `changed`: run format, incremental build, relevant unit tests, and affected
   GUI scenarios after an edit batch.
 - `candidate`: run the full local gate and produce a signed workspace build. If

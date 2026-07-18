@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/lexiray-ci-scope.XXXXXX")"
+CI_WORKFLOW="$ROOT_DIR/.github/workflows/ci.yml"
+CONTROL_PLANE_RUNNER="$ROOT_DIR/script/run_control_plane_tests.sh"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
 assert_scope() {
@@ -34,5 +36,22 @@ assert_scope mixed $'needs_xcode=true\nneeds_script_tests=true\nneeds_prototype=
 : >"$TMP_ROOT/empty.txt"
 [[ "$("$ROOT_DIR/script/ci_scope.sh" "$TMP_ROOT/empty.txt")" == \
   $'needs_xcode=true\nneeds_script_tests=true\nneeds_prototype=false' ]]
+
+rg -F "run: ./script/run_control_plane_tests.sh" "$CI_WORKFLOW" >/dev/null || {
+  echo "CI script control-plane tests do not use the canonical runner" >&2
+  exit 1
+}
+rg -F 'MAX_JOBS="${LEXIRAY_CONTROL_PLANE_JOBS:-4}"' "$CONTROL_PLANE_RUNNER" >/dev/null || {
+  echo "control-plane runner does not default to four workers" >&2
+  exit 1
+}
+rg -F 'xargs -0 -n 1 -P "$MAX_JOBS" /bin/bash -c' "$CONTROL_PLANE_RUNNER" >/dev/null || {
+  echo "control-plane runner is not using bounded parallel execution" >&2
+  exit 1
+}
+if rg -F 'for test_script in script/tests/*_test.sh' "$CI_WORKFLOW" >/dev/null; then
+  echo "CI script control-plane tests regressed to serial execution" >&2
+  exit 1
+fi
 
 echo "CI_SCOPE_PASS"

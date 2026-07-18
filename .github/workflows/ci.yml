@@ -72,11 +72,7 @@ jobs:
         if: steps.scope.outputs.needs_script_tests == 'true'
         env:
           LEXIRAY_PORTABLE_CONTROL_PLANE_TESTS: "1"
-        run: |
-          for test_script in script/tests/*_test.sh; do
-            [[ -x "$test_script" ]] || continue
-            "$test_script"
-          done
+        run: ./script/run_control_plane_tests.sh
 
       - name: Prototype build
         if: steps.scope.outputs.needs_prototype == 'true'
