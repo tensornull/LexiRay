@@ -133,20 +133,27 @@ acquire_publish_lock() {
   [[ "$DRY_RUN" -eq 0 ]] || return 0
   [[ "$PUBLISH_LOCK_HELD" == 1 && "${LEXIRAY_RELEASE_LOCK_HELD:-}" == 1 && -e /dev/fd/9 ]] ||
     die "Release command does not hold the secure global release lock."
-  local -a validator_arguments=()
-  [[ "$RELEASE_TEST_MODE" == 0 ]] || validator_arguments+=(--test)
-  /usr/bin/swift "$ROOT_DIR/script/release_lock_validate.swift" \
-    "${validator_arguments[@]}" "$GLOBAL_LOCK_FILE" 9 >/dev/null ||
-    die "Inherited global release lock is invalid."
+  if [[ "$RELEASE_TEST_MODE" == 0 ]]; then
+    /usr/bin/swift "$ROOT_DIR/script/release_lock_validate.swift" \
+      "$GLOBAL_LOCK_FILE" 9 >/dev/null ||
+      die "Inherited global release lock is invalid."
+  else
+    /usr/bin/swift "$ROOT_DIR/script/release_lock_validate.swift" \
+      --test "$GLOBAL_LOCK_FILE" 9 >/dev/null ||
+      die "Inherited test release lock is invalid."
+  fi
 }
 
 bootstrap_publish_lock() {
   [[ "$DRY_RUN" -eq 0 ]] || return 0
-  local -a lock_arguments=()
-  [[ "$RELEASE_TEST_MODE" == 0 ]] || lock_arguments+=(--test)
   if [[ "${LEXIRAY_RELEASE_LOCK_HELD:-}" != 1 || ! -e /dev/fd/9 ]]; then
-    exec /usr/bin/swift "$ROOT_DIR/script/release_lock.swift" \
-      "${lock_arguments[@]}" "$GLOBAL_LOCK_FILE" "$ROOT_DIR/script/release.sh" "$@"
+    if [[ "$RELEASE_TEST_MODE" == 0 ]]; then
+      exec /usr/bin/swift "$ROOT_DIR/script/release_lock.swift" \
+        "$GLOBAL_LOCK_FILE" "$ROOT_DIR/script/release.sh" "$@"
+    else
+      exec /usr/bin/swift "$ROOT_DIR/script/release_lock.swift" \
+        --test "$GLOBAL_LOCK_FILE" "$ROOT_DIR/script/release.sh" "$@"
+    fi
   fi
   PUBLISH_LOCK="$GLOBAL_LOCK_FILE"
   PUBLISH_LOCK_HELD=1
