@@ -12,6 +12,8 @@ struct AcceptanceProfile: Equatable {
     case missingDefaultsSuite
     case productionDefaultsSuite
     case unsafeDefaultsSuite
+    case unsafePreferencesHome
+    case preferencesDaemonIsolationRequired
     case unsafeSelectionFixtureProcessIdentifier
   }
 
@@ -27,6 +29,10 @@ struct AcceptanceProfile: Equatable {
   static let selectionFixturePIDArgument = "--lexiray-acceptance-selection-pid"
   static let markerFileName = ".lexiray-acceptance-root"
   static let markerContents = "LexiRay acceptance root v1\n"
+  static let preferencesHomeDirectoryName = "preferences-home"
+  static let homeEnvironmentKey = "HOME"
+  static let fixedUserHomeEnvironmentKey = "CFFIXED_USER_HOME"
+  static let preferencesAvoidDaemonEnvironmentKey = "CFPREFERENCES_AVOID_DAEMON"
 
   let dataRoot: URL
   let defaultsSuiteName: String
@@ -40,10 +46,14 @@ struct AcceptanceProfile: Equatable {
     dataRoot.appending(path: "history.json", directoryHint: .notDirectory)
   }
 
+  var loginItemSystemProbeURL: URL {
+    dataRoot.appending(path: "login-item-system-probe.json", directoryHint: .notDirectory)
+  }
+
   static func resolve(
     environment: [String: String] = ProcessInfo.processInfo.environment,
     arguments: [String] = ProcessInfo.processInfo.arguments,
-    homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    homeDirectory: URL? = nil
   ) throws -> AcceptanceProfile? {
     let hasEnabledArgument = arguments.contains(enabledArgument)
     if hasEnabledArgument,
@@ -95,7 +105,10 @@ struct AcceptanceProfile: Equatable {
       .appending(path: "build/acceptance-data", directoryHint: .isDirectory)
       .standardizedFileURL
       .resolvingSymlinksInPath()
-    let canonicalHomeRoot = homeDirectory
+    guard let effectiveHomeDirectory = homeDirectory ?? systemHomeDirectory() else {
+      throw ConfigurationError.unsafeDataRoot
+    }
+    let canonicalHomeRoot = effectiveHomeDirectory
       .standardizedFileURL
       .resolvingSymlinksInPath()
     let productionDataRoot = canonicalHomeRoot
@@ -144,6 +157,26 @@ struct AcceptanceProfile: Equatable {
       throw ConfigurationError.unsafeDefaultsSuite
     }
 
+    let expectedPreferencesHome = dataRoot
+      .appending(path: preferencesHomeDirectoryName, directoryHint: .isDirectory)
+      .standardizedFileURL
+      .resolvingSymlinksInPath()
+    let canonicalPreferencesHome = environment[homeEnvironmentKey]
+      .map { URL(fileURLWithPath: $0, isDirectory: true) }
+      .map { $0.standardizedFileURL.resolvingSymlinksInPath() }
+    guard let rawHome = environment[homeEnvironmentKey]?.nonEmptyTrimmed,
+          let rawFixedUserHome = environment[fixedUserHomeEnvironmentKey]?.nonEmptyTrimmed,
+          rawHome.hasPrefix("/"),
+          rawHome == rawFixedUserHome,
+          fileType(atPath: rawHome) == S_IFDIR,
+          canonicalPreferencesHome == expectedPreferencesHome
+    else {
+      throw ConfigurationError.unsafePreferencesHome
+    }
+    guard environment[preferencesAvoidDaemonEnvironmentKey] == "1" else {
+      throw ConfigurationError.preferencesDaemonIsolationRequired
+    }
+
     let rawSelectionPID = try resolvedValue(
       environmentKey: selectionFixturePIDEnvironmentKey,
       argument: selectionFixturePIDArgument,
@@ -173,6 +206,15 @@ struct AcceptanceProfile: Equatable {
       return nil
     }
     return metadata.st_mode & S_IFMT
+  }
+
+  private static func systemHomeDirectory() -> URL? {
+    guard let passwordEntry = getpwuid(getuid()),
+          let directory = passwordEntry.pointee.pw_dir
+    else {
+      return nil
+    }
+    return URL(fileURLWithPath: String(cString: directory), isDirectory: true)
   }
 
   private static func resolvedValue(

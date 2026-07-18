@@ -10,31 +10,79 @@ on:
       - main
       - dev
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test:
     runs-on: macos-26
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Classify changes
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_BEFORE: ${{ github.event.before }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          base="$EVENT_BEFORE"
+          if [[ "$EVENT_NAME" == pull_request ]]; then
+            base="$PR_BASE_SHA"
+          fi
+          if [[ -z "$base" || "$base" =~ ^0+$ ]] || ! git cat-file -e "$base^{commit}"; then
+            base="$(git rev-parse HEAD^)"
+          fi
+          git diff --name-only --diff-filter=ACDMRTUXB "$base" HEAD > "$RUNNER_TEMP/lexiray-changed-files.txt"
+          ./script/ci_scope.sh "$RUNNER_TEMP/lexiray-changed-files.txt" >> "$GITHUB_OUTPUT"
 
       - name: Select Xcode
+        if: steps.scope.outputs.needs_xcode == 'true'
         run: |
           sudo xcode-select -s /Applications/Xcode.app
           xcodebuild -version
 
       - name: Install tools
-        run: brew install ripgrep xcodegen swiftformat
+        run: |
+          brew install ripgrep
+          if [[ "${{ steps.scope.outputs.needs_xcode }}" == true ]]; then
+            brew install xcodegen
+            ./script/install_swiftformat.sh "$RUNNER_TEMP/lexiray-tools"
+          fi
 
       - name: Context lint
         run: ./script/context_lint.sh
 
       - name: Generate project
+        if: steps.scope.outputs.needs_xcode == 'true'
         run: xcodegen generate
 
       - name: SwiftFormat lint
-        run: swiftformat LexiRay LexiRayTests Package.swift --lint
+        if: steps.scope.outputs.needs_xcode == 'true'
+        env:
+          LEXIRAY_SWIFTFORMAT_TOOL: ${{ runner.temp }}/lexiray-tools/swiftformat
+        run: ./script/swiftformat_tool.sh LexiRay LexiRayTests Package.swift --lint
+
+      - name: Script control-plane tests
+        if: steps.scope.outputs.needs_script_tests == 'true'
+        env:
+          LEXIRAY_PORTABLE_CONTROL_PLANE_TESTS: "1"
+        run: ./script/run_control_plane_tests.sh
+
+      - name: Prototype build
+        if: steps.scope.outputs.needs_prototype == 'true'
+        working-directory: prototypes/lexiray-current
+        run: |
+          npm ci
+          npm run build
 
       - name: Test
+        if: steps.scope.outputs.needs_xcode == 'true'
         run: |
           xcodebuild test \
             -project LexiRay.xcodeproj \

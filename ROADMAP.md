@@ -15,6 +15,8 @@ reliable, with no permission or data-loss surprises.
 
 - [x] **WF-001** — Unify the agent-independent development, isolated acceptance,
   atomic install, and local-first release workflow.
+- [x] **DEV-101** — Pin the development signing identity and fail closed instead
+  of silently replacing a missing or inaccessible identity.
 
 ## Next
 
@@ -38,7 +40,5 @@ reliable, with no permission or data-loss surprises.
 - [ ] **UX-102** — Evaluate an optional mouse-selection popup icon, default off.
 - [ ] **PERF-101** — Add scenario budgets for hotkey-to-panel and first-result
   latency.
-- [ ] **DEV-101** — Stop the development signing helper from silently replacing
-  a missing identity and changing the app's TCC identity.
 - [ ] **REL-101** — Revisit Apple Developer ID and notarization if an Apple
   Developer account becomes available.

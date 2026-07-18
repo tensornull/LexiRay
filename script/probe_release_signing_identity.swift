@@ -71,7 +71,7 @@ guard let algorithm = algorithms.first(where: {
 }
 
 var error: Unmanaged<CFError>?
-let payload = Data("LexiRay non-interactive release signing probe".utf8) as CFData
+let payload = Data("LexiRay non-interactive signing probe".utf8) as CFData
 guard SecKeyCreateSignature(privateKey, algorithm, payload, &error) != nil else {
   exit(1)
 }

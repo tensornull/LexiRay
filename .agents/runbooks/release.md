@@ -14,8 +14,8 @@ receipt with installed-app Computer Use acceptance.
 
 - `doctor` is noninteractive. It checks the clean tagged checkout, `origin/main`,
   Info.plist, CHANGELOG, current candidate receipt, installed/Computer Use
-  evidence, successful CI and CodeQL push runs for the exact SHA, GitHub
-  authentication, and the fixed signing identity. It never
+  evidence, a passing real Login Item probe, successful CI for the exact SHA,
+  GitHub authentication, and the fixed signing identity. It never
   unlocks a keychain or calls a command that can ask for a keychain password.
 - `publish` is local-first. When the exact fixed identity is accessible it
   packages, verifies, uploads, downloads, and re-verifies the DMG and SHA-256.

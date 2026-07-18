@@ -7,10 +7,16 @@ final class LoginItemServiceTests: XCTestCase {
     XCTAssertEqual(LoginItemStatus.fromSystemStatus(.notRegistered), .notRegistered)
     XCTAssertEqual(LoginItemStatus.fromSystemStatus(.enabled), .enabled)
     XCTAssertEqual(LoginItemStatus.fromSystemStatus(.requiresApproval), .requiresApproval)
+    XCTAssertEqual(LoginItemStatus.fromSystemStatus(.notFound), .notFound)
+  }
 
-    guard case .unavailable = LoginItemStatus.fromSystemStatus(.notFound) else {
-      return XCTFail("Expected unavailable status")
-    }
+  func testNotFoundStatusIsActionableInsteadOfUnavailable() {
+    let status = LoginItemStatus.notFound
+
+    XCTAssertFalse(status.isEnabled)
+    XCTAssertFalse(status.isUnavailable)
+    XCTAssertEqual(status.persistedValue, "notFound")
+    XCTAssertEqual(status.detail, "macOS has no Login Item record for LexiRay. Turn this on to register it.")
   }
 
   func testUnavailableStatusIsNotEnabled() {
@@ -42,6 +48,22 @@ final class LoginItemServiceTests: XCTestCase {
         bundleURL: URL(fileURLWithPath: "/Applications/LexiRay Copy.app", isDirectory: true)
       )
     )
+  }
+
+  func testResolvesAcceptanceNotFoundStatus() {
+    XCTAssertEqual(
+      AppRuntime.resolveAcceptanceLoginItemStatus(
+        arguments: ["LexiRay", "--lexiray-acceptance-login-item-status", "notFound"]
+      ),
+      .notFound
+    )
+    XCTAssertEqual(
+      AppRuntime.resolveAcceptanceLoginItemStatus(
+        arguments: ["LexiRay", "--lexiray-acceptance-login-item-status=requiresApproval"]
+      ),
+      .requiresApproval
+    )
+    XCTAssertNil(AppRuntime.resolveAcceptanceLoginItemStatus(arguments: ["LexiRay"]))
   }
 
   @MainActor
@@ -111,6 +133,45 @@ final class LoginItemServiceTests: XCTestCase {
   }
 
   @MainActor
+  func testRepairsNotFoundRegistrationWhenDesiredOn() {
+    let defaults = makeDefaults()
+    defaults.set(true, forKey: "desiredStartAtLogin")
+    defaults.set("notFound", forKey: "lastLoginItemSystemStatus")
+    let system = MockLoginItemSystemService(status: .notFound)
+    let coordinator = LoginItemCoordinator(systemService: system, defaults: defaults)
+
+    coordinator.reconcileAtStartup()
+
+    XCTAssertEqual(system.registerCount, 1)
+    XCTAssertEqual(coordinator.status, .enabled)
+    XCTAssertEqual(defaults.string(forKey: "lastLoginItemSystemStatus"), "enabled")
+  }
+
+  @MainActor
+  func testUserCanRegisterFromNotFound() {
+    let system = MockLoginItemSystemService(status: .notFound)
+    let coordinator = LoginItemCoordinator(systemService: system, defaults: makeDefaults())
+
+    coordinator.setDesiredStartAtLogin(true)
+
+    XCTAssertEqual(system.registerCount, 1)
+    XCTAssertEqual(coordinator.status, .enabled)
+    XCTAssertNil(coordinator.operationError)
+  }
+
+  @MainActor
+  func testDisablingNotFoundDoesNotCallUnregister() {
+    let system = MockLoginItemSystemService(status: .notFound)
+    let coordinator = LoginItemCoordinator(systemService: system, defaults: makeDefaults())
+
+    coordinator.setDesiredStartAtLogin(false)
+
+    XCTAssertEqual(system.unregisterCount, 0)
+    XCTAssertEqual(coordinator.status, .notFound)
+    XCTAssertNil(coordinator.operationError)
+  }
+
+  @MainActor
   func testDoesNotFightSystemApprovalRequirement() {
     let defaults = makeDefaults()
     defaults.set(true, forKey: "desiredStartAtLogin")
@@ -139,6 +200,43 @@ final class LoginItemServiceTests: XCTestCase {
     XCTAssertEqual(system.registerCount, 1)
     XCTAssertNotNil(coordinator.operationError)
     XCTAssertEqual(defaults.string(forKey: "lastLoginItemSystemStatus"), "enabled")
+  }
+
+  @MainActor
+  func testFailedNotFoundRepairKeepsLastConfirmedEnabledStateAndRealError() {
+    let defaults = makeDefaults()
+    defaults.set(true, forKey: "desiredStartAtLogin")
+    defaults.set("enabled", forKey: "lastLoginItemSystemStatus")
+    let error = NSError(domain: "BTMErrorDomain", code: -95, userInfo: [
+      NSLocalizedDescriptionKey: "record not found",
+      NSLocalizedFailureReasonErrorKey: "the background record is missing"
+    ])
+    let system = MockLoginItemSystemService(status: .notFound, registerError: error)
+    let coordinator = LoginItemCoordinator(systemService: system, defaults: defaults)
+
+    coordinator.reconcileAtStartup()
+    coordinator.refresh()
+
+    XCTAssertEqual(system.registerCount, 1)
+    XCTAssertEqual(coordinator.status, .notFound)
+    XCTAssertEqual(defaults.string(forKey: "lastLoginItemSystemStatus"), "enabled")
+    XCTAssertEqual(
+      coordinator.operationError,
+      "Could not restore Start at login. BTMErrorDomain -95: record not found Reason: the background record is missing"
+    )
+  }
+
+  @MainActor
+  func testRegisterThatReturnsNotFoundIsReportedAsFailure() {
+    let system = MockLoginItemSystemService(status: .notFound, registerResult: .notFound)
+    let coordinator = LoginItemCoordinator(systemService: system, defaults: makeDefaults())
+
+    coordinator.setDesiredStartAtLogin(true)
+
+    XCTAssertEqual(system.registerCount, 1)
+    XCTAssertEqual(coordinator.status, .notFound)
+    XCTAssertNotNil(coordinator.operationError)
+    XCTAssertTrue(coordinator.canRetryDesiredOperation)
   }
 
   @MainActor
@@ -213,15 +311,18 @@ private final class MockLoginItemSystemService: LoginItemSystemServicing {
   private(set) var unregisterCount = 0
   private let registerError: Error?
   private let unregisterError: Error?
+  private let registerResult: LoginItemStatus
 
   init(
     status: LoginItemStatus,
     registerError: Error? = nil,
-    unregisterError: Error? = nil
+    unregisterError: Error? = nil,
+    registerResult: LoginItemStatus = .enabled
   ) {
     self.status = status
     self.registerError = registerError
     self.unregisterError = unregisterError
+    self.registerResult = registerResult
   }
 
   func register() throws {
@@ -229,7 +330,7 @@ private final class MockLoginItemSystemService: LoginItemSystemServicing {
     if let registerError {
       throw registerError
     }
-    status = .enabled
+    status = registerResult
   }
 
   func unregister() throws {

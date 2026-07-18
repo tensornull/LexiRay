@@ -415,6 +415,15 @@ private func validateScenarioStateAssertions(
       throw EvidenceError.message("launch state assertions do not prove the main window")
     }
 
+  case "login_item_settings":
+    guard values == [
+      "registration_action": "toggle",
+      "status": "notFound",
+      "toggle_enabled": "true"
+    ] else {
+      throw EvidenceError.message("login_item_settings does not prove an actionable notFound state")
+    }
+
   case "source_editor":
     guard values == [
       "editor_focused": "true",
@@ -511,6 +520,32 @@ private func scenarioStateAssertions(
       throw EvidenceError.message("launch live AX state is not bound to the main window")
     }
     values = ["main_window": "present"]
+
+  case "login_item_settings":
+    guard windows.count == 1,
+          windows[0].role == .main,
+          let accessibilityWindow = windows[0].accessibilityWindow
+    else {
+      throw EvidenceError.message("login_item_settings is not bound to the main window")
+    }
+    let elements = accessibilityElements(root: accessibilityWindow)
+    guard let toggle = elements.first(where: {
+      axString($0, kAXIdentifierAttribute) == "StartAtLoginToggle"
+        && axString($0, kAXRoleAttribute) == "AXCheckBox"
+    }),
+      axBool(toggle, kAXEnabledAttribute) == true,
+      elements.contains(where: {
+        axString($0, kAXIdentifierAttribute) == "StartAtLoginStatus"
+          && axVisibleText($0).contains("no Login Item record for LexiRay")
+      })
+    else {
+      throw EvidenceError.message("login_item_settings is missing the enabled toggle or notFound explanation")
+    }
+    values = [
+      "registration_action": "toggle",
+      "status": "notFound",
+      "toggle_enabled": "true"
+    ]
 
   case "source_editor":
     guard windows.count == 1,
@@ -786,7 +821,7 @@ private func semanticAccessibilityWindow(
   let matches: [AXUIElement]
   let role: EvidenceWindowRole
   switch scenario {
-  case "launch":
+  case "launch", "login_item_settings":
     role = .main
     matches = windows.filter { window in
       guard axString(window, kAXRoleAttribute) == "AXWindow",
@@ -850,7 +885,7 @@ private func eligibleWindows(
   }
 
   switch scenario {
-  case "launch", "selection_hotkey", "source_editor", "language_direction", "speech_controls", "panel_visual_states",
+  case "launch", "login_item_settings", "selection_hotkey", "source_editor", "language_direction", "speech_controls", "panel_visual_states",
        "ocr_result_display_1", "ocr_result_display_2":
     let semantic = try semanticAccessibilityWindow(
       scenario: scenario,
@@ -1436,7 +1471,7 @@ private func verifyProvenance(
   }
 
   switch scenario {
-  case "launch":
+  case "launch", "login_item_settings":
     guard provenance.displayCount == 0,
           provenance.captures.count == 1,
           provenance.captures.allSatisfy({ capture in

@@ -11,8 +11,12 @@ cd "$ROOT_DIR"
 bash -n \
   script/acceptance_receipt.sh \
   script/build_and_run.sh \
+  script/ci_scope.sh \
+  script/computer_use_scope.sh \
   script/ci_local.sh \
   script/context_lint.sh \
+  script/development_identity.sh \
+  script/login_item_system_probe.sh \
   script/preflight.sh \
   script/release_check.sh \
   script/verify_release_dmg.sh \
@@ -68,6 +72,17 @@ if rg -n '(^|[[:space:]/])security([[:space:]]|$)' script/preflight.sh >/dev/nul
   exit 1
 fi
 
+if rg -n 'security (import|add-trusted-cert)|openssl (req|pkcs12)' \
+  script/development_identity.sh script/ensure_local_codesign_identity.sh >/dev/null 2>&1; then
+  echo "normal development signing contains an identity mutation path" >&2
+  exit 1
+fi
+rg -F 'LEXIRAY_DEVELOPMENT_CERT_SHA1="B665AB9A2956DDD3C2712669E4DA0DBE30DA084D"' \
+  script/development_identity.sh >/dev/null || {
+  echo "development signing is not pinned to the accepted SHA-1" >&2
+  exit 1
+}
+
 rg -F -- '--diff-filter=ACDMRTUXB' script/verify.sh >/dev/null || {
   echo "verify.sh does not route deleted files through changed-scope verification" >&2
   exit 1
@@ -82,9 +97,54 @@ rg -F 'validate_installed_acceptance_process' script/acceptance_receipt.sh >/dev
   echo "Computer Use evidence is not bound to a live isolated installed process" >&2
   exit 1
 }
+rg -F 'pgrep -x LexiRay' script/acceptance_receipt.sh >/dev/null || {
+  echo "Computer Use evidence does not fail closed when another LexiRay process exists" >&2
+  exit 1
+}
+(
+  LEXIRAY_ACCEPTANCE_LIBRARY_ONLY=1 source "$ROOT_DIR/script/acceptance_receipt.sh"
+  pgrep() { printf '%s\n' 4242; }
+  validate_sole_lexiray_process 4242
+  pgrep() { printf '%s\n' 4242 4343; }
+  if validate_sole_lexiray_process 4242; then
+    echo "Computer Use process uniqueness accepted a second LexiRay instance" >&2
+    exit 1
+  fi
+)
+
+rg -F 'mark-login-item-probe' script/acceptance_receipt.sh >/dev/null || {
+  echo "candidate receipts cannot record the real Login Item probe" >&2
+  exit 1
+}
+rg -F 'login_item_system_probe.sh' script/install_applications.sh >/dev/null || {
+  echo "canonical installation does not run the required real Login Item probe" >&2
+  exit 1
+}
+rg -F 'AppRuntime.isCanonicalInstalledApplication()' LexiRay/App/AppDelegate.swift >/dev/null || {
+  echo "the in-app Login Item probe is not restricted to the canonical installation" >&2
+  exit 1
+}
+rg -F 'passed:0|blocked:75|failed:1' script/login_item_system_probe.sh >/dev/null || {
+  echo "Login Item probe evidence does not bind outcomes to process exit status" >&2
+  exit 1
+}
+rg -F 'require-login-item-probe' script/release.sh >/dev/null || {
+  echo "release handoff does not require a real Login Item probe" >&2
+  exit 1
+}
 
 rg -F 'capture_installed_launch' script/acceptance_receipt.sh >/dev/null || {
   echo "installation does not seal the automatically presented main window" >&2
+  exit 1
+}
+rg -F 'verification.computer_use_required_scenarios' \
+  script/acceptance_receipt.sh script/verify.sh >/dev/null || {
+  echo "Computer Use matrix is not frozen into the candidate receipt" >&2
+  exit 1
+}
+rg -F -- '--lexiray-acceptance-login-item-status notFound' \
+  script/install_applications.sh script/acceptance_receipt.sh >/dev/null || {
+  echo "installed acceptance does not expose the notFound Login Item state" >&2
   exit 1
 }
 rg -F 'Launch evidence must be sealed during canonical installation.' \
@@ -99,6 +159,25 @@ rg -F 'source_fingerprint -string "$SOURCE_FINGERPRINT"' script/ui/run.sh >/dev/
 }
 rg -F 'app_cdhash -string "$APP_CDHASH"' script/ui/run.sh >/dev/null || {
   echo "GUI evidence is not bound to the candidate CDHash" >&2
+  exit 1
+}
+
+if rg -n '(^|[[:space:]])defaults[[:space:]]+(write|read|export|delete)[[:space:]]' \
+  script/test_acceptance_data_safety.sh script/ui/run.sh >/dev/null 2>&1; then
+  echo "acceptance verification must not use the cfprefsd-backed defaults CLI" >&2
+  exit 1
+fi
+for acceptance_launcher in \
+  script/test_acceptance_data_safety.sh \
+  script/install_applications.sh \
+  script/login_item_system_probe.sh; do
+  rg -F 'CFPREFERENCES_AVOID_DAEMON=1' "$acceptance_launcher" >/dev/null || {
+    echo "$acceptance_launcher does not disable the shared preferences daemon" >&2
+    exit 1
+  }
+done
+rg -F '"CFPREFERENCES_AVOID_DAEMON": "1"' script/ui/lib.swift >/dev/null || {
+  echo "GUI scenarios do not disable the shared preferences daemon" >&2
   exit 1
 }
 

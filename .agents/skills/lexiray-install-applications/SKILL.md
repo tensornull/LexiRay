@@ -40,6 +40,11 @@ version/build/authority/CDHash/executable hash, and rolls back on failure. Its
 interprocess lock prevents concurrent installers. Installed acceptance roots
 and defaults suites are transaction-unique and are never deleted or reused by
 path alone.
+For Login Item, signing, or installation changes, it runs the receipt-required
+real `SMAppService` probe before the normal acceptance process. The probe uses
+isolated data/defaults, mutates only LexiRay's Login Item record, registers at
+most once, and restores an observed initial off state. A blocked or failed
+probe is not installed verification.
 It launches the installed app with an ignored acceptance data root and
 independent defaults suite for Computer Use; it never launches the installed
 app against real user data during automated acceptance.
@@ -48,10 +53,17 @@ presented main window. Later `capture-computer-use launch` revalidates and
 returns that evidence; it cannot replace it with a manually opened window.
 
 After installation, use Computer Use on `/Applications/LexiRay.app` to exercise
-every scenario in the canonical installed matrix. After placing the app in the
+every scenario in the candidate-frozen, change-scoped installed matrix. After placing the app in the
 required state for each scenario, capture only the receipt-bound PID-owned
 window through the repository helper (pass a CGWindow ID only when automatic
 selection is ambiguous):
+
+Target Computer Use by the display name `LexiRay` only after the receipt has
+validated that its PID is the sole running LexiRay process. Do not target the
+bundle ID or full app path: the Computer Use resolver may launch an additional
+non-acceptance instance and make the bundle ambiguous. Revalidate the sole
+receipt-bound process before every capture; an extra LexiRay process fails the
+capture closed.
 
 ```bash
 ./script/acceptance_receipt.sh computer-use-matrix

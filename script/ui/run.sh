@@ -154,6 +154,7 @@ ARTIFACT_DIR="${LEXIRAY_UI_ARTIFACT_DIR:-$ROOT_DIR/build/ui-artifacts/$RUN_STAMP
 ARTIFACT_BASE="$ROOT_DIR/build/ui-artifacts"
 ACCEPTANCE_ROOT="$ROOT_DIR/build/acceptance-data/$RUN_STAMP-$$"
 ACCEPTANCE_DEFAULTS_SUITE="io.github.tensornull.lexiray.acceptance.$RUN_STAMP.$$"
+ACCEPTANCE_PREFERENCES_HOME="$ACCEPTANCE_ROOT/preferences-home"
 PROVIDERS_FILE="$ACCEPTANCE_ROOT/providers.json"
 HISTORY_FILE="$ACCEPTANCE_ROOT/history.json"
 
@@ -232,7 +233,11 @@ validate_acceptance_paths() {
     echo "UI_BLOCKED[data]: invalid acceptance defaults suite" >&2
     exit 2
   }
-  for path in "$ROOT_DIR/build" "$ROOT_DIR/build/acceptance-data" "$ACCEPTANCE_ROOT"; do
+  for path in \
+    "$ROOT_DIR/build" \
+    "$ROOT_DIR/build/acceptance-data" \
+    "$ACCEPTANCE_ROOT" \
+    "$ACCEPTANCE_PREFERENCES_HOME"; do
     [[ ! -L "$path" ]] || {
       echo "UI_BLOCKED[data]: acceptance path must not be a symlink: $path" >&2
       exit 2
@@ -256,9 +261,8 @@ WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/lexiray-ui.XXXXXX")"
 
 seed_fixture_state() {
   validate_acceptance_paths
-  defaults delete "$ACCEPTANCE_DEFAULTS_SUITE" >/dev/null 2>&1 || true
   rm -rf "$ACCEPTANCE_ROOT"
-  mkdir -p "$ACCEPTANCE_ROOT"
+  mkdir -p "$ACCEPTANCE_PREFERENCES_HOME"
   printf '%s\n' 'LexiRay acceptance root v1' >"$ACCEPTANCE_ROOT/.lexiray-acceptance-root"
   cp "$UI_DIR/fixtures/providers.json" "$PROVIDERS_FILE"
   cp "$UI_DIR/fixtures/history.json" "$HISTORY_FILE"
@@ -266,7 +270,6 @@ seed_fixture_state() {
 }
 
 cleanup() {
-  defaults delete "$ACCEPTANCE_DEFAULTS_SUITE" >/dev/null 2>&1 || true
   rm -rf "$WORK_DIR"
 }
 trap cleanup EXIT

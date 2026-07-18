@@ -53,12 +53,14 @@ Requirements:
 - macOS 15+
 - Xcode 16.4+ or newer
 - XcodeGen
-- SwiftFormat
+- SwiftFormat 0.62.1 (repository-pinned)
 
 Install local tools:
 
 ```bash
-brew install xcodegen swiftformat
+brew install xcodegen
+./script/install_swiftformat.sh build/tools
+export LEXIRAY_SWIFTFORMAT_TOOL="$PWD/build/tools/swiftformat"
 ```
 
 Run the changed-scope gate while developing. Before pushing an app-binary
@@ -66,11 +68,15 @@ change, create the candidate, install that exact build, complete installed-app
 Computer Use acceptance with the isolated profile, and then run the PR gate:
 
 ```bash
+./script/preflight.sh change
 ./script/verify.sh changed
 ./script/verify.sh candidate
 ./script/install_applications.sh
 ./script/verify.sh pr
 ```
+
+Ordinary changes must run from a dedicated linked worktree created from the
+latest `dev`; the primary checkout is reserved for synchronization and release.
 
 The installer and Computer Use steps are skipped for docs/tests-only changes.
 See [the verification runbook](.agents/runbooks/verification.md) for receipt and
@@ -82,10 +88,16 @@ Run the app from the workspace build:
 ./script/build_and_run.sh run
 ```
 
-The build/run script owns the local development app identity. It removes stale
-development bundles, creates or reuses the `LexiRay Local Development` signing
-identity, signs the workspace debug app with it, disables Debug dylib splitting,
-and launches only:
+The build/run script requires the repository-pinned `LexiRay Local Development`
+certificate and signs by its exact SHA-1 fingerprint. It never creates, imports,
+trusts, or replaces a certificate. If the keychain or private key is unavailable,
+the build fails with one diagnostic command:
+
+```bash
+./script/development_identity.sh doctor
+```
+
+The signed workspace build launches only:
 
 ```text
 build/DerivedData/Build/Products/Debug/LexiRay.app
@@ -109,9 +121,8 @@ Release preparation for `0.2.0` and later must start from `dev`:
 ```
 
 Open a PR from `dev` to `main`. After the PR checks pass and `main` is updated,
-confirm `main` CI and CodeQL are green before tagging. If those checks are slow,
-record the run URLs and resume commands instead of waiting in an interactive
-agent session.
+confirm the required `main` CI run is green before tagging. CodeQL runs weekly
+or manually and does not block PRs, merges, or releases.
 
 ```bash
 git tag v0.2.0
@@ -128,8 +139,9 @@ pushed, fetch it, check out the exact tagged commit, then run:
 ```
 
 `release.sh` requires a clean worktree, verifies that `v<version>` points to
-`origin/main`, and requires a current candidate receipt with installed-app
-Computer Use acceptance. It uses the local fixed identity when that exact
+`origin/main`, and requires a current candidate receipt with a passing real
+Login Item probe plus installed-app Computer Use acceptance. It uses the local
+fixed identity when that exact
 certificate is accessible; otherwise it automatically dispatches the GitHub
 `Release Build` fallback. Fallback publication is resumable without polling:
 

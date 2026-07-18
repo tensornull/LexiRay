@@ -7,6 +7,7 @@ enum LoginItemStatus: Equatable {
   case notRegistered
   case enabled
   case requiresApproval
+  case notFound
   case unavailable(String)
 
   var isEnabled: Bool {
@@ -28,6 +29,8 @@ enum LoginItemStatus: Equatable {
       "enabled"
     case .requiresApproval:
       "requiresApproval"
+    case .notFound:
+      "notFound"
     case .unavailable:
       nil
     }
@@ -41,6 +44,8 @@ enum LoginItemStatus: Equatable {
       self = .enabled
     case "requiresApproval":
       self = .requiresApproval
+    case "notFound":
+      self = .notFound
     default:
       return nil
     }
@@ -54,8 +59,25 @@ enum LoginItemStatus: Equatable {
       "Enabled"
     case .requiresApproval:
       "macOS requires approval in Login Items."
+    case .notFound:
+      "macOS has no Login Item record for LexiRay. Turn this on to register it."
     case let .unavailable(message):
       message
+    }
+  }
+
+  var diagnosticValue: String {
+    switch self {
+    case .notRegistered:
+      "notRegistered"
+    case .enabled:
+      "enabled"
+    case .requiresApproval:
+      "requiresApproval"
+    case .notFound:
+      "notFound"
+    case let .unavailable(message):
+      "unavailable(\(message))"
     }
   }
 
@@ -68,7 +90,7 @@ enum LoginItemStatus: Equatable {
     case .requiresApproval:
       .requiresApproval
     case .notFound:
-      .unavailable("Login item service is unavailable for this app.")
+      .notFound
     @unknown default:
       .unavailable("Login item service returned an unknown status.")
     }
@@ -178,6 +200,17 @@ final class LoginItemCoordinator: ObservableObject {
     operationError ?? status.detail
   }
 
+  var diagnosticsText: String {
+    [
+      "Login Item status: \(status.diagnosticValue)",
+      "Desired Start at login: \(desiredStartAtLogin)",
+      "Last operation error: \(operationError ?? "None")",
+      "Operating system: \(ProcessInfo.processInfo.operatingSystemVersionString)",
+      "App path: \(Bundle.main.bundleURL.path)",
+      "Bundle ID: \(Bundle.main.bundleIdentifier ?? "Unknown")"
+    ].joined(separator: "\n")
+  }
+
   var needsSystemApproval: Bool {
     status == .requiresApproval
   }
@@ -187,7 +220,7 @@ final class LoginItemCoordinator: ObservableObject {
       return true
     }
     return switch (desiredStartAtLogin, status) {
-    case (true, .notRegistered), (false, .enabled):
+    case (true, .notRegistered), (true, .notFound), (false, .enabled):
       true
     default:
       false
@@ -203,12 +236,8 @@ final class LoginItemCoordinator: ObservableObject {
 
     let currentStatus = systemService.status
     status = currentStatus
-    let previousStatus = defaults.string(forKey: Keys.lastSystemStatus)
-      .flatMap(LoginItemStatus.init(persistedValue:))
-
     guard desiredStartAtLogin,
-          previousStatus == .enabled,
-          currentStatus == .notRegistered
+          currentStatus == .notRegistered || currentStatus == .notFound
     else {
       persist(currentStatus)
       return
@@ -217,11 +246,12 @@ final class LoginItemCoordinator: ObservableObject {
     do {
       try systemService.register()
       status = systemService.status
+      try validateEnabledResult(status)
       persist(status)
       AppLog.settings.info("Restored missing login item registration")
     } catch {
       status = systemService.status
-      operationError = "Could not restore Start at login. Try again in Settings."
+      operationError = operationFailureMessage(action: "restore Start at login", error: error)
       // Keep the last confirmed enabled state so a future process can make one
       // fresh repair attempt; this process is guarded from retry loops.
       AppLog.settings.error("Failed to restore login item: \(error.localizedDescription, privacy: .public)")
@@ -239,7 +269,7 @@ final class LoginItemCoordinator: ObservableObject {
       && hasAttemptedStartupRepair
       && desiredStartAtLogin
       && previousStatus == .enabled
-      && status == .notRegistered
+      && (status == .notRegistered || status == .notFound)
     if !preservesFailedRepair {
       persist(status)
     }
@@ -257,19 +287,27 @@ final class LoginItemCoordinator: ObservableObject {
         {
           try systemService.register()
         }
-      } else if systemService.status != .notRegistered {
+      } else if systemService.status != .notRegistered,
+                systemService.status != .notFound
+      {
         try systemService.unregister()
       }
       status = systemService.status
+      if isEnabled {
+        try validateEnabledResult(status)
+      } else {
+        try validateDisabledResult(status)
+      }
       if statusMatchesDesiredIntent {
         operationError = nil
       }
       persist(status)
     } catch {
       status = systemService.status
-      operationError = isEnabled
-        ? "Could not enable Start at login. Try again."
-        : "Could not disable Start at login. Try again."
+      operationError = operationFailureMessage(
+        action: isEnabled ? "enable Start at login" : "disable Start at login",
+        error: error
+      )
       AppLog.settings.error("Failed to update login item: \(error.localizedDescription, privacy: .public)")
     }
   }
@@ -294,10 +332,39 @@ final class LoginItemCoordinator: ObservableObject {
 
   private var statusMatchesDesiredIntent: Bool {
     switch (desiredStartAtLogin, status) {
-    case (true, .enabled), (false, .notRegistered):
+    case (true, .enabled), (true, .requiresApproval), (false, .notRegistered), (false, .notFound):
       true
     default:
       false
+    }
+  }
+
+  private func validateEnabledResult(_ status: LoginItemStatus) throws {
+    guard status == .enabled || status == .requiresApproval else {
+      throw LoginItemOperationError.unexpectedStatus(status.diagnosticValue)
+    }
+  }
+
+  private func validateDisabledResult(_ status: LoginItemStatus) throws {
+    guard status == .notRegistered || status == .notFound else {
+      throw LoginItemOperationError.unexpectedStatus(status.diagnosticValue)
+    }
+  }
+
+  private func operationFailureMessage(action: String, error: Error) -> String {
+    let nsError = error as NSError
+    let failureReason = nsError.localizedFailureReason.map { " Reason: \($0)" } ?? ""
+    return "Could not \(action). \(nsError.domain) \(nsError.code): \(nsError.localizedDescription)\(failureReason)"
+  }
+}
+
+private enum LoginItemOperationError: LocalizedError {
+  case unexpectedStatus(String)
+
+  var errorDescription: String? {
+    switch self {
+    case let .unexpectedStatus(status):
+      "macOS returned \(status) after the Login Item operation."
     }
   }
 }

@@ -3,6 +3,8 @@ import Darwin
 import Foundation
 
 enum AppRuntime {
+  static let loginItemSystemProbeArgument = "--lexiray-login-item-system-probe"
+  static let acceptanceLoginItemStatusArgument = "--lexiray-acceptance-login-item-status"
   static let canonicalApplicationURL = URL(
     fileURLWithPath: "/Applications/LexiRay.app",
     isDirectory: true
@@ -28,11 +30,43 @@ enum AppRuntime {
       || ProcessInfo.processInfo.arguments.contains("--lexiray-ui-scenario")
   }
 
+  static var isRunningLoginItemSystemProbe: Bool {
+    ProcessInfo.processInfo.arguments.contains(loginItemSystemProbeArgument)
+  }
+
+  static var acceptanceLoginItemStatus: LoginItemStatus? {
+    resolveAcceptanceLoginItemStatus(arguments: ProcessInfo.processInfo.arguments)
+  }
+
+  static func resolveAcceptanceLoginItemStatus(arguments: [String]) -> LoginItemStatus? {
+    let name = acceptanceLoginItemStatusArgument
+    let value: String?
+    if let inline = arguments.first(where: { $0.hasPrefix(name + "=") }) {
+      value = String(inline.dropFirst(name.count + 1))
+    } else if let index = arguments.firstIndex(of: name), arguments.indices.contains(index + 1) {
+      value = arguments[index + 1]
+    } else {
+      value = nil
+    }
+    switch value {
+    case "notRegistered":
+      return .notRegistered
+    case "enabled":
+      return .enabled
+    case "requiresApproval":
+      return .requiresApproval
+    case "notFound":
+      return .notFound
+    default:
+      return nil
+    }
+  }
+
   static func shouldPresentMainWindowAtLaunch(
     acceptanceProfile: AcceptanceProfile? = acceptanceProfile,
     isRunningUIScenarios: Bool = isRunningUIScenarios
   ) -> Bool {
-    acceptanceProfile != nil && !isRunningUIScenarios
+    acceptanceProfile != nil && !isRunningUIScenarios && !isRunningLoginItemSystemProbe
   }
 
   static var allowsMockProvider: Bool {
@@ -134,6 +168,7 @@ enum AppRuntime {
   @MainActor
   static func makeLoginItemCoordinator(
     acceptanceProfile profile: AcceptanceProfile? = acceptanceProfile,
+    acceptanceLoginItemStatus: LoginItemStatus? = acceptanceLoginItemStatus,
     runningTests: Bool = isRunningTests,
     bundleURL: URL = Bundle.main.bundleURL,
     systemServiceFactory: @MainActor () -> LoginItemSystemServicing = {
@@ -146,7 +181,10 @@ enum AppRuntime {
       guard let defaults = UserDefaults(suiteName: profile.defaultsSuiteName) else {
         fatalError("Could not create acceptance defaults suite \(profile.defaultsSuiteName)")
       }
-      return LoginItemCoordinator(systemService: IsolatedLoginItemSystemService(), defaults: defaults)
+      return LoginItemCoordinator(
+        systemService: IsolatedLoginItemSystemService(status: acceptanceLoginItemStatus ?? .notRegistered),
+        defaults: defaults
+      )
     }
 
     if runningTests {

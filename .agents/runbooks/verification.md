@@ -12,6 +12,10 @@ pipeline. Verification evidence belongs to the current source fingerprint.
 ./script/verify.sh pr
 ```
 
+These gates run registered script control-plane tests through the bounded
+parallel `script/run_control_plane_tests.sh` entry point. Do not replace it with
+a serial per-test loop in CI or local verification.
+
 - `changed`: run format, incremental build, relevant unit tests, and affected
   GUI scenarios after an edit batch.
 - `candidate`: run the full local gate and produce a signed workspace build. If
@@ -37,11 +41,18 @@ Candidate receipts are ignored files named for the source fingerprint under
 ./script/acceptance_receipt.sh require-handoff
 ./script/acceptance_receipt.sh field <keypath>
 ./script/acceptance_receipt.sh mark-gui-inspected passed <contact-sheet-path>
+./script/acceptance_receipt.sh require-login-item-probe
 ./script/acceptance_receipt.sh mark-computer-use passed <computer-use-manifest.json>
 ```
 
 The canonical installer records the exact `/Applications` path and live
 acceptance-profile PID. Do not call `mark-installed` manually.
+
+Login Item, signing, installation, and release changes require the reversible
+real-system probe before installed acceptance. A passing manifest is bound to
+the source fingerprint, installed CDHash/certificate/requirement, OS version,
+and initial/registered/final states. Mock status coverage is never real-system
+evidence.
 
 Use `failed` or `blocked` instead of `passed` when appropriate. Any source
 change creates a different fingerprint and invalidates earlier candidate,

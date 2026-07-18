@@ -260,7 +260,11 @@ struct DashboardSettingsView: View {
   }
 
   private var loginItemDetailColor: Color {
-    loginItems.status == .requiresApproval || loginItems.operationError != nil ? Color.orange : Color.secondary
+    loginItems.status == .requiresApproval
+      || loginItems.status == .notFound
+      || loginItems.operationError != nil
+      ? Color.orange
+      : Color.secondary
   }
 
   private var appIdentityIconName: String {

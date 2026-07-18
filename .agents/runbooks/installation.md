@@ -45,7 +45,11 @@ The helper must:
    path, PID plus kernel start time, authority, version/build, and CDHash, and
    seal the automatically presented main-window capture before returning
    control for Computer Use.
-7. Create the installed acceptance data root and defaults suite uniquely from
+7. When required by the receipt, run the real `SMAppService` probe before the
+   normal acceptance PID. It may register once, must restore the initial off
+   state, and records `passed`, `blocked`, or `failed` without touching real
+   defaults or TCC.
+8. Create the installed acceptance data root and defaults suite uniquely from
    the install transaction UUID. Directory creation must be exclusive; never
    delete or reuse a path-derived acceptance root. Mark the receipt installed
    only after all checks pass; remove the swapped-out backup and transaction

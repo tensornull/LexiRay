@@ -7,6 +7,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-07-18
+
+### Fixed
+
+- Kept `SMAppService.notFound` actionable so Start at Login can recreate a
+  missing macOS background-item record, with real system errors and diagnostics.
+- Pinned the local development certificate and made normal builds fail closed
+  instead of silently rotating the app identity when Keychain is unavailable.
+
+### Changed
+
+- Moved Swift CodeQL to weekly/manual non-blocking runs and skipped unrelated
+  Xcode work for documentation, control-plane, and prototype-only changes.
+
 ## [0.4.1] - 2026-07-16
 
 ### Fixed

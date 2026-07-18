@@ -486,7 +486,8 @@ func currentOwnedWindowInfo(targetWindowID: UInt32, processIdentifier: pid_t) ->
 func captureOwnedWindow(
   _ name: String,
   window: [String: Any],
-  existingPanelBackdrop: ControlledPanelBackdrop? = nil
+  existingPanelBackdrop: ControlledPanelBackdrop? = nil,
+  omitShadow: Bool = false
 ) -> String? {
   guard let processIdentifier = workspaceProcessIdentifier,
         workspaceInstance()?.processIdentifier == processIdentifier,
@@ -524,6 +525,9 @@ func captureOwnedWindow(
   let process = Process()
   process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
   process.arguments = ["-x", "-l", "\(id)", outputURL.path]
+  if omitShadow {
+    process.arguments?.insert("-o", at: 1)
+  }
   do {
     try process.run()
     process.waitUntilExit()
@@ -622,6 +626,156 @@ func snapPanel(_ name: String) {
   snap(name, window: window)
 }
 
+func languageMenuWindowInfo(containing title: String, excluding windowIDToExclude: UInt32) -> [String: Any]? {
+  guard let menuItem = axMenuItem(title: title), let menuItemFrame = axFrame(menuItem) else {
+    return nil
+  }
+  let menuItemCenter = CGPoint(x: menuItemFrame.midX, y: menuItemFrame.midY)
+  let matches = lexirayWindowInfos().filter { window in
+    guard windowID(window) != windowIDToExclude else {
+      return false
+    }
+    return windowBounds(window).insetBy(dx: -2, dy: -2).contains(menuItemCenter)
+  }
+  return matches.count == 1 ? matches[0] : nil
+}
+
+func compositeWindowCaptures(
+  _ outputName: String,
+  captures: [(name: String, bounds: CGRect)]
+) -> String? {
+  guard !captures.isEmpty else {
+    return "no app-owned window captures were provided for compositing"
+  }
+
+  let directoryURL = URL(fileURLWithPath: shotDir)
+  var images: [(image: CGImage, bounds: CGRect)] = []
+  var scale: CGFloat?
+  for capture in captures {
+    let inputURL = directoryURL.appendingPathComponent("\(capture.name).png")
+    guard let data = try? Data(contentsOf: inputURL),
+          let bitmap = NSBitmapImageRep(data: data),
+          let image = bitmap.cgImage,
+          capture.bounds.width > 0,
+          capture.bounds.height > 0
+    else {
+      return "could not read \(capture.name).png for app-owned window compositing"
+    }
+    let horizontalScale = CGFloat(image.width) / capture.bounds.width
+    let verticalScale = CGFloat(image.height) / capture.bounds.height
+    guard abs(horizontalScale - verticalScale) <= 0.02 else {
+      return "\(capture.name).png has inconsistent backing scale"
+    }
+    if let scale, abs(scale - horizontalScale) > 0.02 {
+      return "app-owned window captures use different backing scales"
+    }
+    scale = horizontalScale
+    images.append((image, capture.bounds))
+  }
+
+  guard let scale else {
+    return "could not determine the app-owned window capture scale"
+  }
+  let unionBounds = captures.dropFirst().reduce(captures[0].bounds) { partial, capture in
+    partial.union(capture.bounds)
+  }
+  let pixelWidth = Int(ceil(unionBounds.width * scale))
+  let pixelHeight = Int(ceil(unionBounds.height * scale))
+  guard let output = NSBitmapImageRep(
+    bitmapDataPlanes: nil,
+    pixelsWide: pixelWidth,
+    pixelsHigh: pixelHeight,
+    bitsPerSample: 8,
+    samplesPerPixel: 4,
+    hasAlpha: true,
+    isPlanar: false,
+    colorSpaceName: .deviceRGB,
+    bytesPerRow: 0,
+    bitsPerPixel: 0
+  ), let context = NSGraphicsContext(bitmapImageRep: output)
+  else {
+    return "could not create the app-owned composite bitmap"
+  }
+
+  NSGraphicsContext.saveGraphicsState()
+  NSGraphicsContext.current = context
+  context.cgContext.clear(CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight))
+  for capture in images {
+    let destination = CGRect(
+      x: (capture.bounds.minX - unionBounds.minX) * scale,
+      y: (unionBounds.maxY - capture.bounds.maxY) * scale,
+      width: capture.bounds.width * scale,
+      height: capture.bounds.height * scale
+    )
+    context.cgContext.draw(capture.image, in: destination)
+  }
+  context.flushGraphics()
+  NSGraphicsContext.restoreGraphicsState()
+
+  guard let png = output.representation(using: .png, properties: [:]) else {
+    return "could not encode the app-owned composite bitmap"
+  }
+  let outputURL = directoryURL.appendingPathComponent("\(outputName).png")
+  do {
+    try png.write(to: outputURL, options: .atomic)
+    return nil
+  } catch {
+    return "could not write the app-owned composite bitmap: \(error.localizedDescription)"
+  }
+}
+
+func captureHorizontalScale(_ captureName: String, windowBounds: CGRect) -> CGFloat? {
+  let inputURL = URL(fileURLWithPath: shotDir).appendingPathComponent("\(captureName).png")
+  guard let data = try? Data(contentsOf: inputURL),
+        let bitmap = NSBitmapImageRep(data: data),
+        windowBounds.width > 0
+  else {
+    return nil
+  }
+  let scale = CGFloat(bitmap.pixelsWide) / windowBounds.width
+  return scale > 0 ? scale : nil
+}
+
+func captureExtendsPanel(
+  _ captureName: String,
+  panelBounds: CGRect,
+  expectedScale: CGFloat? = nil
+) -> Bool? {
+  let inputURL = URL(fileURLWithPath: shotDir).appendingPathComponent("\(captureName).png")
+  guard let data = try? Data(contentsOf: inputURL),
+        let bitmap = NSBitmapImageRep(data: data),
+        panelBounds.width > 0,
+        panelBounds.height > 0
+  else {
+    return nil
+  }
+  let scale = expectedScale ?? CGFloat(bitmap.pixelsWide) / panelBounds.width
+  guard scale > 0 else {
+    return nil
+  }
+  guard abs(CGFloat(bitmap.pixelsWide) - panelBounds.width * scale) <= 2 else {
+    return false
+  }
+  let expectedPanelHeight = panelBounds.height * scale
+  if CGFloat(bitmap.pixelsHigh) + 2 < expectedPanelHeight {
+    return nil
+  }
+  return CGFloat(bitmap.pixelsHigh) >= expectedPanelHeight + 8 * scale
+}
+
+func copyWindowCapture(_ captureName: String, to outputName: String) -> String? {
+  let directoryURL = URL(fileURLWithPath: shotDir)
+  let inputURL = directoryURL.appendingPathComponent("\(captureName).png")
+  let outputURL = directoryURL.appendingPathComponent("\(outputName).png")
+  do {
+    try? FileManager.default.removeItem(at: outputURL)
+    try FileManager.default.copyItem(at: inputURL, to: outputURL)
+    return nil
+  } catch {
+    return "could not preserve the attached-menu capture: \(error.localizedDescription)"
+  }
+}
+
 func snapPanelWithOpenLanguageMenu(
   _ name: String,
   containing title: String,
@@ -654,8 +808,48 @@ func snapPanelWithOpenLanguageMenu(
   guard lexiRayLanguageMenuIsOpen() else {
     return "language menu closed before its panel-border capture"
   }
-  if let error = captureOwnedWindow(name, window: window, existingPanelBackdrop: backdrop) {
-    return "screenshot \(name): \(error)"
+  guard let menuWindow = languageMenuWindowInfo(containing: title, excluding: targetWindowID) else {
+    return "could not resolve the app-owned language menu window"
+  }
+  let panelCaptureName = "\(name)-panel"
+  let menuCaptureName = "\(name)-menu"
+  if let error = captureOwnedWindow(panelCaptureName, window: window, existingPanelBackdrop: backdrop) {
+    return "screenshot \(panelCaptureName): \(error)"
+  }
+  guard let panelCaptureIncludesMenu = captureExtendsPanel(
+    panelCaptureName,
+    panelBounds: windowBounds(window)
+  ), let panelCaptureScale = captureHorizontalScale(
+    panelCaptureName,
+    windowBounds: windowBounds(window)
+  ) else {
+    return "screenshot \(panelCaptureName): could not validate its pixel geometry"
+  }
+  if panelCaptureIncludesMenu {
+    if let error = copyWindowCapture(panelCaptureName, to: name) {
+      return "screenshot \(name): \(error)"
+    }
+  } else {
+    if let error = captureOwnedWindow(menuCaptureName, window: menuWindow, omitShadow: true) {
+      return "screenshot \(menuCaptureName): \(error)"
+    }
+    if captureExtendsPanel(
+      menuCaptureName,
+      panelBounds: windowBounds(window),
+      expectedScale: panelCaptureScale
+    ) == true {
+      if let error = copyWindowCapture(menuCaptureName, to: name) {
+        return "screenshot \(name): \(error)"
+      }
+    } else if let error = compositeWindowCaptures(
+      name,
+      captures: [
+        (panelCaptureName, windowBounds(window)),
+        (menuCaptureName, windowBounds(menuWindow))
+      ]
+    ) {
+      return "screenshot \(name): \(error)"
+    }
   }
   guard lexiRayLanguageMenuIsOpen() else {
     let outputURL = URL(fileURLWithPath: shotDir).appendingPathComponent("\(name).png")
@@ -816,6 +1010,14 @@ func axString(_ element: AXUIElement, _ attribute: String) -> String {
     return ""
   }
   return value as? String ?? ""
+}
+
+func axBool(_ element: AXUIElement, _ attribute: String) -> Bool? {
+  var value: CFTypeRef?
+  guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
+    return nil
+  }
+  return (value as? NSNumber)?.boolValue
 }
 
 func axElement(identifier: String) -> AXUIElement? {
@@ -1660,6 +1862,15 @@ func ensureAppRunning() {
   configuration.createsNewApplicationInstance = true
   let launchArguments = expectedWorkspaceArguments(extraArguments: workspaceLaunchExtraArguments)
   configuration.arguments = launchArguments
+  configuration.environment = [
+    "HOME": URL(fileURLWithPath: acceptanceRoot, isDirectory: true)
+      .appendingPathComponent("preferences-home", isDirectory: true)
+      .path,
+    "CFFIXED_USER_HOME": URL(fileURLWithPath: acceptanceRoot, isDirectory: true)
+      .appendingPathComponent("preferences-home", isDirectory: true)
+      .path,
+    "CFPREFERENCES_AVOID_DAEMON": "1"
+  ]
 
   var launchCompleted = false
   var launchError: Error?
