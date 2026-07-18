@@ -342,7 +342,10 @@ doctor() {
   local plist_build
   local plist_version
   local remote_main
-  local applicable_rules
+  local release_commit
+  local release_parent_one=""
+  local release_parent_two=""
+  local release_extra_parent=""
   local workflow_state
 
   require_command git
@@ -375,6 +378,13 @@ doctor() {
   [[ "$SOURCE_COMMIT" == "$TAG_COMMIT" ]] ||
     die "Local HEAD must match $TAG ($SOURCE_COMMIT != $TAG_COMMIT)."
 
+  release_commit="$(git rev-list --parents -n 1 "$TAG_COMMIT")"
+  read -r release_commit release_parent_one release_parent_two release_extra_parent \
+    <<<"$release_commit"
+  [[ "$release_commit" == "$TAG_COMMIT" && -n "$release_parent_one" &&
+    -n "$release_parent_two" && -z "$release_extra_parent" ]] ||
+    die "$TAG must point at a two-parent dev-to-main release merge commit."
+
   branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
   if [[ -n "$branch" && "$branch" != "main" ]]; then
     die "Release publication must run from main or a detached $TAG checkout, not $branch."
@@ -396,13 +406,6 @@ doctor() {
   STATE_KEY="${TAG}-${SOURCE_COMMIT:0:12}"
   STATE_FILE="$(state_path_for_commit "$SOURCE_COMMIT")"
   acquire_publish_lock
-  if ! applicable_rules="$(
-    gh api "repos/$REPOSITORY/rules/branches/main" --jq '.[].type' 2>/dev/null
-  )"; then
-    die "Could not verify the effective GitHub rules for main; refusing to assume merge commits are allowed."
-  fi
-  ! /usr/bin/grep -Fx required_linear_history <<<"$applicable_rules" >/dev/null ||
-    die "main requires linear history, which blocks the required dev-to-main merge commit."
   require_successful_workflow ci.yml CI
   CI_RUN_ID="$GATE_RUN_ID"
   CI_RUN_URL="$GATE_RUN_URL"
