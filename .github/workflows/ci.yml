@@ -70,6 +70,8 @@ jobs:
 
       - name: Script control-plane tests
         if: steps.scope.outputs.needs_script_tests == 'true'
+        env:
+          LEXIRAY_PORTABLE_CONTROL_PLANE_TESTS: "1"
         run: |
           for test_script in script/tests/*_test.sh; do
             [[ -x "$test_script" ]] || continue
