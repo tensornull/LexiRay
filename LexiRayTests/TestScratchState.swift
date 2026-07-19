@@ -6,7 +6,7 @@ import XCTest
 /// cfprefsd or ~/Library/Preferences — per-suite teardown cannot win the
 /// race against cfprefsd's post-exit flush, which used to leak one plist per
 /// test run. Leftovers from older runs are removed by
-/// script/clean_test_state.sh.
+/// the test target's own teardown.
 final class InMemoryScratchDefaults: UserDefaults, @unchecked Sendable {
   private let lock = NSLock()
   private var storage: [String: Any] = [:]
@@ -15,7 +15,7 @@ final class InMemoryScratchDefaults: UserDefaults, @unchecked Sendable {
     // Bind to a sentinel scratch suite so an accessor that bypassed the
     // overridden primitives could never touch the real
     // io.github.tensornull.lexiray domain. The sentinel matches the
-    // clean_test_state.sh pattern in case it ever materializes on disk.
+    // legacy scratch-file pattern in case it ever materializes on disk.
     super.init(suiteName: "LexiRayTestScratch-00000000-0000-0000-0000-000000000000")!
   }
 

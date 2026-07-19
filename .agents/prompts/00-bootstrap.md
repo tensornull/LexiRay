@@ -1,17 +1,5 @@
-# Bootstrap LexiRay
+# Bootstrap
 
-Bootstrap only the requested repository capability. Follow `AGENTS.md` and the
-applicable `.agents/runbooks/` procedure.
+Inspect `AGENTS.md`, current Git/worktree state, relevant source, tests, and history. Create one temporary linked worktree from current `origin/dev` only when the task is authorized to change code. Preserve unrelated dirty work.
 
-Before editing:
-
-- Inspect branch/worktree state and run `./script/preflight.sh change`.
-- State the user-visible goal, acceptance matrix, and smallest file scope.
-- Preserve clean-room, Swift-only product code, SwiftUI/AppKit boundaries, and
-  XcodeGen ownership.
-
-After each edit batch run `./script/verify.sh changed`. Finish with
-`./script/verify.sh candidate`; install and Computer Use-accept app changes by
-default. Before PR work run `./script/verify.sh pr`.
-
-Report evidence states, checks blocked or skipped, and residual risk.
+Use `swift run lexiray-ops verify changed --base <sha>` for final local scope selection. Unknown paths are a mapping defect and must not trigger broad fallback verification.

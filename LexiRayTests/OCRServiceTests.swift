@@ -30,7 +30,7 @@ final class OCRServiceTests: XCTestCase {
         confidence: 0.9
       ),
       OCRService.RecognizedTextCandidate(
-        text: "./script/build_and_run.sh --verify",
+        text: "swift run lexiray-ops verify changed --base HEAD",
         boundingBox: CGRect(x: 0.08, y: 0.22, width: 0.4, height: 0.04),
         confidence: 0.82
       )
@@ -41,7 +41,7 @@ final class OCRServiceTests: XCTestCase {
       """
       验证:
       xcodebuild test -project LexiRay.xcodeproj CODE_SIGNING_ALLOWED=NO
-      ./script/build_and_run.sh --verify
+      swift run lexiray-ops verify changed --base HEAD
       """
     )
   }

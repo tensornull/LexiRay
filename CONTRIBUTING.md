@@ -1,74 +1,32 @@
 # Contributing to LexiRay
 
-Thanks for helping improve LexiRay. Keep changes focused, Swift-only, and aligned
-with the clean-room goal.
+LexiRay is a clean-room macOS app. Do not copy source, assets, Objective-C, private behavior, or implementation details from EasyDict or other projects.
 
-## Development Rules
+## Development
 
-- Create `feat/<task>`, `fix/<task>`, `chore/<task>`, or `docs/<task>` from the
-  latest `dev` in a dedicated linked worktree. Only emergency hotfixes branch
-  from `main`; keep the primary checkout for synchronization and release.
-- Keep changes surgical. Do not include unrelated refactors or formatting churn.
-- Use SwiftUI for app surfaces and narrow AppKit bridges for macOS-specific
-  edges.
-- Do not copy EasyDict source code, assets, UI implementation, Objective-C, or
-  private reverse-engineered behavior.
-- Do not commit local `.codex/`, build products, DerivedData, xcresults, or
-  generated `LexiRay.xcodeproj`.
+Requirements are macOS 15 or newer, Xcode, Swift, and XcodeGen. Create a Git linked worktree from current `dev` and keep the primary checkout for synchronization and release work.
 
-## Required Checks
-
-Start each change with preflight, then run the changed-scope gate while
-iterating:
+Implement the smallest complete change and run:
 
 ```bash
-./script/preflight.sh change
-./script/verify.sh changed
+swift run lexiray-ops verify changed --base <base-sha>
 ```
 
-Before opening a PR, create and inspect candidate evidence, then run the PR
-gate. For app-binary changes, the candidate flow also requires canonical
-installation and installed-app Computer Use acceptance; docs/tests-only changes
-stop without installation:
+The verifier chooses checks from changed paths. Unknown paths must receive an explicit mapping; never substitute a full suite. Debug UI with named scenarios and reserve a full GUI run for shared window/panel code, runner changes, or an explicit request.
 
-```bash
-./script/verify.sh candidate
-./script/install_applications.sh
-./script/verify.sh pr
-```
+With explicit delivery authorization, make one atomic commit and push directly to `dev`. A `dev` push has no remote CI and no task pull request. Remove and prune the linked worktree when finished.
 
-## Pull Requests
+## Reviews and releases
 
-- Task PRs target `dev` and use squash merge.
-- Release PRs alone target `main` from `dev` and use a merge commit. Sync
-  `main` back to `dev` immediately after release.
-- Include a concise summary and the exact checks you ran.
-- After local CI passes and the PR is open, request the manual dual-agent review:
+Formal automated review occurs only on an explicit `dev` to `main` release pull request. The required `release-ci` job runs build, unit, operations, and packaging preflight checks without GUI or secrets. Only unresolved Codex P0/P1 findings block alongside that check.
 
-```bash
-./script/request_ai_review.sh <PR_NUMBER>
-```
+Release PRs use merge commits. After merge, synchronize `dev` to `main`, then manually dispatch the single `Release` workflow with the version and exact SHA. Never create a new tag or publish assets locally; the workflow verifies the signed DMG before creating the tag and public release.
 
-- Address actionable GitHub Copilot and Codex findings before merge. If a fix
-  changes code or release behavior, rerun the relevant local gate before asking
-  for another review.
-- If a GitHub Actions check fails, inspect the failed logs before changing code:
+## Safety
 
-```bash
-gh run view <run-id> --log-failed
-```
+- Preserve unrelated dirty work and real user data.
+- GUI and installed acceptance use isolated fixtures and UserDefaults.
+- Never reset TCC, read real provider credentials, or capture unrelated windows.
+- Never commit generated projects, build products, evidence, DMGs, archives, or secrets.
 
-Swift CodeQL runs weekly or on manual dispatch. Treat findings as follow-up
-security work; CodeQL is not a PR or release gate.
-
-## Releases
-
-Release candidates must already have a passing real Login Item probe and
-current installed-app Computer Use evidence. From the tagged `main` checkout,
-use the resumable orchestrator:
-
-```bash
-./script/release.sh doctor <version>
-./script/release.sh publish <version>
-./script/release.sh status <version>
-```
+By participating, you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).

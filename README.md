@@ -53,117 +53,61 @@ Requirements:
 - macOS 15+
 - Xcode 16.4+ or newer
 - XcodeGen
-- SwiftFormat 0.62.1 (repository-pinned)
 
-Install local tools:
+Install XcodeGen, create a temporary linked worktree from `dev`, and run the
+changed-scope verifier:
 
 ```bash
 brew install xcodegen
-./script/install_swiftformat.sh build/tools
-export LEXIRAY_SWIFTFORMAT_TOOL="$PWD/build/tools/swiftformat"
+git worktree add ../LexiRay-task dev
+swift run lexiray-ops verify changed --base HEAD
 ```
 
-Run the changed-scope gate while developing. Before pushing an app-binary
-change, create the candidate, install that exact build, complete installed-app
-Computer Use acceptance with the isolated profile, and then run the PR gate:
+The verifier maps changed paths to the narrowest build, unit, and GUI checks.
+Unknown paths fail instead of expanding to a full suite. Run a named GUI
+scenario directly when debugging visible behavior:
 
 ```bash
-./script/preflight.sh change
-./script/verify.sh changed
-./script/verify.sh candidate
-./script/install_applications.sh
-./script/verify.sh pr
+swift run lexiray-ops gui list
+swift run lexiray-ops gui run panel_blank
 ```
 
-Ordinary changes must run from a dedicated linked worktree created from the
-latest `dev`; the primary checkout is reserved for synchronization and release.
-
-The installer and Computer Use steps are skipped for docs/tests-only changes.
-See [the verification runbook](.agents/runbooks/verification.md) for receipt and
-evidence commands.
-
-Run the app from the workspace build:
+Full GUI verification is restricted to shared window/panel infrastructure,
+runner changes, or an explicit request. Installation and Computer Use are
+restricted to macOS system boundaries. Their evidence is immutable and bound to
+the source fingerprint:
 
 ```bash
-./script/build_and_run.sh run
+swift run lexiray-ops gui run --all --reason explicit
+swift run lexiray-ops install
+swift run lexiray-ops accept launch launch
+swift run lexiray-ops accept record launch --pid 12345 --result passed
 ```
 
-The build/run script requires the repository-pinned `LexiRay Local Development`
-certificate and signs by its exact SHA-1 fingerprint. It never creates, imports,
-trusts, or replaces a certificate. If the keychain or private key is unavailable,
-the build fails with one diagnostic command:
+The acceptance launcher prints a live PID only for the immediate Computer Use handoff. The recorder verifies that process owns the isolated profile, captures only its windows, then terminates it and removes the isolated data; the PID is never persisted.
 
-```bash
-./script/development_identity.sh doctor
-```
-
-The signed workspace build launches only:
-
-```text
-build/DerivedData/Build/Products/Debug/LexiRay.app
-```
-
-Grant Accessibility and Screen & System Audio Recording to that app once in
-System Settings. Normal rebuilds should not reset TCC or require reauthorizing
-permissions.
-
-Do not use raw Xcode builds or hand-made DMGs for permission-sensitive testing.
-They can change the code identity macOS uses for TCC. LexiRay will show an App
-Identity warning and block Selection/OCR if it detects an unstable identity.
+Daily delivery pushes an atomic commit directly to `dev`. A `dev` push runs no
+remote CI and opens no task pull request. Remove and prune the temporary
+worktree immediately after delivery.
 
 ## Release
 
-Release preparation for `0.2.0` and later must start from `dev`:
+An explicit release opens the only pull request path, `dev` to `main`. The PR
+runs one required 10-minute `release-ci` job and one automatic Codex P0/P1
+review. It never runs GUI or accesses signing secrets.
 
 ```bash
-./script/verify.sh candidate
-./script/verify.sh pr
+swift run lexiray-ops verify release-pr --base <main-sha> --head <dev-sha>
 ```
 
-Open a PR from `dev` to `main`. After the PR checks pass and `main` is updated,
-confirm the required `main` CI run is green before tagging. CodeQL runs weekly
-or manually and does not block PRs, merges, or releases.
+After merge, manually dispatch the single `Release` workflow with the exact
+version and SHA. Its 20-minute, single-instance job imports the existing P12
+only in the runner, builds and verifies the signed DMG, then creates the tag and
+public GitHub Release. A failure creates neither. There is no local publish,
+fallback builder, polling, or recovery state.
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
-```
-
-Release artifacts are built, signed, verified, and uploaded from the local
-release checkout when the fixed release identity is available. After the tag is
-pushed, fetch it, check out the exact tagged commit, then run:
-
-```bash
-./script/release.sh doctor 0.2.0
-./script/release.sh publish 0.2.0
-```
-
-`release.sh` requires a clean worktree, verifies that `v<version>` points to
-`origin/main`, and requires a current candidate receipt with a passing real
-Login Item probe plus installed-app Computer Use acceptance. It uses the local
-fixed identity when that exact
-certificate is accessible; otherwise it automatically dispatches the GitHub
-`Release Build` fallback. Fallback publication is resumable without polling:
-
-```bash
-./script/release.sh status 0.2.0
-```
-
-Exit 75 means the fallback is pending or its visibility is uncertain. The
-fallback workflow creates only a private build artifact. Local `status`
-rechecks installed-app Computer Use evidence, verifies that artifact, then
-uploads it through a draft release before publication. Both paths verify the
-fixed certificate fingerprint, designated requirement, entitlements, DMG
-contents, and published `.sha256` before marking the release complete. Resumable state is kept under ignored
-`build/release-state/`; see [the release runbook](.agents/runbooks/release.md).
-
-The separate GitHub `Release Asset Check` workflow remains an asset/checksum
-validation gate. The fallback `Release Build` workflow may compile, sign,
-package, and upload a private Actions artifact only when the fixed identity is
-unavailable locally; it has no permission or script path to publish a release.
-
-```bash
-gh release view v0.2.0 --json assets,url
+gh workflow run release.yml -f version=0.4.3 -f sha=<exact-sha>
 ```
 
 ## Clean-Room Rule

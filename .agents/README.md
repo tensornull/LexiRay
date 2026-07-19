@@ -1,15 +1,11 @@
-# LexiRay Agent Assets
+# LexiRay agent guidance
 
-`AGENTS.md` is the canonical, agent-independent contract. This directory holds
-progressively loaded detail:
+`AGENTS.md` defines the canonical workflow. Runbooks contain narrow operational detail and must not introduce alternative gates or release paths. `lexiray-ops` is the only repository operations entry point.
 
-- `runbooks/`: executable project procedures for verification, GUI acceptance,
-  data safety, installation, Git/CI, and release.
-- `adr/`: durable technical decisions and shared domain terminology.
-- `skills/`: narrow reusable capabilities discovered by supported agents.
-- `prompts/`: optional task starters; they must defer to `AGENTS.md` and the
-  runbooks instead of duplicating policy.
-
-Codex loads `AGENTS.md` and `.agents/skills` natively. `CLAUDE.md` imports the
-same contract and `.claude/skills` points to `.agents/skills`. Do not add tracked
-`.codex` compatibility files or create an agent-specific source of truth.
+- `runbooks/verification.md`: changed-scope mapping and retry rule.
+- `runbooks/gui-acceptance.md`: isolated GUI scenarios and immutable evidence.
+- `runbooks/installation.md`: rare `/Applications` system-boundary install.
+- `runbooks/git-workflow.md`: direct `dev` delivery and release PR.
+- `runbooks/ci.md`: the single required release job.
+- `runbooks/release.md`: manual GitHub-only publishing.
+- `runbooks/data-safety.md`: production-data and TCC boundaries.
