@@ -80,8 +80,11 @@ the source fingerprint:
 ```bash
 swift run lexiray-ops gui run --all --reason explicit
 swift run lexiray-ops install
-swift run lexiray-ops accept launch --result passed --screenshot build/acceptance-artifacts/<run-id>/capture.png
+swift run lexiray-ops accept launch launch
+swift run lexiray-ops accept record launch --pid 12345 --result passed
 ```
+
+The acceptance launcher prints a live PID only for the immediate Computer Use handoff. The recorder verifies that process owns the isolated profile, captures only its windows, then terminates it and removes the isolated data; the PID is never persisted.
 
 Daily delivery pushes an atomic commit directly to `dev`. A `dev` push runs no
 remote CI and opens no task pull request. Remove and prune the temporary

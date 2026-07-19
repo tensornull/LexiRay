@@ -4,9 +4,9 @@ import Foundation
 public enum ReleaseContract {
   public static let repository = "tensornull/LexiRay"
   public static let bundleID = "io.github.tensornull.lexiray"
-  public static let identityName = "LexiRay Release Self-Signed"
-  public static let certificateSHA1 = "C4407C14D31AA9397CD21829E9F26C9AF7AA925B"
-  public static let certificateSHA256 = "5A54594CFDFB1827E3A097EA43BF4674A6FCBFA2563D60DE178566AE860229F5"
+  public static let identityName = SigningIdentityContract.release.name
+  public static let certificateSHA1 = SigningIdentityContract.release.certificateSHA1
+  public static let certificateSHA256 = SigningIdentityContract.release.certificateSHA256
 }
 
 public struct ReleaseArtifacts: Sendable {

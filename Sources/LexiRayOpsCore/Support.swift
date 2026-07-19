@@ -17,6 +17,76 @@ public struct ProcessResult: Sendable {
   public let output: String
 }
 
+public struct PinnedSigningIdentity: Equatable, Sendable {
+  public let name: String
+  public let certificateSHA1: String
+  public let certificateSHA256: String
+}
+
+public enum SigningIdentityContract {
+  public static let development = PinnedSigningIdentity(
+    name: "LexiRay Local Development",
+    certificateSHA1: "B665AB9A2956DDD3C2712669E4DA0DBE30DA084D",
+    certificateSHA256: "77C74E4D76C7A7AE0D0FF77D5C4AA928E0FE75CA463BF7B5FC6D0C9E08F6D356"
+  )
+  public static let release = PinnedSigningIdentity(
+    name: "LexiRay Release Self-Signed",
+    certificateSHA1: "C4407C14D31AA9397CD21829E9F26C9AF7AA925B",
+    certificateSHA256: "5A54594CFDFB1827E3A097EA43BF4674A6FCBFA2563D60DE178566AE860229F5"
+  )
+  public static let installable = [development, release]
+}
+
+public enum SigningIdentityVerifier {
+  @discardableResult
+  public static func verify(
+    app: URL,
+    repository: Repository,
+    allowed: [PinnedSigningIdentity]
+  ) throws -> PinnedSigningIdentity {
+    try ProcessRunner.run(
+      "/usr/bin/codesign", ["--verify", "--deep", "--strict", app.path],
+      cwd: repository.root,
+      capture: true
+    )
+    let details = try ProcessRunner.capture(
+      "/usr/bin/codesign", ["-dvvv", app.path], cwd: repository.root
+    )
+    guard details.contains("Identifier=io.github.tensornull.lexiray") else {
+      throw OpsError.failed("LexiRay code signature has an unexpected bundle identifier")
+    }
+    let identity = allowed.first { details.contains("Authority=\($0.name)") }
+    guard let identity else {
+      throw OpsError.failed("LexiRay is not signed by an allowed pinned identity")
+    }
+
+    let certificateDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "lexiray-signing-certificate-\(UUID().uuidString.lowercased())",
+      isDirectory: true
+    )
+    try FileManager.default.createDirectory(at: certificateDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: certificateDirectory) }
+    try ProcessRunner.run(
+      "/usr/bin/codesign", ["-d", "--extract-certificates", app.path],
+      cwd: certificateDirectory,
+      capture: true
+    )
+    let certificate = certificateDirectory.appendingPathComponent("codesign0")
+    guard FileManager.default.fileExists(atPath: certificate.path),
+          try Data(contentsOf: certificate).sha256.uppercased() == identity.certificateSHA256
+    else { throw OpsError.failed("LexiRay signing certificate fingerprint is not pinned") }
+
+    let requirement = try ProcessRunner.capture(
+      "/usr/bin/codesign", ["-d", "-r-", app.path], cwd: repository.root
+    )
+    let expected = "identifier \"io.github.tensornull.lexiray\" and certificate leaf = H\"\(identity.certificateSHA1.lowercased())\""
+    guard requirement.contains("designated => \(expected)") else {
+      throw OpsError.failed("LexiRay designated requirement does not match its pinned identity")
+    }
+    return identity
+  }
+}
+
 public enum ProcessRunner {
   @discardableResult
   public static func run(

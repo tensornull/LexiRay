@@ -102,23 +102,30 @@ struct LexiRayOpsMain {
   }
 
   private static func accept(_ arguments: [String], repository: Repository) throws {
-    guard let scenario = arguments.first, !scenario.hasPrefix("-") else {
-      throw OpsError.usage("accept requires a scenario name")
+    guard arguments.count >= 2 else { throw OpsError.usage("accept requires launch|record and a scenario") }
+    let mode = arguments[0]
+    let scenario = arguments[1]
+    switch mode {
+    case "launch":
+      let launch = try AcceptanceRecorder.launch(repository: repository, scenario: scenario)
+      print("acceptance_pid=\(launch.processIdentifier)")
+      print("record with: swift run lexiray-ops accept record \(scenario) --pid \(launch.processIdentifier) --result passed|failed|blocked")
+    case "record":
+      guard let processIdentifier = Int32(try arguments.value(after: "--pid")) else {
+        throw OpsError.usage("accept record --pid must be an integer")
+      }
+      let evidence = try AcceptanceRecorder.record(
+        repository: repository,
+        scenario: scenario,
+        result: arguments.value(after: "--result"),
+        processIdentifier: processIdentifier,
+        retryOf: arguments.optionalValue(after: "--retry-of"),
+        rootCause: arguments.optionalValue(after: "--cause")
+      )
+      print("acceptance evidence: \(evidence.path)")
+    default:
+      throw OpsError.usage("accept requires launch or record")
     }
-    let result = try arguments.value(after: "--result")
-    var screenshots: [URL] = []
-    for index in arguments.indices where arguments[index] == "--screenshot" && arguments.indices.contains(index + 1) {
-      screenshots.append(URL(fileURLWithPath: arguments[index + 1]))
-    }
-    let evidence = try AcceptanceRecorder.record(
-      repository: repository,
-      scenario: scenario,
-      result: result,
-      screenshots: screenshots,
-      retryOf: arguments.optionalValue(after: "--retry-of"),
-      rootCause: arguments.optionalValue(after: "--cause")
-    )
-    print("acceptance evidence: \(evidence.path)")
   }
 
   private static func release(_ arguments: [String], repository: Repository) throws {
@@ -182,7 +189,8 @@ struct LexiRayOpsMain {
       gui run <scenario>... [--retry-of ID --cause TEXT]
       gui run --all --reason shared-ui|runner-change|explicit
       install [--source PATH] [--retry-of ID --cause TEXT]
-      accept <scenario> --result passed|failed|blocked [--screenshot PATH]
+      accept launch <scenario>
+      accept record <scenario> --pid PID --result passed|failed|blocked [--retry-of ID --cause TEXT]
       release authorize-pr --pr-number N --head SHA
       release authorize --version X.Y.Z --sha SHA
       release preflight [--version X.Y.Z]

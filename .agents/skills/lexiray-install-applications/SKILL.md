@@ -14,11 +14,17 @@ Use this skill only for TCC, Login Item, global hotkey, selection/OCR/speech, si
    swift run lexiray-ops install --source /absolute/path/LexiRay.app
    ```
 
-3. Use Computer Use only for the mapped installed-app scenario with the isolated acceptance profile. Never read or seed production data, reset TCC, or capture unrelated windows.
-4. Record the result and sealed screenshot paths:
+3. Launch the installed copy through the operations tool. It prints the live PID but does not persist it:
 
    ```bash
-   swift run lexiray-ops accept <scenario> --result passed --screenshot /absolute/path/capture.png
+   swift run lexiray-ops accept launch <scenario>
    ```
 
-Installation is an immediate stage/verify/replace operation with rollback; there is no transaction receipt or resumable state. A diagnosed failed acceptance may be retried once with `--retry-of <id> --cause <root-cause>`.
+4. Use Computer Use only for that mapped scenario. Never read or seed production data or reset TCC.
+5. Record the result with the printed PID:
+
+   ```bash
+   swift run lexiray-ops accept record <scenario> --pid 12345 --result passed
+   ```
+
+The recorder accepts a pass only from the exact installed process launched with the isolated profile, captures only its windows, then terminates it and cleans its isolated data. Installation uses a crash-safe atomic exchange; there is no transaction receipt, saved PID, or resumable state. A diagnosed failed acceptance may be retried once with `--retry-of <id> --cause <root-cause>`.
