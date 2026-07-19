@@ -406,7 +406,7 @@ public enum ReleaseBuilder {
       cwd: repository.root, redactedArgumentIndexes: [5]
     )
     let identities = try ProcessRunner.capture(
-      "/usr/bin/security", ["find-identity", "-v", "-p", "codesigning", keychain.path],
+      "/usr/bin/security", ["find-identity", "-p", "codesigning", keychain.path],
       cwd: repository.root
     )
     let selector = try signingSelector(from: identities, identityName: ReleaseContract.identityName)
