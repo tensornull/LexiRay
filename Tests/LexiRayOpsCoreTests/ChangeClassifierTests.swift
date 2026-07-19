@@ -101,13 +101,19 @@ import Testing
   let data = Data(
     """
     {"workflow_runs":[
-      {"id":11,"pull_requests":[{"number":7}]},
-      {"id":12,"pull_requests":[{"number":8}]}
+      {"id":10,"created_at":"2026-07-19T03:00:00Z","pull_requests":[{"number":7}]},
+      {"id":11,"created_at":"2026-07-19T04:00:00Z","pull_requests":[{"number":7}]},
+      {"id":12,"created_at":"2026-07-19T04:01:00Z","pull_requests":[{"number":8}]}
     ]}
     """.utf8
   )
-  #expect(try ReleasePRAttemptGate.attemptCount(from: data, pullRequestNumber: 7, currentRunID: 11) == 1)
-  #expect(try ReleasePRAttemptGate.attemptCount(from: data, pullRequestNumber: 7, currentRunID: 13) == 2)
+  let createdAt = "2026-07-19T03:30:00Z"
+  #expect(try ReleasePRAttemptGate.attemptCount(
+    from: data, pullRequestNumber: 7, pullRequestCreatedAt: createdAt, currentRunID: 11
+  ) == 1)
+  #expect(try ReleasePRAttemptGate.attemptCount(
+    from: data, pullRequestNumber: 7, pullRequestCreatedAt: createdAt, currentRunID: 13
+  ) == 2)
 }
 
 @Test func failedInstallStillWritesImmutableEvidence() throws {

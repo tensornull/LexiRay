@@ -54,8 +54,16 @@ public enum ReleasePRAttemptGate {
     }
 
     let state: String
+    let createdAt: String
     let head: Branch
     let base: Branch
+
+    enum CodingKeys: String, CodingKey {
+      case state
+      case createdAt = "created_at"
+      case head
+      case base
+    }
   }
 
   struct WorkflowRuns: Decodable {
@@ -63,10 +71,12 @@ public enum ReleasePRAttemptGate {
       struct PullRequestReference: Decodable { let number: Int }
 
       let id: Int64
+      let createdAt: String
       let pullRequests: [PullRequestReference]
 
       enum CodingKeys: String, CodingKey {
         case id
+        case createdAt = "created_at"
         case pullRequests = "pull_requests"
       }
     }
@@ -93,6 +103,7 @@ public enum ReleasePRAttemptGate {
     let count = try attemptCount(
       repository: repository,
       pullRequestNumber: pullRequestNumber,
+      pullRequestCreatedAt: pullRequest.createdAt,
       currentRunID: runID
     )
     guard count <= 2 else {
@@ -105,13 +116,14 @@ public enum ReleasePRAttemptGate {
     pullRequestNumber: Int
   ) throws {
     let runID = try requireActionsContext()
+    let pullRequest = try decodePullRequest(repository: repository, number: pullRequestNumber)
     let count = try attemptCount(
       repository: repository,
       pullRequestNumber: pullRequestNumber,
+      pullRequestCreatedAt: pullRequest.createdAt,
       currentRunID: runID
     )
     guard count >= 2 else { return }
-    let pullRequest = try decodePullRequest(repository: repository, number: pullRequestNumber)
     guard pullRequest.state == "open" else { return }
     try ProcessRunner.run(
       "/usr/bin/env",
@@ -127,12 +139,14 @@ public enum ReleasePRAttemptGate {
   static func attemptCount(
     from data: Data,
     pullRequestNumber: Int,
+    pullRequestCreatedAt: String,
     currentRunID: Int64
   ) throws -> Int {
     let response = try JSONDecoder().decode(WorkflowRuns.self, from: data)
     var runIDs = Set(
       response.workflowRuns.filter { run in
-        run.pullRequests.contains(where: { $0.number == pullRequestNumber })
+        run.createdAt >= pullRequestCreatedAt
+          && run.pullRequests.contains(where: { $0.number == pullRequestNumber })
       }.map(\.id)
     )
     runIDs.insert(currentRunID)
@@ -142,6 +156,7 @@ public enum ReleasePRAttemptGate {
   private static func attemptCount(
     repository: Repository,
     pullRequestNumber: Int,
+    pullRequestCreatedAt: String,
     currentRunID: Int64
   ) throws -> Int {
     let data = try GitHubAPI.required(
@@ -151,6 +166,7 @@ public enum ReleasePRAttemptGate {
     return try attemptCount(
       from: data,
       pullRequestNumber: pullRequestNumber,
+      pullRequestCreatedAt: pullRequestCreatedAt,
       currentRunID: currentRunID
     )
   }
