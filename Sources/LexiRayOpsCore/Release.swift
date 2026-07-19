@@ -48,9 +48,18 @@ private enum GitHubAPI {
 
 public enum ReleasePRAttemptGate {
   private struct PullRequest: Decodable {
+    struct RemoteRepository: Decodable {
+      let fullName: String
+
+      enum CodingKeys: String, CodingKey {
+        case fullName = "full_name"
+      }
+    }
+
     struct Branch: Decodable {
       let ref: String
       let sha: String
+      let repo: RemoteRepository?
     }
 
     let state: String
@@ -88,23 +97,33 @@ public enum ReleasePRAttemptGate {
     }
   }
 
+  private struct ActionsContext {
+    let runID: Int64
+    let runAttempt: Int
+  }
+
   public static func authorize(
     repository: Repository,
     pullRequestNumber: Int,
     headSHA: String
   ) throws {
-    let runID = try requireActionsContext()
+    let context = try requireActionsContext()
+    guard context.runAttempt == 1 else {
+      throw OpsError.failed("manual workflow reruns are prohibited; push one diagnosed correction instead")
+    }
     let pullRequest = try decodePullRequest(repository: repository, number: pullRequestNumber)
     guard pullRequest.state == "open",
           pullRequest.base.ref == "main",
+          pullRequest.base.repo?.fullName == ReleaseContract.repository,
           pullRequest.head.ref == "dev",
+          pullRequest.head.repo?.fullName == ReleaseContract.repository,
           pullRequest.head.sha == headSHA
     else { throw OpsError.failed("release-ci accepts only the current open dev to main pull request head") }
     let count = try attemptCount(
       repository: repository,
       pullRequestNumber: pullRequestNumber,
       pullRequestCreatedAt: pullRequest.createdAt,
-      currentRunID: runID
+      currentRunID: context.runID
     )
     guard count <= 2 else {
       throw OpsError.failed("release PR has exhausted its initial run and one diagnosed retry")
@@ -115,15 +134,15 @@ public enum ReleasePRAttemptGate {
     repository: Repository,
     pullRequestNumber: Int
   ) throws {
-    let runID = try requireActionsContext()
+    let context = try requireActionsContext()
     let pullRequest = try decodePullRequest(repository: repository, number: pullRequestNumber)
     let count = try attemptCount(
       repository: repository,
       pullRequestNumber: pullRequestNumber,
       pullRequestCreatedAt: pullRequest.createdAt,
-      currentRunID: runID
+      currentRunID: context.runID
     )
-    guard count >= 2 else { return }
+    guard context.runAttempt > 1 || count >= 2 else { return }
     guard pullRequest.state == "open" else { return }
     try ProcessRunner.run(
       "/usr/bin/env",
@@ -181,13 +200,20 @@ public enum ReleasePRAttemptGate {
     )
   }
 
-  private static func requireActionsContext() throws -> Int64 {
+  private static func requireActionsContext() throws -> ActionsContext {
     guard ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true",
           ProcessInfo.processInfo.environment["GH_TOKEN"]?.isEmpty == false,
           let rawRunID = ProcessInfo.processInfo.environment["GITHUB_RUN_ID"],
-          let runID = Int64(rawRunID)
-    else { throw OpsError.failed("release PR attempt control requires GitHub Actions, GH_TOKEN, and GITHUB_RUN_ID") }
-    return runID
+          let runID = Int64(rawRunID),
+          let rawRunAttempt = ProcessInfo.processInfo.environment["GITHUB_RUN_ATTEMPT"],
+          let runAttempt = Int(rawRunAttempt),
+          runAttempt > 0
+    else {
+      throw OpsError.failed(
+        "release PR attempt control requires GitHub Actions, GH_TOKEN, GITHUB_RUN_ID, and GITHUB_RUN_ATTEMPT"
+      )
+    }
+    return ActionsContext(runID: runID, runAttempt: runAttempt)
   }
 }
 

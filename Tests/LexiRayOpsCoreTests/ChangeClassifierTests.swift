@@ -280,4 +280,12 @@ import Testing
   #expect(workflow.contains("gui run") == false)
   #expect(workflow.contains("lexiray-ops install") == false)
   #expect(workflow.contains("lexiray-ops accept") == false)
+
+  let releaseSource = try String(
+    contentsOf: repository.root.appendingPathComponent("Sources/LexiRayOpsCore/Release.swift"),
+    encoding: .utf8
+  )
+  #expect(releaseSource.contains("head.repo?.fullName == ReleaseContract.repository"))
+  #expect(releaseSource.contains("GITHUB_RUN_ATTEMPT"))
+  #expect(releaseSource.contains("manual workflow reruns are prohibited"))
 }
