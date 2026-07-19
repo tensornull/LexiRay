@@ -282,7 +282,7 @@ public enum ReleaseBuilder {
     }
     try p12Data.write(to: p12, options: [.atomic])
     try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: p12.path)
-    try importIdentity(
+    let codeSignSelector = try importIdentity(
       repository: repository,
       p12: p12,
       p12Password: password,
@@ -324,7 +324,7 @@ public enum ReleaseBuilder {
       [
         "--force", "--deep", "--options", "runtime", "--timestamp=none",
         "--entitlements", repository.root.appendingPathComponent("LexiRay/Resources/LexiRay.entitlements").path,
-        "--sign", ReleaseContract.certificateSHA1, "--keychain", keychain.path, app.path
+        "--sign", codeSignSelector, "--keychain", keychain.path, app.path
       ],
       cwd: repository.root
     )
@@ -381,7 +381,7 @@ public enum ReleaseBuilder {
     keychain: URL,
     keychainPassword: String,
     originalKeychains: [String]
-  ) throws {
+  ) throws -> String {
     try ProcessRunner.run(
       "/usr/bin/security", ["create-keychain", "-p", keychainPassword, keychain.path],
       cwd: repository.root, redactedArgumentIndexes: [2]
@@ -409,9 +409,29 @@ public enum ReleaseBuilder {
       "/usr/bin/security", ["find-identity", "-v", "-p", "codesigning", keychain.path],
       cwd: repository.root
     )
-    guard identities.contains(ReleaseContract.certificateSHA1), identities.contains(ReleaseContract.identityName) else {
-      throw OpsError.failed("fixed release signing identity was not imported")
+    let selector = try signingSelector(from: identities, identityName: ReleaseContract.identityName)
+    let certificates = try ProcessRunner.capture(
+      "/usr/bin/security", ["find-certificate", "-a", "-c", ReleaseContract.identityName, "-Z", keychain.path],
+      cwd: repository.root
+    ).uppercased()
+    guard certificates.contains(ReleaseContract.certificateSHA1),
+          certificates.contains(ReleaseContract.certificateSHA256)
+    else {
+      throw OpsError.failed("imported release certificate does not match the pinned SHA-1/SHA-256 pair")
     }
+    return selector
+  }
+
+  static func signingSelector(from output: String, identityName: String) throws -> String {
+    let matchingLines = output.split(separator: "\n").filter { line in
+      line.contains("\"\(identityName)\"")
+    }
+    guard matchingLines.count == 1,
+          let selector = matchingLines[0].split(whereSeparator: \.isWhitespace).first(where: { token in
+            token.count == 40 && token.allSatisfy(\.isHexDigit)
+          })
+    else { throw OpsError.failed("exactly one fixed release signing identity must be imported") }
+    return String(selector)
   }
 
   private static func verifySignedApp(

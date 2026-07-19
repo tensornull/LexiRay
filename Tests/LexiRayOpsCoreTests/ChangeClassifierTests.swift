@@ -116,6 +116,24 @@ import Testing
   ) == 2)
 }
 
+@Test func releaseSigningSeparatesCodeSignSelectorFromCertificateFingerprint() throws {
+  let selector = try ReleaseBuilder.signingSelector(
+    from: "  1) 24A09DAB56BCDA221510C0C63B72051F5165B184 \"LexiRay Release Self-Signed\"",
+    identityName: "LexiRay Release Self-Signed"
+  )
+  #expect(selector == "24A09DAB56BCDA221510C0C63B72051F5165B184")
+  #expect(selector != ReleaseContract.certificateSHA1)
+  #expect(throws: OpsError.self) {
+    _ = try ReleaseBuilder.signingSelector(
+      from: """
+        1) AAAA09DAB56BCDA221510C0C63B72051F5165B184 "LexiRay Release Self-Signed"
+        2) BBBB09DAB56BCDA221510C0C63B72051F5165B184 "LexiRay Release Self-Signed"
+        """,
+      identityName: "LexiRay Release Self-Signed"
+    )
+  }
+}
+
 @Test func failedInstallStillWritesImmutableEvidence() throws {
   let root = FileManager.default.temporaryDirectory.appendingPathComponent("lexiray-install-evidence-\(UUID().uuidString)")
   defer { try? FileManager.default.removeItem(at: root) }
