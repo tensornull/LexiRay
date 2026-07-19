@@ -1,53 +1,102 @@
-name: Release Asset Check
+name: Release
 
 on:
-  release:
+  pull_request:
+    branches:
+      - main
     types:
-      - published
+      - opened
+      - synchronize
+      - reopened
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version without leading v, for example 0.2.0"
+        description: Release version without the leading v
+        required: true
+        type: string
+      sha:
+        description: Exact main or existing-tag commit SHA
         required: true
         type: string
 
+concurrency:
+  group: ${{ github.event_name == 'workflow_dispatch' && 'release-publish' || format('release-pr-{0}', github.event.pull_request.number) }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 jobs:
-  verify-release-assets:
-    runs-on: ubuntu-latest
+  release-ci:
+    if: github.event_name == 'pull_request'
+    name: release-ci
+    runs-on: macos-26
+    timeout-minutes: 10
     permissions:
+      actions: read
       contents: read
-
+      pull-requests: write
     steps:
-      - name: Resolve release version
-        id: release
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_TAG: ${{ github.event.release.tag_name }}
-          INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          if [[ "$EVENT_NAME" == "release" ]]; then
-            tag="$EVENT_TAG"
-            version="${tag#v}"
-          else
-            version="$INPUT_VERSION"
-            tag="v$version"
-          fi
-
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || "$tag" != "v$version" ]]; then
-            echo "Release versions must use x.y.z and tags v<version>, got: $tag" >&2
-            exit 1
-          fi
-
-          echo "tag=$tag" >>"$GITHUB_OUTPUT"
-          echo "version=$version" >>"$GITHUB_OUTPUT"
-
-      - name: Checkout
+      - name: Checkout release PR
         uses: actions/checkout@v6
         with:
-          ref: ${{ steps.release.outputs.tag }}
-
-      - name: Verify published release assets
+          fetch-depth: 0
+      - name: Require the single release path
+        env:
+          RELEASE_HEAD: ${{ github.head_ref }}
+        run: test "$RELEASE_HEAD" = dev
+      - name: Enforce the two-attempt release budget
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./script/verify_github_release_assets.sh "${{ steps.release.outputs.version }}"
+        run: swift run lexiray-ops release authorize-pr --pr-number "${{ github.event.pull_request.number }}" --head "${{ github.event.pull_request.head.sha }}"
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build, test, and preflight package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: swift run lexiray-ops verify release-pr --base "${{ github.event.pull_request.base.sha }}" --head "${{ github.event.pull_request.head.sha }}" --pr-number "${{ github.event.pull_request.number }}"
+      - name: Close an exhausted failed release attempt
+        if: failure() && !cancelled()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: swift run lexiray-ops release close-failed-pr --pr-number "${{ github.event.pull_request.number }}"
+
+  publish:
+    if: github.event_name == 'workflow_dispatch'
+    name: publish
+    runs-on: macos-26
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout trusted operations code
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          path: ops
+      - name: Authorize source commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: swift run --package-path ops lexiray-ops --root ops release authorize --version "${{ inputs.version }}" --sha "${{ inputs.sha }}"
+      - name: Checkout exact release source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+          path: source
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build, sign, and verify DMG
+        env:
+          LEXIRAY_RELEASE_CERT_P12_BASE64: ${{ secrets.LEXIRAY_RELEASE_CERT_P12_BASE64 }}
+          LEXIRAY_RELEASE_CERT_PASSWORD: ${{ secrets.LEXIRAY_RELEASE_CERT_PASSWORD }}
+        run: swift run --package-path ops lexiray-ops --root source release build --version "${{ inputs.version }}" --sha "${{ inputs.sha }}"
+      - name: Create tag and publish verified assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: swift run --package-path ops lexiray-ops --root source release publish --version "${{ inputs.version }}" --sha "${{ inputs.sha }}" --dmg "source/build/LexiRay-${{ inputs.version }}.dmg" --checksum "source/build/LexiRay-${{ inputs.version }}.dmg.sha256"

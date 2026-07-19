@@ -7,13 +7,19 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Changed
+
+- Replaced the legacy shell control plane with one Swift operations tool,
+  changed-scope local verification, a zero-CI `dev` branch, and one manual
+  GitHub release path.
+- Removed CodeQL and automatic Copilot review from the delivery loop; formal
+  review is limited to Codex P0/P1 findings on release pull requests.
+
 ## [0.4.3] - 2026-07-19
 
 ### Fixed
 
-- Fixed the secure release-lock bootstrap on the macOS system Bash 3.2 so
-  `release.sh doctor`, `publish`, and `status` no longer fail on empty arrays
-  under `set -u`.
+- Fixed the former local release-lock bootstrap on the macOS system Bash 3.2.
 
 ## [0.4.2] - 2026-07-18
 

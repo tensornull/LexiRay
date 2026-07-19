@@ -1,49 +1,17 @@
-# Git Workflow
+# Git workflow
 
-The long-lived integration branch is `dev`; `main` represents released source.
+## Daily work
 
-## Normal task
+1. Fetch `origin` and ensure no other task is writing to `dev`.
+2. Create a Git linked worktree from current `origin/dev`.
+3. Implement and run changed-scope local verification.
+4. With explicit delivery authorization, create one atomic commit and fast-forward push directly to `dev`.
+5. Confirm the push created no Actions run, remove the linked worktree, and prune.
 
-1. Ensure `dev` contains the latest `main` release commit.
-2. Create a dedicated linked worktree from `dev` as `feat/<task>`, `fix/<task>`,
-   `chore/<task>`, or `docs/<task>`; primary checkout changes are rejected.
-3. Keep one smallest-complete task per branch.
-4. Open the task PR to `dev` and squash merge after local and PR gates pass.
-
-Do not use `codex/<task>` or another agent-specific prefix.
-
-## Repository settings
-
-- `dev` task PRs must run the `build-test` check from `.github/workflows/ci.yml`;
-  configure it as required when branch protection is available.
-- `main` must require CI and conversation resolution, but CodeQL remains
-  scheduled/manual and non-blocking. Keep `required_linear_history` enabled
-  except for the shortest possible release-merge window; preserve all other
-  protection, restore linear history immediately after the merge, and verify
-  the restored state.
-- `script/release.sh doctor` verifies that the release tag points at a
-  two-parent `dev`-to-`main` merge commit. It must not require branch protection
-  to remain weakened after that merge. Changing GitHub protection is an
-  explicit repository administration action, not part of ordinary local
-  implementation.
+Do not open task pull requests to `dev`. Never leave a task worktree, dirty task branch, or detached checkout after delivery.
 
 ## Release
 
-1. Open `dev` to `main` as the release PR.
-2. Merge with a merge commit only—never squash or rebase this PR.
-3. Complete the tagged release from `main` using `release.md`.
-4. Before any next task, fast-forward `dev` to `main`. If protection prevents a
-   direct update, use a dedicated sync PR and preserve the merge topology.
+An explicit release opens one `dev` to `main` PR. Merge commits are required; squash and rebase are disabled. `main` is non-linear and non-strict, so the PR is not updated solely to rerun CI.
 
-## Emergency hotfix
-
-Branch `fix/<task>` from `main`, merge it to `main`, release if needed, and
-immediately sync `main` back to `dev` before normal work resumes.
-
-Ordinary implementation intent does not imply permission to commit, push, open
-a PR, merge, tag, or publish. An explicit user request to release/publish a new
-version authorizes the whole documented release chain without repeated prompts.
-
-Use a temporary bare remote or dry-run harness when testing topology. Verify
-task-to-dev squash, dev-to-main merge commit, main-to-dev fast-forward/sync, and
-hotfix backflow without mutating the real remote.
+If the first gate finds a real blocking defect, make one diagnosed correction and allow one additional `release-ci` run. A second failure closes the release attempt. After merge, fast-forward `dev` to `main` before another task starts.

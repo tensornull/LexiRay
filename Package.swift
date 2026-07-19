@@ -3,12 +3,16 @@
 import PackageDescription
 
 let package = Package(
-  name: "LexiRayDependencies",
+  name: "LexiRayOperations",
   platforms: [
     .macOS(.v15)
   ],
-  products: [],
-  dependencies: [
-    .package(url: "https://github.com/apple/swift-markdown.git", from: "0.5.0")
+  products: [
+    .executable(name: "lexiray-ops", targets: ["LexiRayOps"])
+  ],
+  targets: [
+    .target(name: "LexiRayOpsCore"),
+    .executableTarget(name: "LexiRayOps", dependencies: ["LexiRayOpsCore"]),
+    .testTarget(name: "LexiRayOpsCoreTests", dependencies: ["LexiRayOpsCore"])
   ]
 )

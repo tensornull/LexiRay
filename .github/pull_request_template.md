@@ -1,45 +1,26 @@
-## Summary
+## Release summary
 
-- User outcome:
-- Scope intentionally excluded:
-- Roadmap ID (if applicable):
+- Version:
+- Exact dev SHA:
+- User-visible changes:
+- Intentionally excluded scope:
 
-## Acceptance Matrix
+## Required gate
 
-| State / interaction | Expected result | Evidence |
-| --- | --- | --- |
-|  |  |  |
+- [ ] This is the single `dev` to `main` release pull request.
+- [ ] Required `release-ci` completed successfully for this head SHA.
+- [ ] No unresolved Codex P0/P1 review finding remains.
+- [ ] The PR head was corrected at most once after its first gate.
+- [ ] No GUI, installation, Computer Use, signing secret, tag, or publication ran in PR CI.
 
-## Verification Receipt
+## Risk and release metadata
 
-- Source fingerprint:
-- Candidate receipt:
-- GUI scenarios:
-- Screenshot/contact-sheet directory:
-- Installed version/build/CDHash:
-- Computer Use evidence:
+- Residual risk or blocked local coverage:
+- Version/CHANGELOG/signing/packaging impact:
+- [ ] Protected provider, history, defaults, pasteboard, and TCC state were not touched.
+- [ ] No copied source/assets/UI, private reverse-engineered behavior, credentials, generated project, or build output is included.
 
-- [ ] `./script/preflight.sh change`
-- [ ] `./script/verify.sh changed`
-- [ ] `./script/verify.sh candidate`
-- [ ] `./script/verify.sh pr`
-- [ ] Every relevant screenshot/contact sheet was visually inspected
-- [ ] App-binary changes were atomically installed and accepted with Computer Use
-- [ ] Protected real provider/history/defaults data was not touched
-- [ ] Blocked or uncovered states are named below
+## After merge
 
-## Review and Risk
-
-- [ ] GitHub Copilot and Codex reviews requested when required
-- [ ] Actionable findings addressed with the affected gate rerun
-- Residual risk / blocked coverage:
-
-## Release Impact
-
-- Version, CHANGELOG, README, release notes, signing, or packaging impact:
-- [ ] Gatekeeper and SHA-256 guidance remains accurate for release changes
-
-## Clean-Room Check
-
-- [ ] No copied GPL source/assets/UI, Objective-C, private reverse-engineered
-      behavior, generated project edits, secrets, or generated build output
+- [ ] Fast-forward `dev` to the merge commit.
+- [ ] Manually dispatch the Release workflow with the exact version and SHA.
