@@ -7,7 +7,16 @@ trap 'rm -rf "$TMP_ROOT"' EXIT
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REMOTE="$TMP_ROOT/remote.git"
 WORK="$TMP_ROOT/work"
+FLOW_BIN_DIR="$TMP_ROOT/bin"
 FLOW_SWIFTFORMAT_TOOL="$TMP_ROOT/swiftformat"
+
+mkdir -p "$FLOW_BIN_DIR"
+cat >"$FLOW_BIN_DIR/xcodegen" <<'XCODEGEN'
+#!/usr/bin/env bash
+exit 0
+XCODEGEN
+chmod +x "$FLOW_BIN_DIR/xcodegen"
+export PATH="$FLOW_BIN_DIR:$PATH"
 
 cat >"$FLOW_SWIFTFORMAT_TOOL" <<'SWIFTFORMAT'
 #!/usr/bin/env bash

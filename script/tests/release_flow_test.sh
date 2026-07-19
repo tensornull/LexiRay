@@ -233,6 +233,41 @@ rg -F 'release_lock_validate.swift' "$ROOT_DIR/script/release.sh" >/dev/null || 
   echo "release state is not protected by the validated kernel lock" >&2
   exit 1
 }
+if rg -n 'local -a (validator_arguments|lock_arguments)' "$ROOT_DIR/script/release.sh" >/dev/null; then
+  echo "release lock bootstrap still expands an empty array under macOS Bash 3.2 nounset" >&2
+  exit 1
+fi
+rg -F '"$GLOBAL_LOCK_FILE" 9 >/dev/null' "$ROOT_DIR/script/release.sh" >/dev/null || {
+  echo "normal release lock validation is not invoked without test arguments" >&2
+  exit 1
+}
+rg -F '"$GLOBAL_LOCK_FILE" "$ROOT_DIR/script/release.sh" "$@"' \
+  "$ROOT_DIR/script/release.sh" >/dev/null || {
+  echo "normal release lock bootstrap is not invoked without test arguments" >&2
+  exit 1
+}
+rg -F 'git rev-list --parents -n 1 "$TAG_COMMIT"' "$ROOT_DIR/script/release.sh" >/dev/null || {
+  echo "release doctor does not validate the tagged release merge topology" >&2
+  exit 1
+}
+rg -F 'must point at a two-parent dev-to-main release merge commit' \
+  "$ROOT_DIR/script/release.sh" >/dev/null || {
+  echo "release doctor does not fail closed for a non-merge release tag" >&2
+  exit 1
+}
+rg -F 'repos/$REPOSITORY/commits/dev' "$ROOT_DIR/script/release.sh" >/dev/null || {
+  echo "release doctor does not resolve the live dev head" >&2
+  exit 1
+}
+rg -F '"$release_parent_two" == "$remote_dev" || "$TAG_COMMIT" == "$remote_dev"' \
+  "$ROOT_DIR/script/release.sh" >/dev/null || {
+  echo "release doctor does not bind the release merge to dev or its synced state" >&2
+  exit 1
+}
+if rg -F 'rules/branches/main' "$ROOT_DIR/script/release.sh" >/dev/null; then
+  echo "release doctor still requires main protection to remain weakened after merge" >&2
+  exit 1
+fi
 rg -F 'kSecUseAuthenticationContext' "$ROOT_DIR/script/probe_release_signing_identity.swift" >/dev/null
 rg -F 'interactionNotAllowed = true' "$ROOT_DIR/script/probe_release_signing_identity.swift" >/dev/null
 if "$ROOT_DIR/script/generate_release_cert.sh" >"$WORK_DIR/generate.out" 2>&1; then
