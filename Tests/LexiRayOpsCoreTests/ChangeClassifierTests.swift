@@ -306,4 +306,5 @@ import Testing
   #expect(releaseSource.contains("head.repo?.fullName == ReleaseContract.repository"))
   #expect(releaseSource.contains("GITHUB_RUN_ATTEMPT"))
   #expect(releaseSource.contains("manual workflow reruns are prohibited"))
+  #expect(releaseSource.contains("[\"find-identity\", \"-v\"") == false)
 }
