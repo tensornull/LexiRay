@@ -276,6 +276,7 @@ import Testing
   #expect(workflow.contains("name: release-ci"))
   #expect(workflow.contains("--pr-number"))
   #expect(workflow.contains("close-failed-pr"))
+  #expect(workflow.contains("reopened") == false)
   #expect(workflow.contains("gui run") == false)
   #expect(workflow.contains("lexiray-ops install") == false)
   #expect(workflow.contains("lexiray-ops accept") == false)
