@@ -161,15 +161,9 @@ public enum ValidationExecutor {
       throw OpsError.failed(".github/workflows must contain only release.yml")
     }
 
-    let referenceCheck = try ProcessRunner.run(
-      "/usr/bin/env",
-      ["rg", "-n", "\\.sh\\b", "AGENTS.md", "README.md", ".agents", ".github"],
-      cwd: repository.root,
-      capture: true,
-      allowedExitCodes: [0, 1]
-    )
-    guard referenceCheck.status == 1 else {
-      throw OpsError.failed("stale shell references remain:\n\(referenceCheck.output)")
+    let staleReferences = try staleShellReferences(repository: repository)
+    guard staleReferences.isEmpty else {
+      throw OpsError.failed("stale shell references remain:\n\(staleReferences.joined(separator: "\n"))")
     }
 
     let workflow = try String(contentsOf: workflowDirectory.appendingPathComponent("release.yml"), encoding: .utf8)
@@ -241,5 +235,48 @@ public enum ValidationExecutor {
     if let data = try? encoder.encode(plan), let text = String(data: data, encoding: .utf8) {
       print(text)
     }
+  }
+
+  private static func staleShellReferences(repository: Repository) throws -> [String] {
+    let manager = FileManager.default
+    let roots = ["AGENTS.md", "README.md", ".agents", ".github"]
+      .map(repository.root.appendingPathComponent)
+    let expression = try NSRegularExpression(pattern: #"\.sh\b"#)
+    var files: [URL] = []
+
+    for root in roots {
+      var isDirectory: ObjCBool = false
+      guard manager.fileExists(atPath: root.path, isDirectory: &isDirectory) else { continue }
+      if !isDirectory.boolValue {
+        files.append(root)
+        continue
+      }
+      guard let enumerator = manager.enumerator(
+        at: root,
+        includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+        options: [.skipsHiddenFiles]
+      ) else { continue }
+      for case let file as URL in enumerator {
+        let values = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        if values.isRegularFile == true, values.isSymbolicLink != true { files.append(file) }
+      }
+    }
+
+    var hits: [String] = []
+    for file in files.sorted(by: { $0.path < $1.path }) {
+      guard let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
+      for (offset, line) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+        let value = String(line)
+        let range = NSRange(value.startIndex..., in: value)
+        if expression.firstMatch(in: value, range: range) != nil {
+          let relative = file.path.replacingOccurrences(
+            of: repository.root.standardizedFileURL.path + "/",
+            with: ""
+          )
+          hits.append("\(relative):\(offset + 1):\(value)")
+        }
+      }
+    }
+    return hits
   }
 }
