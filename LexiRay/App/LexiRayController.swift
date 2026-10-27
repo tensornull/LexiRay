@@ -49,6 +49,8 @@ final class LexiRayController: ObservableObject {
   private var floatingPanel: FloatingPanelPresenting!
   private var translationTask: Task<Void, Never>?
   private var identityRefreshTask: Task<Void, Never>?
+  private var identityRefreshGeneration = UUID()
+  private var identityValidationRequired = false
   private let providerTranslationTasks = ProviderTranslationTaskCoordinator()
   private var copyToastTask: Task<Void, Never>?
   private var activeBatchID: UUID?
@@ -737,6 +739,11 @@ final class LexiRayController: ObservableObject {
   }
 
   private func preparePermissionSensitiveWorkflow() -> Bool {
+    guard !identityValidationRequired else {
+      showIdentityValidationPending()
+      return false
+    }
+
     guard let blockingIssue = appIdentity.blockingIssue else {
       return true
     }
@@ -753,6 +760,21 @@ final class LexiRayController: ObservableObject {
     panelState = .error(PanelErrorState(title: "Action Unavailable", message: message))
     floatingPanel.show(activating: false, repositioning: false)
     AppLog.app.error("Blocked permission-sensitive workflow: \(message, privacy: .public)")
+  }
+
+  private func showIdentityValidationPending() {
+    cancelTranslationWork()
+    isExpanded = false
+    panelSourceText = ""
+    lastSelectionSource = .unavailable
+    panelState = .error(
+      PanelErrorState(
+        title: "Checking App Identity",
+        message: "LexiRay is checking for another running copy. Press the shortcut again in a moment."
+      )
+    )
+    floatingPanel.show(activating: false, repositioning: false)
+    AppLog.app.info("Blocked permission-sensitive workflow while app identity is being revalidated")
   }
 
   private func showSelectionPermissionError() {
@@ -846,6 +868,37 @@ final class LexiRayController: ObservableObject {
         self?.refreshAppIdentityInBackground()
       }
       .store(in: &settingsCancellables)
+
+    let workspaceNotificationCenter = NSWorkspace.shared.notificationCenter
+    [
+      NSWorkspace.didLaunchApplicationNotification,
+      NSWorkspace.didTerminateApplicationNotification
+    ]
+    .forEach { notificationName in
+      workspaceNotificationCenter.publisher(for: notificationName)
+        .sink { [weak self] notification in
+          guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                application.bundleIdentifier == AppConstants.bundleID
+          else {
+            return
+          }
+          Task { @MainActor [weak self] in
+            self?.handleLexiRayProcessChange()
+          }
+        }
+        .store(in: &settingsCancellables)
+    }
+  }
+
+  private func handleLexiRayProcessChange() {
+    identityRefreshTask?.cancel()
+    identityRefreshTask = nil
+    identityRefreshGeneration = UUID()
+    identityValidationRequired = true
+    appIdentity = AppIdentitySnapshot.currentProcessFallback(
+      reason: "Another LexiRay process may have started or stopped."
+    )
+    refreshAppIdentityInBackground()
   }
 
   /// Security.framework and NSWorkspace can synchronously wait on system
@@ -859,17 +912,22 @@ final class LexiRayController: ObservableObject {
     }
 
     let checker = appIdentityChecker
+    let generation = UUID()
+    identityRefreshGeneration = generation
     identityRefreshTask = Task.detached(priority: .utility) { [weak self] in
       let snapshot = checker.currentSnapshot
       await MainActor.run {
         guard let self else {
           return
         }
-        self.identityRefreshTask = nil
-        guard self.appIdentity != snapshot else {
+        guard self.identityRefreshGeneration == generation else {
           return
         }
-        self.appIdentity = snapshot
+        self.identityRefreshTask = nil
+        self.identityValidationRequired = false
+        if self.appIdentity != snapshot {
+          self.appIdentity = snapshot
+        }
       }
     }
   }
