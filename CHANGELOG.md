@@ -15,6 +15,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Removed CodeQL and automatic Copilot review from the delivery loop; formal
   review is limited to Codex P0/P1 findings on release pull requests.
 
+### Fixed
+
+- Kept OCR and selection shortcuts responsive by moving app-identity validation
+  off the main actor instead of blocking the capture window on Security and
+  running-application scans.
+
 ## [0.4.3] - 2026-07-19
 
 ### Fixed

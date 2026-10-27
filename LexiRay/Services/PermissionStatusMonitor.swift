@@ -15,9 +15,14 @@ struct PermissionStatus: Equatable {
 final class PermissionStatusMonitor: NSObject, ObservableObject {
   @Published private(set) var status: PermissionStatus
 
-  /// Fires after every refresh tick, even when `status` did not change, so
-  /// observers can piggyback their own re-checks (app identity, login item).
+  /// Fires after every refresh tick, even when `status` did not change, for
+  /// lightweight consumers that need the latest permission observation.
   let refreshEvents = PassthroughSubject<Void, Never>()
+
+  /// Fires only when the application becomes active. Expensive app-identity
+  /// validation uses this lifecycle boundary instead of running on every
+  /// fallback permission poll.
+  let applicationActivationEvents = PassthroughSubject<Void, Never>()
 
   private let permissionChecker: PermissionChecking
   private let distributedCenter: NotificationCenter
@@ -125,7 +130,11 @@ final class PermissionStatusMonitor: NSObject, ObservableObject {
 
   @objc private nonisolated func applicationDidBecomeActive() {
     Task { @MainActor [weak self] in
-      self?.refreshNow()
+      guard let self else {
+        return
+      }
+      applicationActivationEvents.send()
+      refreshNow()
     }
   }
 

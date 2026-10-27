@@ -411,6 +411,24 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(panel.events.last, .show(activating: false, repositioning: false))
   }
 
+  func testOCRHotKeyUsesCachedIdentityBeforeOpeningOverlay() {
+    let panel = MockFloatingPanelPresenter()
+    let overlay = MockOCRSelectionOverlay()
+    let identityChecker = MutableAppIdentityChecker(snapshot: .stableForTesting())
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      appIdentityChecker: identityChecker,
+      ocrSelectionOverlay: overlay
+    )
+    let identityReadsAfterInitialization = identityChecker.readCount
+
+    controller.translateOCRRegion()
+
+    XCTAssertEqual(identityChecker.readCount, identityReadsAfterInitialization)
+    XCTAssertEqual(overlay.beginCount, 1)
+  }
+
   func testOCRMissingPermissionDoesNotShowOverlay() {
     let panel = MockFloatingPanelPresenter()
     let permissions = MockPermissionChecker(
@@ -2597,15 +2615,17 @@ private final class MockPermissionChecker: PermissionChecking {
   }
 }
 
-private final class MutableAppIdentityChecker: AppIdentityChecking {
+private final class MutableAppIdentityChecker: AppIdentityChecking, @unchecked Sendable {
   var snapshot: AppIdentitySnapshot
+  private(set) var readCount = 0
 
   init(snapshot: AppIdentitySnapshot) {
     self.snapshot = snapshot
   }
 
   var currentSnapshot: AppIdentitySnapshot {
-    snapshot
+    readCount += 1
+    return snapshot
   }
 }
 

@@ -48,6 +48,7 @@ final class LexiRayController: ObservableObject {
   private let pasteboard: NSPasteboard
   private var floatingPanel: FloatingPanelPresenting!
   private var translationTask: Task<Void, Never>?
+  private var identityRefreshTask: Task<Void, Never>?
   private let providerTranslationTasks = ProviderTranslationTaskCoordinator()
   private var copyToastTask: Task<Void, Never>?
   private var activeBatchID: UUID?
@@ -129,12 +130,12 @@ final class LexiRayController: ObservableObject {
       return
     }
 
-    refreshAppIdentity()
     permissionChecker.requestAccessibilityIfNeeded(prompt: false)
     loginItemCoordinator.reconcileAtStartup()
     permissionMonitor.start()
     registerHotKeys()
     observeSettings()
+    refreshAppIdentityInBackground()
     AppLog.app.info("LexiRay started")
   }
 
@@ -736,7 +737,6 @@ final class LexiRayController: ObservableObject {
   }
 
   private func preparePermissionSensitiveWorkflow() -> Bool {
-    refreshAppIdentity()
     guard let blockingIssue = appIdentity.blockingIssue else {
       return true
     }
@@ -841,11 +841,37 @@ final class LexiRayController: ObservableObject {
       }
       .store(in: &settingsCancellables)
 
-    permissionMonitor.refreshEvents
+    permissionMonitor.applicationActivationEvents
       .sink { [weak self] in
-        self?.refreshAppIdentity()
+        self?.refreshAppIdentityInBackground()
       }
       .store(in: &settingsCancellables)
+  }
+
+  /// Security.framework and NSWorkspace can synchronously wait on system
+  /// services. They must never sit on the main actor while a global shortcut
+  /// is opening the OCR selection UI. The controller keeps using the last
+  /// validated snapshot immediately, then replaces it when the background
+  /// refresh completes.
+  private func refreshAppIdentityInBackground() {
+    guard identityRefreshTask == nil else {
+      return
+    }
+
+    let checker = appIdentityChecker
+    identityRefreshTask = Task.detached(priority: .utility) { [weak self] in
+      let snapshot = checker.currentSnapshot
+      await MainActor.run {
+        guard let self else {
+          return
+        }
+        self.identityRefreshTask = nil
+        guard self.appIdentity != snapshot else {
+          return
+        }
+        self.appIdentity = snapshot
+      }
+    }
   }
 
   private func startBatchTranslation(text: String, source: SelectionSource, bypassCache: Bool, directionOverride: PanelDirectionOverride? = nil) {

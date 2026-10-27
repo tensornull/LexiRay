@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import Security
 
-protocol AppIdentityChecking {
+protocol AppIdentityChecking: Sendable {
   var currentSnapshot: AppIdentitySnapshot { get }
 }
 
