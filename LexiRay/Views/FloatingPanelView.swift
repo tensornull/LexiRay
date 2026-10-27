@@ -145,7 +145,11 @@ struct FloatingPanelView: View {
       )
     }
     .padding(10)
-    .background(.black.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    // Keep text and controls on a stable semantic macOS surface. A translucent
+    // black wash over the glass made the panel's light appearance depend on
+    // whatever was behind the window, reducing label contrast and making the
+    // otherwise native text look soft.
+    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     .overlay {
       RoundedRectangle(cornerRadius: 14, style: .continuous)
         .stroke(Color(nsColor: .separatorColor).opacity(0.34), lineWidth: 1)
@@ -248,7 +252,10 @@ struct FloatingPanelView: View {
     .scrollBounceBehavior(.basedOnSize)
     .padding(10)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    .background(.black.opacity(0.055), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    // Translation is a reading surface: use the system text background so
+    // glyph contrast stays stable over the live glass backdrop in both key and
+    // non-key states.
+    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     .overlay {
       RoundedRectangle(cornerRadius: 14, style: .continuous)
         .stroke(Color(nsColor: .separatorColor).opacity(0.3), lineWidth: 1)

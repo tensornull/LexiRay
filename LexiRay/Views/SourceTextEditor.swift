@@ -52,7 +52,10 @@ struct SourceTextEditor: View {
       )
     }
     .frame(minHeight: editorHeight, maxHeight: editorHeight)
-    .background(.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    // An opaque semantic text surface keeps the editor's glyphs from blending
+    // with the panel's live material, which otherwise makes light-mode text
+    // appear gray and slightly out of focus.
+    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     .overlay {
       RoundedRectangle(cornerRadius: 12, style: .continuous)
         .stroke(
