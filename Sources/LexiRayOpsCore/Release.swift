@@ -14,7 +14,16 @@ public struct ReleaseArtifacts: Sendable {
   public let checksum: URL
 }
 
-private enum GitHubAPI {
+enum GitHubAPI {
+  static func isMissingResourceResponse(_ output: String) -> Bool {
+    output.localizedCaseInsensitiveContains("not found")
+      || output.contains("HTTP 404")
+      || (
+        output.localizedCaseInsensitiveContains("no commit found for sha")
+          && output.contains("HTTP 422")
+      )
+  }
+
   static func required(_ endpoint: String, repository: Repository) throws -> Data {
     let output = try ProcessRunner.capture(
       "/usr/bin/env", ["gh", "api", endpoint], cwd: repository.root
@@ -39,7 +48,7 @@ private enum GitHubAPI {
     if result.status == 0 {
       return result.output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
-    if result.output.localizedCaseInsensitiveContains("not found") || result.output.contains("HTTP 404") {
+    if isMissingResourceResponse(result.output) {
       return nil
     }
     throw OpsError.failed("GitHub API lookup failed for \(endpoint):\n\(result.output)")

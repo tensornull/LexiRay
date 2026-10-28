@@ -116,6 +116,19 @@ import Testing
   ) == 2)
 }
 
+@Test func missingReleaseTagLookupTreatsGitHub422AsAbsent() {
+  #expect(
+    GitHubAPI.isMissingResourceResponse(
+      "gh: No commit found for SHA: v0.4.4 (HTTP 422)"
+    )
+  )
+  #expect(
+    GitHubAPI.isMissingResourceResponse(
+      "gh: Validation Failed: another GitHub API error (HTTP 422)"
+    ) == false
+  )
+}
+
 @Test func releaseSigningSeparatesCodeSignSelectorFromCertificateFingerprint() throws {
   let selector = try ReleaseBuilder.signingSelector(
     from: "  1) 24A09DAB56BCDA221510C0C63B72051F5165B184 \"LexiRay Release Self-Signed\"",
