@@ -20,6 +20,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Kept OCR and selection shortcuts responsive by moving app-identity validation
   off the main actor instead of blocking the capture window on Security and
   running-application scans.
+- Removed the remaining synchronous app-identity read from startup so the
+  login-item launch can register the OCR shortcut immediately.
+- Retried only transient `hdiutil` resource-unavailable failures during DMG
+  preflight and verification, while preserving immediate failure for other
+  packaging errors.
 
 ## [0.4.3] - 2026-07-19
 

@@ -149,6 +149,51 @@ public enum ProcessRunner {
     try run(executable, arguments, cwd: cwd, environment: environment, capture: true).output
       .trimmingCharacters(in: .whitespacesAndNewlines)
   }
+
+  /// hdiutil occasionally fails on a busy macOS runner before it has touched
+  /// the image, reporting `Resource temporarily unavailable`. That is a
+  /// transient runner condition, so retry the bounded disk-image operation
+  /// without turning other packaging failures into retries.
+  @discardableResult
+  public static func runHdiutil(
+    _ arguments: [String],
+    cwd: URL,
+    maxAttempts: Int = 3,
+    retryDelay: TimeInterval = 0.75
+  ) throws -> ProcessResult {
+    precondition(maxAttempts > 0)
+    var attempt = 1
+
+    while true {
+      do {
+        let result = try run(
+          "/usr/bin/hdiutil", arguments, cwd: cwd, capture: true
+        )
+        if !result.output.isEmpty {
+          print(result.output, terminator: result.output.hasSuffix("\n") ? "" : "\n")
+        }
+        return result
+      } catch {
+        guard attempt < maxAttempts, shouldRetryHdiutil(error) else {
+          throw error
+        }
+        print(
+          "hdiutil hit a transient resource error; retrying "
+            + String(attempt + 1)
+            + "/"
+            + String(maxAttempts)
+        )
+        Thread.sleep(forTimeInterval: retryDelay)
+        attempt += 1
+      }
+    }
+  }
+
+  static func shouldRetryHdiutil(_ error: Error) -> Bool {
+    String(describing: error).localizedCaseInsensitiveContains(
+      "resource temporarily unavailable"
+    )
+  }
 }
 
 public struct Repository: Sendable {
