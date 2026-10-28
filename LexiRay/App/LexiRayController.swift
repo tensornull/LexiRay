@@ -114,7 +114,19 @@ final class LexiRayController: ObservableObject {
     self.speechService = speechService ?? SpeechService()
     self.historyStore = historyStore
     self.pasteboard = pasteboard
-    appIdentity = appIdentityChecker.currentSnapshot
+    // Security.framework and NSWorkspace can wait on system services. Keep
+    // startup on the main actor independent from that work so the global
+    // shortcut can be registered without making launch latency depend on
+    // identity validation. Tests use a deterministic checker and retain the
+    // synchronous snapshot for their in-process assertions.
+    if AppRuntime.isRunningTests {
+      appIdentity = appIdentityChecker.currentSnapshot
+    } else {
+      appIdentity = AppIdentitySnapshot.currentProcessFallback(
+        reason: "LexiRay is validating its app identity."
+      )
+      identityValidationRequired = true
+    }
     translationHistory = historyStore.load(limit: settings.translationHistoryLimit)
     floatingPanel = floatingPanelFactory?(self) ?? FloatingPanelController(controller: self)
     hasTranslationHistory = !translationHistory.isEmpty
@@ -135,9 +147,9 @@ final class LexiRayController: ObservableObject {
     permissionChecker.requestAccessibilityIfNeeded(prompt: false)
     loginItemCoordinator.reconcileAtStartup()
     permissionMonitor.start()
+    refreshAppIdentityInBackground()
     registerHotKeys()
     observeSettings()
-    refreshAppIdentityInBackground()
     AppLog.app.info("LexiRay started")
   }
 

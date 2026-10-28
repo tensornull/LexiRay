@@ -340,8 +340,7 @@ public enum ReleaseBuilder {
     let checksum = repository.root.appendingPathComponent("build/LexiRay-\(version).dmg.sha256")
     try? FileManager.default.removeItem(at: dmg)
     try? FileManager.default.removeItem(at: checksum)
-    try ProcessRunner.run(
-      "/usr/bin/hdiutil",
+    try ProcessRunner.runHdiutil(
       ["create", "-volname", "LexiRay", "-srcfolder", app.path, "-ov", "-format", "UDZO", dmg.path],
       cwd: repository.root
     )
@@ -496,19 +495,18 @@ public enum ReleaseBuilder {
     sha: String,
     fingerprint: String
   ) throws {
-    try ProcessRunner.run("/usr/bin/hdiutil", ["verify", dmg.path], cwd: repository.root)
+    try ProcessRunner.runHdiutil(["verify", dmg.path], cwd: repository.root)
     let mountRoot = FileManager.default.temporaryDirectory.appendingPathComponent("lexiray-dmg-\(UUID().uuidString)")
     let mount = mountRoot.appendingPathComponent("mnt", isDirectory: true)
     try FileManager.default.createDirectory(at: mount, withIntermediateDirectories: true)
     defer {
-      _ = try? ProcessRunner.run(
-        "/usr/bin/hdiutil", ["detach", mount.path, "-quiet"],
-        cwd: repository.root, capture: true, allowedExitCodes: [0, 1]
+      _ = try? ProcessRunner.runHdiutil(
+        ["detach", mount.path, "-quiet"], cwd: repository.root, maxAttempts: 1
       )
       try? FileManager.default.removeItem(at: mountRoot)
     }
-    try ProcessRunner.run(
-      "/usr/bin/hdiutil", ["attach", dmg.path, "-nobrowse", "-readonly", "-mountpoint", mount.path, "-quiet"],
+    try ProcessRunner.runHdiutil(
+      ["attach", dmg.path, "-nobrowse", "-readonly", "-mountpoint", mount.path, "-quiet"],
       cwd: repository.root
     )
     try verifySignedApp(

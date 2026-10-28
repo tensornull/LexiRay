@@ -263,6 +263,19 @@ import Testing
   }
 }
 
+@Test func hdiutilRetryOnlyMatchesTransientResourceFailures() {
+  #expect(
+    ProcessRunner.shouldRetryHdiutil(
+      OpsError.failed("command failed: Resource temporarily unavailable")
+    )
+  )
+  #expect(
+    ProcessRunner.shouldRetryHdiutil(
+      OpsError.failed("command failed: no such file or directory")
+    ) == false
+  )
+}
+
 @Test func releaseMetadataMustMatch() throws {
   let root = FileManager.default.temporaryDirectory.appendingPathComponent("lexiray-release-preflight-\(UUID().uuidString)")
   defer { try? FileManager.default.removeItem(at: root) }

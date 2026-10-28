@@ -140,12 +140,11 @@ public enum ValidationExecutor {
           !manager.fileExists(atPath: app.appendingPathComponent("Contents/_CodeSignature").path)
     else { throw OpsError.failed("unsigned release package preflight metadata is invalid") }
 
-    try ProcessRunner.run(
-      "/usr/bin/hdiutil",
+    try ProcessRunner.runHdiutil(
       ["create", "-volname", "LexiRay", "-srcfolder", app.path, "-ov", "-format", "UDZO", dmg.path],
       cwd: repository.root
     )
-    try ProcessRunner.run("/usr/bin/hdiutil", ["verify", dmg.path], cwd: repository.root)
+    try ProcessRunner.runHdiutil(["verify", dmg.path], cwd: repository.root)
   }
 
   public static func lintControlPlane(repository: Repository) throws {
