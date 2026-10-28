@@ -15,16 +15,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Removed CodeQL and automatic Copilot review from the delivery loop; formal
   review is limited to Codex P0/P1 findings on release pull requests.
 
+## [0.4.4] - 2026-10-28
+
 ### Fixed
 
 - Kept OCR and selection shortcuts responsive by moving app-identity validation
   off the main actor instead of blocking the capture window on Security and
   running-application scans.
-- Removed the remaining synchronous app-identity read from startup so the
-  login-item launch can register the OCR shortcut immediately.
-- Retried only transient `hdiutil` resource-unavailable failures during DMG
-  preflight and verification, while preserving immediate failure for other
-  packaging errors.
+- Moved the remaining startup app-identity check off the main actor so the
+  login-item launch can register the OCR shortcut without waiting on
+  Security.framework or running-application scans.
+- Added bounded retries for transient `hdiutil` resource errors during DMG
+  packaging and verification.
 
 ## [0.4.3] - 2026-07-19
 
