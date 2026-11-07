@@ -41,6 +41,17 @@ import Testing
   }
 }
 
+@Test func readmeScreenshotsAreDocumentationOnly() throws {
+  let plan = try ChangeClassifier.classify([
+    "README.md", "docs/screenshots/translation-panel.png", "docs/screenshots/providers.png",
+    "docs/screenshots/main-window.png", "docs/screenshots/settings.png"
+  ])
+  #expect(plan.runOpsTests)
+  #expect(plan.buildApp == false)
+  #expect(plan.requiresGUI == false)
+  #expect(plan.requiresSystemAcceptance == false)
+}
+
 @Test func evidenceIsImmutableAndAllowsOneDiagnosedRetry() throws {
   let root = FileManager.default.temporaryDirectory.appendingPathComponent("lexiray-evidence-\(UUID().uuidString)")
   defer { try? FileManager.default.removeItem(at: root) }

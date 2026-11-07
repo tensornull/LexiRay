@@ -305,6 +305,27 @@ final class SettingsStore: ObservableObject {
     persistProviderSettingsFile()
   }
 
+  /// Reorder visible instances without moving hidden test providers or changing
+  /// configuration identities, credentials, or enabled state.
+  func moveProvider(configurationID: String, toVisibleIndex destination: Int) {
+    let visibleIndices = providerConfigurations.indices.filter {
+      allowsMockProvider || providerConfigurations[$0].providerID.isProductVisible
+    }
+    var visible = visibleIndices.map { providerConfigurations[$0] }
+    guard let source = visible.firstIndex(where: { $0.id == configurationID }),
+          visible.indices.contains(destination), source != destination
+    else {
+      return
+    }
+
+    visible.insert(visible.remove(at: source), at: destination)
+    var reordered = providerConfigurations
+    for (index, configuration) in zip(visibleIndices, visible) {
+      reordered[index] = configuration
+    }
+    providerConfigurations = reordered
+  }
+
   func setAPIKey(_ apiKey: String, for providerID: ProviderID) {
     setAPIKey(apiKey, forConfigurationID: providerID.rawValue)
   }

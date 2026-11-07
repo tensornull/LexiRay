@@ -1,7 +1,12 @@
 import Foundation
 
 public enum ValidationExecutor {
-  public static func verifyChanged(repository: Repository, base: String) throws -> ValidationPlan {
+  public static func verifyChanged(
+    repository: Repository,
+    base: String,
+    retryOf: String? = nil,
+    rootCause: String? = nil
+  ) throws -> ValidationPlan {
     let paths = try repository.changedFiles(base: base)
     guard !paths.isEmpty else { throw OpsError.failed("no changed files to verify") }
     let plan = try ChangeClassifier.classify(paths)
@@ -17,16 +22,16 @@ public enum ValidationExecutor {
         repository: repository,
         scenarios: GUIRunner.scenarioOrder,
         allReason: reason,
-        retryOf: nil,
-        rootCause: nil
+        retryOf: retryOf,
+        rootCause: rootCause
       )
     } else if !plan.selectedGUIScenarios.isEmpty {
       try GUIRunner.run(
         repository: repository,
         scenarios: plan.selectedGUIScenarios,
         allReason: nil,
-        retryOf: nil,
-        rootCause: nil
+        retryOf: retryOf,
+        rootCause: rootCause
       )
     }
 

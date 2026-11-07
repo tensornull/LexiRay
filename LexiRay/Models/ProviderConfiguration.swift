@@ -106,28 +106,28 @@ struct ProviderConfiguration: Codable, Equatable, Identifiable {
     case .openAIChatCompletions:
       ProviderConfiguration(
         providerID: providerID,
-        baseURL: "https://api.cometapi.com/v1",
+        baseURL: "https://api.openai.com/v1",
         model: "gpt-5.5",
         isEnabled: false
       )
     case .openAIResponses:
       ProviderConfiguration(
         providerID: providerID,
-        baseURL: "https://api.cometapi.com/v1",
+        baseURL: "https://api.openai.com/v1",
         model: "gpt-5.5",
         isEnabled: true
       )
     case .anthropicMessages:
       ProviderConfiguration(
         providerID: providerID,
-        baseURL: "https://api.cometapi.com",
+        baseURL: "https://api.anthropic.com",
         model: "claude-sonnet-4-6",
         isEnabled: false
       )
     case .geminiGenerateContent:
       ProviderConfiguration(
         providerID: providerID,
-        baseURL: "https://api.cometapi.com/v1beta",
+        baseURL: "https://generativelanguage.googleapis.com/v1beta",
         model: "gemini-3-flash-preview",
         isEnabled: false
       )
@@ -138,6 +138,8 @@ struct ProviderConfiguration: Codable, Equatable, Identifiable {
     var configuration = defaults(for: providerID)
     configuration.id = "\(providerID.rawValue)-\(UUID().uuidString)"
     configuration.displayName = ""
+    configuration.baseURL = ""
+    configuration.model = ""
     configuration.isEnabled = false
     return configuration
   }

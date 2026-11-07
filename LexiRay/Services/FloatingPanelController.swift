@@ -133,6 +133,7 @@ final class FloatingPanelController: NSObject, FloatingPanelPresenting {
   }
 
   func hide() {
+    controller?.floatingPanelDidDismiss()
     pendingResizeTask?.cancel()
     pendingResizeTask = nil
     userContentSizeOverride = nil

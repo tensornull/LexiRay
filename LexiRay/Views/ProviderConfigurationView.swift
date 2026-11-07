@@ -1,17 +1,72 @@
+import CoreTransferable
 import Foundation
+import OSLog
 import SwiftUI
+import UniformTypeIdentifiers
+
+private let providerReorderType = UTType(exportedAs: "io.github.tensornull.lexiray.provider-order", conformingTo: .data)
+
+private struct ProviderReorderPayload: Codable, Transferable {
+  let configurationID: String
+
+  static var transferRepresentation: some TransferRepresentation {
+    CodableRepresentation(contentType: providerReorderType)
+  }
+}
 
 struct ProviderConfigurationList: View {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @ObservedObject var settings: SettingsStore
   var compact = false
+  @State private var isEditing = false
 
   var body: some View {
-    LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
-      ForEach(settings.visibleProviderConfigurations()) { configuration in
-        ProviderConfigurationCard(settings: settings, configurationID: configuration.id, compact: compact)
+    VStack(alignment: .leading, spacing: 14) {
+      HStack(spacing: 12) {
+        Text(isEditing ? "Drag providers to change their order." : "Provider order is also used for translation results.")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+        Spacer()
+        Button(isEditing ? "Done" : "Edit Providers", systemImage: isEditing ? "checkmark" : "slider.horizontal.3") {
+          withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+            isEditing.toggle()
+          }
+        }
+        .accessibilityIdentifier("ProviderEditButton")
+        .disabled(settings.visibleProviderConfigurations().isEmpty && !isEditing)
       }
+
+      LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+        ForEach(Array(settings.visibleProviderConfigurations().enumerated()), id: \.element.id) { index, configuration in
+          if isEditing {
+            ProviderReorderTile(
+              settings: settings,
+              configuration: configuration,
+              index: index
+            )
+            .draggable(ProviderReorderPayload(configurationID: configuration.id))
+            .dropDestination(for: ProviderReorderPayload.self) { payloads, _ in
+              guard let sourceID = payloads.first?.configurationID,
+                    sourceID != configuration.id,
+                    settings.configuration(for: sourceID) != nil,
+                    let destination = settings.visibleProviderConfigurations().firstIndex(where: { $0.id == configuration.id })
+              else {
+                AppLog.settings.debug("Provider reorder drop rejected")
+                return false
+              }
+              AppLog.settings.debug("Provider reorder drop: \(sourceID, privacy: .public) to \(configuration.id, privacy: .public)")
+              withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+                settings.moveProvider(configurationID: sourceID, toVisibleIndex: destination)
+              }
+              return true
+            }
+          } else {
+            ProviderConfigurationCard(settings: settings, configurationID: configuration.id, compact: compact)
+          }
+        }
+      }
+      .accessibilityIdentifier("ProviderConfigurationGrid")
     }
-    .accessibilityIdentifier("ProviderConfigurationGrid")
   }
 
   private var columns: [GridItem] {
@@ -19,6 +74,85 @@ struct ProviderConfigurationList: View {
       [GridItem(.adaptive(minimum: 260), spacing: 12, alignment: .top)]
     } else {
       [GridItem(.adaptive(minimum: 320), spacing: 12, alignment: .top)]
+    }
+  }
+}
+
+private struct ProviderReorderTile: View {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @ObservedObject var settings: SettingsStore
+  let configuration: ProviderConfiguration
+  let index: Int
+  @State private var wiggles = false
+
+  var body: some View {
+    HStack(spacing: 10) {
+      Button(role: .destructive) {
+        settings.removeProvider(configurationID: configuration.id)
+      } label: {
+        Image(systemName: "minus.circle.fill")
+          .font(.title3)
+          .symbolRenderingMode(.palette)
+          .foregroundStyle(.white, .red)
+      }
+      .buttonStyle(.borderless)
+      .help("Remove \(configuration.effectiveDisplayName)")
+      .accessibilityLabel("Remove \(configuration.effectiveDisplayName)")
+      .accessibilityIdentifier("ProviderRemove-\(configuration.id)")
+
+      ProviderIconView(providerID: configuration.providerID)
+        .frame(width: 24)
+        .accessibilityHidden(true)
+
+      VStack(alignment: .leading, spacing: 4) {
+        Text(configuration.effectiveDisplayName)
+          .font(.headline)
+          .lineLimit(2)
+        Text("\(index + 1) · \(configuration.isEnabled ? "Enabled" : "Off")")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+
+      Spacer(minLength: 4)
+
+      VStack(spacing: 5) {
+        Button("Move Earlier", systemImage: "chevron.up") { move(by: -1) }
+          .disabled(index == 0)
+          .accessibilityIdentifier("ProviderMoveEarlier-\(configuration.id)")
+        Button("Move Later", systemImage: "chevron.down") { move(by: 1) }
+          .disabled(index == settings.visibleProviderConfigurations().count - 1)
+          .accessibilityIdentifier("ProviderMoveLater-\(configuration.id)")
+      }
+      .labelStyle(.iconOnly)
+      .buttonStyle(.borderless)
+
+      Image(systemName: "line.3.horizontal")
+        .foregroundStyle(.tertiary)
+        .accessibilityHidden(true)
+        .accessibilityIdentifier("ProviderDragHandle-\(configuration.id)")
+    }
+    .padding(14)
+    .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
+    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+    .overlay {
+      RoundedRectangle(cornerRadius: 12)
+        .stroke(Color.accentColor.opacity(0.25), lineWidth: 1)
+    }
+    .contentShape(RoundedRectangle(cornerRadius: 12))
+    .rotationEffect(.degrees(reduceMotion ? 0 : (wiggles ? 0.55 : -0.55)))
+    .animation(reduceMotion ? nil : .easeInOut(duration: 0.16).repeatForever(autoreverses: true), value: wiggles)
+    .onAppear { wiggles = !reduceMotion }
+    .onChange(of: reduceMotion) { _, isReduced in
+      wiggles = !isReduced
+    }
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel(configuration.effectiveDisplayName)
+    .accessibilityIdentifier("ProviderReorderTile-\(configuration.id)")
+  }
+
+  private func move(by offset: Int) {
+    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+      settings.moveProvider(configurationID: configuration.id, toVisibleIndex: index + offset)
     }
   }
 }
@@ -36,13 +170,16 @@ private struct ProviderConfigurationCard: View {
 
       TextField("Display Name", text: configurationBinding(\.displayName))
         .textFieldStyle(.roundedBorder)
+        .accessibilityIdentifier("ProviderDisplayName-\(configurationID)")
 
       if configuration.providerID.isLLMProvider {
         TextField("Base URL", text: configurationBinding(\.baseURL))
           .textFieldStyle(.roundedBorder)
+          .accessibilityIdentifier("ProviderBaseURL-\(configurationID)")
 
         TextField("Model", text: configurationBinding(\.model))
           .textFieldStyle(.roundedBorder)
+          .accessibilityIdentifier("ProviderModel-\(configurationID)")
 
         SecureField("API key", text: apiKeyBinding)
           .textFieldStyle(.roundedBorder)
@@ -85,14 +222,6 @@ private struct ProviderConfigurationCard: View {
       }
 
       Spacer()
-
-      Button(role: .destructive) {
-        settings.removeProvider(configurationID: configurationID)
-      } label: {
-        Image(systemName: "trash")
-      }
-      .buttonStyle(.borderless)
-      .help("Remove Provider")
     }
   }
 

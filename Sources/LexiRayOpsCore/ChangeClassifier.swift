@@ -55,7 +55,9 @@ public enum ChangeClassifier {
   private static func classify(_ path: String, into plan: inout MutablePlan) -> Bool {
     if path == "AGENTS.md" || path == ".gitignore" || path == ".swiftformat" ||
       path == "README.md" || path == "CONTRIBUTING.md" || path == "ROADMAP.md" || path == "CHANGELOG.md" ||
-      path == "LICENSE" || path.hasPrefix(".agents/") || path.hasPrefix(".github/")
+      path == "LICENSE" || path.hasPrefix(".agents/") || path.hasPrefix(".github/") ||
+      path == "docs/screenshots/translation-panel.png" || path == "docs/screenshots/providers.png" ||
+      path == "docs/screenshots/main-window.png" || path == "docs/screenshots/settings.png"
     {
       plan.ops = true
       return true

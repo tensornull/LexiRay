@@ -62,6 +62,49 @@ final class OCRServiceTests: XCTestCase {
     XCTAssertTrue(request.automaticallyDetectsLanguage)
   }
 
+  func testHighConfidenceShortTextDoesNotRequireAnotherRecognitionPass() {
+    for text in ["字", "屏幕文字", "screen text"] {
+      XCTAssertTrue(
+        OCRService.RecognitionResult(text: text, averageConfidence: 0.9).isHighQuality,
+        "Confident short text should not require recognizing the same capture again: \(text)"
+      )
+    }
+  }
+
+  func testUncertainShortTextAndEmptyResultsStillNeedRecognitionFallback() {
+    XCTAssertFalse(
+      OCRService.RecognitionResult(text: "screen text", averageConfidence: 0.6).isHighQuality
+    )
+    XCTAssertFalse(
+      OCRService.RecognitionResult(text: "", averageConfidence: 1).isHighQuality
+    )
+    XCTAssertTrue(
+      OCRService.RecognitionResult(
+        text: "a longer readable line of text",
+        averageConfidence: 0.6
+      ).isHighQuality
+    )
+  }
+
+  @MainActor
+  func testCancelledRecognitionDoesNotStartVisionWork() async throws {
+    let image = try makeImage(width: 120, height: 40)
+    let service = OCRService()
+    let task = Task { @MainActor in
+      try await service.recognizeText(in: image)
+    }
+    task.cancel()
+
+    do {
+      _ = try await task.value
+      XCTFail("Cancelled OCR should propagate cancellation rather than perform recognition")
+    } catch is CancellationError {
+      // Cancellation is preserved instead of becoming noTextRecognized.
+    } catch {
+      XCTFail("Expected CancellationError, received \(error)")
+    }
+  }
+
   func testCaptureRectConversionFlipsMainDisplayYCoordinate() throws {
     let conversion = try XCTUnwrap(
       OCRService.captureRectConversion(
