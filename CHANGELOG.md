@@ -15,6 +15,25 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Removed CodeQL and automatic Copilot review from the delivery loop; formal
   review is limited to Codex P0/P1 findings on release pull requests.
 
+## [0.4.5] - 2026-11-07
+
+### Fixed
+
+- Show OCR recognition progress immediately after screen capture, including
+  while macOS loads its recognition model. Avoid a second recognition pass for
+  high-confidence short text and stop superseded OCR work between passes.
+- Continue the first selection or OCR shortcut after startup identity checks
+  finish, and cancel the queued action if its panel is dismissed.
+- Remove the CometAPI endpoint from provider defaults. Newly added remote
+  providers start disabled with an empty endpoint and model.
+
+### Added
+
+- Provider editing with drag ordering, keyboard move controls, minus controls,
+  and a Reduce Motion-aware animation. Provider order persists across launches.
+- README screenshots of the floating translation panel, main window, Settings,
+  and provider editing, plus corrected installation and development instructions.
+
 ## [0.4.4] - 2026-10-28
 
 ### Fixed

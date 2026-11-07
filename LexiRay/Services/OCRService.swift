@@ -7,7 +7,10 @@ import Vision
 
 @MainActor
 protocol OCRRecognizing: AnyObject {
-  func captureAndRecognizeText(in rect: CGRect) async throws -> OCRRecognitionResult
+  func captureAndRecognizeText(
+    in rect: CGRect,
+    onCaptureComplete: @MainActor () -> Void
+  ) async throws -> OCRRecognitionResult
 }
 
 struct OCRRecognitionResult: Equatable {
@@ -67,12 +70,14 @@ final class OCRService: OCRRecognizing {
     let confidence: Float
   }
 
-  private struct RecognitionResult {
+  struct RecognitionResult {
     let text: String
     let averageConfidence: Float
 
     var isHighQuality: Bool {
-      (text.count >= 16 && averageConfidence >= 0.55) || (text.count >= 80 && averageConfidence >= 0.45)
+      (!text.isEmpty && averageConfidence >= 0.85)
+        || (text.count >= 16 && averageConfidence >= 0.55)
+        || (text.count >= 80 && averageConfidence >= 0.45)
     }
 
     var score: Float {
@@ -80,7 +85,11 @@ final class OCRService: OCRRecognizing {
     }
   }
 
-  func captureAndRecognizeText(in rect: CGRect) async throws -> OCRRecognitionResult {
+  func captureAndRecognizeText(
+    in rect: CGRect,
+    onCaptureComplete: @MainActor () -> Void
+  ) async throws -> OCRRecognitionResult {
+    try Task.checkCancellation()
     guard rect.width >= 8, rect.height >= 8 else {
       throw OCRError.selectionTooSmall
     }
@@ -109,6 +118,10 @@ final class OCRService: OCRRecognizing {
       throw error
     }
     AppLog.ocr.info("OCR screenshot capture completed")
+    try Task.checkCancellation()
+    // Keep progress UI out of the captured image. Recognition may need to load
+    // system models on first use, so show progress as soon as capture is done.
+    onCaptureComplete()
     do {
       let text = try await recognizeText(in: image)
       AppLog.ocr.info("OCR recognition succeeded characters=\(text.count)")
@@ -116,6 +129,8 @@ final class OCRService: OCRRecognizing {
         text: text,
         captureDisplayIndices: conversion.displayIndices
       )
+    } catch is CancellationError {
+      throw CancellationError()
     } catch {
       AppLog.ocr.error("OCR recognition failed: \(error.localizedDescription, privacy: .public)")
       throw error
@@ -123,24 +138,32 @@ final class OCRService: OCRRecognizing {
   }
 
   func recognizeText(in image: CGImage) async throws -> String {
-    try await Task.detached(priority: .userInitiated) {
+    try Task.checkCancellation()
+    let recognitionTask = Task.detached(priority: .userInitiated) {
+      try Task.checkCancellation()
       var bestResult: RecognitionResult?
       var lastError: Error?
 
       for image in Self.recognitionImages(for: image) {
+        try Task.checkCancellation()
         do {
           let result = try Self.recognizeTextResult(in: image)
+          try Task.checkCancellation()
           if bestResult == nil || result.score > bestResult!.score {
             bestResult = result
           }
           if result.isHighQuality {
             return result.text
           }
+        } catch is CancellationError {
+          throw CancellationError()
         } catch {
+          try Task.checkCancellation()
           lastError = error
         }
       }
 
+      try Task.checkCancellation()
       if let bestResult {
         return bestResult.text
       }
@@ -153,7 +176,14 @@ final class OCRService: OCRRecognizing {
       }
 
       throw OCRError.noTextRecognized
-    }.value
+    }
+    return try await withTaskCancellationHandler {
+      try await recognitionTask.value
+    } onCancel: {
+      // Vision's synchronous request can finish its current pass, but a
+      // superseded OCR must not start another pass or return stale text.
+      recognitionTask.cancel()
+    }
   }
 
   nonisolated static var defaultRecognitionLanguages: [String] {

@@ -365,6 +365,50 @@ final class SettingsStoreTests: XCTestCase {
     XCTAssertTrue(reloaded.visibleProviderConfigurations().contains { $0.id == custom.id })
   }
 
+  func testNewProvidersStartWithoutEndpointOrModel() {
+    for providerID in ProviderID.addableCases where providerID.isLLMProvider {
+      let configuration = ProviderConfiguration.custom(providerID: providerID)
+      XCTAssertEqual(configuration.baseURL, "")
+      XCTAssertEqual(configuration.model, "")
+      XCTAssertFalse(configuration.isEnabled)
+    }
+  }
+
+  func testProviderReorderPersistsAndPreservesCredentialsAndHiddenProviders() throws {
+    let defaults = try makeDefaults()
+    let providerFileStore = makeProviderFileStore()
+    let store = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+    let hiddenIndex = try XCTUnwrap(store.providerConfigurations.firstIndex { $0.providerID == .mock })
+    var custom = store.addProvider(providerID: .openAIResponses)
+    custom.displayName = "Personal Endpoint"
+    custom.baseURL = "https://personal.example.test/v1"
+    custom.model = "personal-model"
+    custom.isEnabled = true
+    store.updateConfiguration(custom)
+    store.setAPIKey("personal-secret", forConfigurationID: custom.id)
+    let originalIDs = store.visibleProviderConfigurations().map(\.id)
+
+    store.moveProvider(configurationID: custom.id, toVisibleIndex: 0)
+
+    let expected = [custom.id] + originalIDs.filter { $0 != custom.id }
+    XCTAssertEqual(store.visibleProviderConfigurations().map(\.id), expected)
+    XCTAssertEqual(store.providerConfigurations[hiddenIndex].providerID, .mock)
+    XCTAssertEqual(store.configuration(for: custom.id), custom)
+    XCTAssertEqual(store.apiKey(forConfigurationID: custom.id), "personal-secret")
+    XCTAssertEqual(store.enabledProviderConfigurations().first?.id, custom.id)
+
+    let reloaded = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
+    XCTAssertEqual(reloaded.visibleProviderConfigurations().map(\.id), expected)
+    XCTAssertEqual(reloaded.configuration(for: custom.id), custom)
+    XCTAssertEqual(reloaded.apiKey(forConfigurationID: custom.id), "personal-secret")
+
+    reloaded.moveProvider(configurationID: custom.id, toVisibleIndex: expected.count - 1)
+    XCTAssertEqual(reloaded.visibleProviderConfigurations().map(\.id), originalIDs)
+    reloaded.moveProvider(configurationID: custom.id, toVisibleIndex: -1)
+    reloaded.moveProvider(configurationID: "unknown", toVisibleIndex: 0)
+    XCTAssertEqual(reloaded.visibleProviderConfigurations().map(\.id), originalIDs)
+  }
+
   func testProviderSettingsPersistAsStringKeyedJSONFile() throws {
     let defaults = try makeDefaults()
     let providerFileStore = makeProviderFileStore()
@@ -572,27 +616,27 @@ final class SettingsStoreTests: XCTestCase {
     let store = SettingsStore(defaults: defaults, providerFileStore: providerFileStore)
 
     XCTAssertEqual(store.preferredProvider, .openAIResponses)
-    XCTAssertEqual(store.configuration(for: .openAIChatCompletions).baseURL, "https://api.cometapi.com/v1")
+    XCTAssertEqual(store.configuration(for: .openAIChatCompletions).baseURL, "https://api.openai.com/v1")
   }
 
-  func testProviderDefaultsUseCometModernModels() {
+  func testProviderDefaultsUseProtocolEndpoints() {
     let openAIChat = ProviderConfiguration.defaults(for: .openAIChatCompletions)
-    XCTAssertEqual(openAIChat.baseURL, "https://api.cometapi.com/v1")
+    XCTAssertEqual(openAIChat.baseURL, "https://api.openai.com/v1")
     XCTAssertEqual(openAIChat.model, "gpt-5.5")
     XCTAssertFalse(openAIChat.isEnabled)
 
     let openAIResponses = ProviderConfiguration.defaults(for: .openAIResponses)
-    XCTAssertEqual(openAIResponses.baseURL, "https://api.cometapi.com/v1")
+    XCTAssertEqual(openAIResponses.baseURL, "https://api.openai.com/v1")
     XCTAssertEqual(openAIResponses.model, "gpt-5.5")
     XCTAssertTrue(openAIResponses.isEnabled)
 
     let anthropic = ProviderConfiguration.defaults(for: .anthropicMessages)
-    XCTAssertEqual(anthropic.baseURL, "https://api.cometapi.com")
+    XCTAssertEqual(anthropic.baseURL, "https://api.anthropic.com")
     XCTAssertEqual(anthropic.model, "claude-sonnet-4-6")
     XCTAssertFalse(anthropic.isEnabled)
 
     let gemini = ProviderConfiguration.defaults(for: .geminiGenerateContent)
-    XCTAssertEqual(gemini.baseURL, "https://api.cometapi.com/v1beta")
+    XCTAssertEqual(gemini.baseURL, "https://generativelanguage.googleapis.com/v1beta")
     XCTAssertEqual(gemini.model, "gemini-3-flash-preview")
     XCTAssertFalse(gemini.isEnabled)
   }

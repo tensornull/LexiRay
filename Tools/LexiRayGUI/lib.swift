@@ -2016,15 +2016,21 @@ func restartWorkspaceApp(extraArguments: [String]) {
 func openMainWindow() {
   ensureAppRunning()
   if lexirayMainWindows().isEmpty {
+    // The status item can be hosted by MenuBarAgent without exposing an
+    // AXExtrasMenuBar on this PID. Use the app's own panel Settings action.
+    openBlankComposer()
     require(
-      pressLexiRayElement(title: "Open LexiRay"),
-      "menu-bar Open LexiRay action was not reachable"
+      pressLexiRayButton(description: "Settings"),
+      "floating panel Settings action was not reachable"
     )
   }
   if !waitFor("LexiRay main window", timeout: 10, { !lexirayMainWindows().isEmpty }) {
     fail("main window did not appear")
   }
   activateWorkspaceApp()
+  require(waitFor("Dashboard sidebar", { axElement(identifier: "SidebarDashboard") != nil }), "Dashboard sidebar item was not reachable")
+  require(pressLexiRayElement(identifier: "SidebarDashboard"), "Dashboard sidebar item could not be selected")
+  require(waitFor("Dashboard", { axElement(identifier: "DashboardLexiRayTitle") != nil }), "Dashboard did not appear")
   RunLoop.current.run(until: Date().addingTimeInterval(0.3))
 }
 

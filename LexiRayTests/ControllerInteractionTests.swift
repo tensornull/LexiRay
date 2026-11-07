@@ -611,6 +611,58 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(overlay.beginCount, 2)
   }
 
+  func testOCRShowsRecognitionProgressOnlyAfterCaptureCompletes() async {
+    let panel = MockFloatingPanelPresenter()
+    let ocrService = DeferredCaptureOCRService()
+    let overlay = MockOCRSelectionOverlay()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      ocrService: ocrService,
+      ocrSelectionOverlay: overlay
+    )
+
+    controller.translateOCRRegion()
+    overlay.complete(with: CGRect(x: 10, y: 20, width: 120, height: 40))
+    await waitUntil { ocrService.didStart }
+    XCTAssertTrue(panel.events.isEmpty, "The panel must stay out of the captured image")
+
+    ocrService.finishCapture()
+    await waitUntil { !panel.events.isEmpty }
+    guard case let .loading(state) = controller.panelState else {
+      return XCTFail("Recognition must show progress while Vision is still working")
+    }
+    XCTAssertEqual(state.title, "Recognizing text...")
+    XCTAssertEqual(panel.events.last, .show(activating: false, repositioning: false))
+    controller.translateOCRRegion()
+  }
+
+  func testSupersededOCRCaptureCannotReopenProgressPanel() async {
+    let panel = MockFloatingPanelPresenter()
+    let ocrService = DeferredCaptureOCRService()
+    let overlay = MockOCRSelectionOverlay()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: panel,
+      ocrService: ocrService,
+      ocrSelectionOverlay: overlay
+    )
+    controller.translateOCRRegion()
+    overlay.complete(with: CGRect(x: 10, y: 20, width: 120, height: 40))
+    await waitUntil { ocrService.didStart }
+
+    controller.translateOCRRegion()
+    ocrService.finishCapture()
+    await waitUntil { ocrService.didFinishCapture }
+
+    XCTAssertTrue(panel.events.isEmpty)
+    XCTAssertEqual(overlay.beginCount, 2)
+    guard case let .loading(state) = controller.panelState else {
+      return XCTFail("The new region selection must remain active")
+    }
+    XCTAssertEqual(state.title, "Drag to select an OCR region...")
+  }
+
   func testSelectionWorkflowClosesActiveOCROverlayAndInvalidatesItsCompletion() async {
     let selectionReader = BlockingSelectionReader()
     let panel = MockFloatingPanelPresenter()
@@ -2111,6 +2163,75 @@ final class ControllerInteractionTests: XCTestCase {
     XCTAssertEqual(overlay.beginCount, 1)
   }
 
+  func testFirstOCRHotKeyContinuesAfterStartupIdentityValidation() async {
+    let overlay = MockOCRSelectionOverlay()
+    let hotKeys = MockHotKeyService()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: MockFloatingPanelPresenter(),
+      hotKeyService: hotKeys,
+      defersIdentityValidation: true,
+      ocrSelectionOverlay: overlay
+    )
+    controller.startForTesting()
+    hotKeys.triggerOCR()
+    XCTAssertEqual(overlay.beginCount, 0)
+
+    await waitUntil { overlay.beginCount == 1 }
+    XCTAssertEqual(hotKeys.registrations.count, 1)
+  }
+
+  func testDismissedStartupActionDoesNotOpenOCROverlayLater() async {
+    let overlay = MockOCRSelectionOverlay()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: MockFloatingPanelPresenter(),
+      defersIdentityValidation: true,
+      ocrSelectionOverlay: overlay
+    )
+    controller.startForTesting()
+    controller.translateOCRRegion()
+    controller.hideFloatingPanel()
+
+    await waitUntil { controller.appIdentity.isStableForTCC }
+    XCTAssertEqual(overlay.beginCount, 0)
+  }
+
+  func testNativePanelDismissalCancelsQueuedStartupOCR() async {
+    let overlay = MockOCRSelectionOverlay()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: MockFloatingPanelPresenter(),
+      defersIdentityValidation: true,
+      ocrSelectionOverlay: overlay
+    )
+    controller.startForTesting()
+    controller.translateOCRRegion()
+    controller.floatingPanelDidDismiss()
+
+    await waitUntil { controller.appIdentity.isStableForTCC }
+    XCTAssertEqual(overlay.beginCount, 0)
+  }
+
+  func testQueuedOCRStillBlocksAnUnstableStartupIdentity() async {
+    let overlay = MockOCRSelectionOverlay()
+    let controller = makeController(
+      selectionReader: ImmediateSelectionReader(result: .unavailable),
+      panel: MockFloatingPanelPresenter(),
+      appIdentityChecker: MockAppIdentityChecker(snapshot: unstableAppIdentity()),
+      defersIdentityValidation: true,
+      ocrSelectionOverlay: overlay
+    )
+    controller.startForTesting()
+    controller.translateOCRRegion()
+
+    await waitUntil {
+      guard case let .error(state) = controller.panelState else { return false }
+      return state.title == "Action Unavailable"
+    }
+    XCTAssertEqual(overlay.beginCount, 0)
+  }
+
   func testAppRuntimeDetectsXCTest() {
     XCTAssertTrue(AppRuntime.isRunningTests)
   }
@@ -2349,6 +2470,7 @@ final class ControllerInteractionTests: XCTestCase {
     permissions: PermissionChecking = MockPermissionChecker(isAccessibilityTrusted: true),
     hotKeyService: HotKeyRegistering = MockHotKeyService(),
     appIdentityChecker: AppIdentityChecking = StaticAppIdentityChecker(snapshot: .stableForTesting()),
+    defersIdentityValidation: Bool = false,
     pipeline: TranslationPipeline? = nil,
     ocrService: OCRRecognizing? = nil,
     ocrSelectionOverlay: OCRRegionSelecting? = nil,
@@ -2371,6 +2493,7 @@ final class ControllerInteractionTests: XCTestCase {
       permissionChecker: permissions,
       hotKeyService: hotKeyService,
       appIdentityChecker: appIdentityChecker,
+      defersIdentityValidation: defersIdentityValidation,
       floatingPanelFactory: { _ in panel },
       pipeline: pipeline,
       ocrService: ocrService,
@@ -2648,8 +2771,11 @@ private final class MockOCRService: OCRRecognizing {
     self.captureDisplayIndices = captureDisplayIndices
   }
 
-  func captureAndRecognizeText(in rect: CGRect) async throws -> OCRRecognitionResult {
+  func captureAndRecognizeText(
+    in rect: CGRect, onCaptureComplete: @MainActor () -> Void
+  ) async throws -> OCRRecognitionResult {
     capturedRects.append(rect)
+    onCaptureComplete()
     return try OCRRecognitionResult(
       text: result.get(),
       captureDisplayIndices: captureDisplayIndices
@@ -2661,10 +2787,40 @@ private final class MockOCRService: OCRRecognizing {
 private final class SuspendedOCRService: OCRRecognizing {
   private(set) var didStart = false
 
-  func captureAndRecognizeText(in _: CGRect) async throws -> OCRRecognitionResult {
+  func captureAndRecognizeText(
+    in _: CGRect, onCaptureComplete: @MainActor () -> Void
+  ) async throws -> OCRRecognitionResult {
     didStart = true
+    onCaptureComplete()
     try await Task.sleep(nanoseconds: 10_000_000_000)
     return OCRRecognitionResult(text: "stale OCR text", captureDisplayIndices: [1])
+  }
+}
+
+@MainActor
+private final class DeferredCaptureOCRService: OCRRecognizing {
+  private(set) var didStart = false
+  private(set) var didFinishCapture = false
+  private var captureContinuation: CheckedContinuation<Void, Never>?
+
+  func captureAndRecognizeText(
+    in _: CGRect, onCaptureComplete: @MainActor () -> Void
+  ) async throws -> OCRRecognitionResult {
+    await withCheckedContinuation { continuation in
+      captureContinuation = continuation
+      didStart = true
+    }
+    // Deliberately ignore cancellation until after the callback to model a
+    // screenshot operation that completes after a newer OCR request starts.
+    onCaptureComplete()
+    didFinishCapture = true
+    try await Task.sleep(for: .seconds(10))
+    return OCRRecognitionResult(text: "stale text", captureDisplayIndices: [1])
+  }
+
+  func finishCapture() {
+    captureContinuation?.resume()
+    captureContinuation = nil
   }
 }
 

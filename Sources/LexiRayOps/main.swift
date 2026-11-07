@@ -46,7 +46,12 @@ struct LexiRayOpsMain {
     switch mode {
     case "changed":
       let base = arguments.optionalValue(after: "--base") ?? "HEAD"
-      _ = try ValidationExecutor.verifyChanged(repository: repository, base: base)
+      _ = try ValidationExecutor.verifyChanged(
+        repository: repository,
+        base: base,
+        retryOf: arguments.optionalValue(after: "--retry-of"),
+        rootCause: arguments.optionalValue(after: "--cause")
+      )
     case "release-pr":
       let pullRequestNumber = arguments.optionalValue(after: "--pr-number").flatMap(Int.init)
       try ValidationExecutor.verifyReleasePR(
@@ -183,7 +188,7 @@ struct LexiRayOpsMain {
   private static let usage = """
     usage: lexiray-ops [--root PATH] <command>
 
-      verify changed [--base SHA]
+      verify changed [--base SHA] [--retry-of ID --cause TEXT]
       verify release-pr --base SHA --head SHA [--pr-number N]
       gui list
       gui run <scenario>... [--retry-of ID --cause TEXT]

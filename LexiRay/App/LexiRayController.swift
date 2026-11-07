@@ -51,6 +51,11 @@ final class LexiRayController: ObservableObject {
   private var identityRefreshTask: Task<Void, Never>?
   private var identityRefreshGeneration = UUID()
   private var identityValidationRequired = false
+  private enum PendingPermissionWorkflow {
+    case selection
+    case ocr
+  }
+  private var pendingPermissionWorkflow: PendingPermissionWorkflow?
   private let providerTranslationTasks = ProviderTranslationTaskCoordinator()
   private var copyToastTask: Task<Void, Never>?
   private var activeBatchID: UUID?
@@ -90,6 +95,7 @@ final class LexiRayController: ObservableObject {
     permissionChecker: PermissionChecking? = nil,
     hotKeyService: HotKeyRegistering = GlobalHotKeyService(),
     appIdentityChecker: AppIdentityChecking = AppIdentityCheckerFactory.makeDefault(),
+    defersIdentityValidation: Bool = !AppRuntime.isRunningTests,
     floatingPanelFactory: ((LexiRayController) -> FloatingPanelPresenting)? = nil,
     pipeline: TranslationPipeline? = nil,
     ocrService: OCRRecognizing? = nil,
@@ -119,13 +125,13 @@ final class LexiRayController: ObservableObject {
     // shortcut can be registered without making launch latency depend on
     // identity validation. Tests use a deterministic checker and retain the
     // synchronous snapshot for their in-process assertions.
-    if AppRuntime.isRunningTests {
-      appIdentity = appIdentityChecker.currentSnapshot
-    } else {
+    if defersIdentityValidation {
       appIdentity = AppIdentitySnapshot.currentProcessFallback(
         reason: "LexiRay is validating its app identity."
       )
       identityValidationRequired = true
+    } else {
+      appIdentity = appIdentityChecker.currentSnapshot
     }
     translationHistory = historyStore.load(limit: settings.translationHistoryLimit)
     floatingPanel = floatingPanelFactory?(self) ?? FloatingPanelController(controller: self)
@@ -144,18 +150,21 @@ final class LexiRayController: ObservableObject {
       return
     }
 
+    registerHotKeys()
+    observeSettings()
+    refreshAppIdentityInBackground()
     permissionChecker.requestAccessibilityIfNeeded(prompt: false)
     loginItemCoordinator.reconcileAtStartup()
     permissionMonitor.start()
-    refreshAppIdentityInBackground()
-    registerHotKeys()
-    observeSettings()
     AppLog.app.info("LexiRay started")
   }
 
   func startForTesting() {
     registerHotKeys()
     observeSettings()
+    if identityValidationRequired {
+      refreshAppIdentityInBackground()
+    }
   }
 
   /// Test hook: force the panel content-retention window to be considered
@@ -188,7 +197,8 @@ final class LexiRayController: ObservableObject {
     stopSpeaking()
     translationTask?.cancel()
     translationTask = nil
-    guard preparePermissionSensitiveWorkflow() else {
+    pendingPermissionWorkflow = nil
+    guard preparePermissionSensitiveWorkflow(.selection) else {
       return
     }
 
@@ -349,7 +359,7 @@ final class LexiRayController: ObservableObject {
   func translateOCRRegion() {
     AppLog.ocr.info("OCR workflow triggered")
     cancelTranslationWork()
-    guard preparePermissionSensitiveWorkflow() else {
+    guard preparePermissionSensitiveWorkflow(.ocr) else {
       return
     }
 
@@ -437,7 +447,12 @@ final class LexiRayController: ObservableObject {
           return
         }
 
-        let result = try await ocrService.captureAndRecognizeText(in: rect)
+        let result = try await ocrService.captureAndRecognizeText(in: rect) { [weak self] in
+          guard !Task.isCancelled else { return }
+          // Wait until capture has finished so the progress panel cannot be
+          // included in the image being recognized.
+          self?.floatingPanel.show(activating: false, repositioning: false)
+        }
         guard !Task.isCancelled else {
           return
         }
@@ -653,11 +668,19 @@ final class LexiRayController: ObservableObject {
   }
 
   func hideFloatingPanelIfNeeded() {
+    if !isPanelPinned {
+      floatingPanelDidDismiss()
+    }
     floatingPanel.hideIfNeeded()
   }
 
   func hideFloatingPanel() {
+    floatingPanelDidDismiss()
     floatingPanel.hide()
+  }
+
+  func floatingPanelDidDismiss() {
+    pendingPermissionWorkflow = nil
   }
 
   func refreshFloatingPanelLayout() {
@@ -750,9 +773,10 @@ final class LexiRayController: ObservableObject {
     lastPanelContentAt = Date()
   }
 
-  private func preparePermissionSensitiveWorkflow() -> Bool {
+  private func preparePermissionSensitiveWorkflow(_ workflow: PendingPermissionWorkflow) -> Bool {
     guard !identityValidationRequired else {
       showIdentityValidationPending()
+      pendingPermissionWorkflow = workflow
       return false
     }
 
@@ -782,7 +806,7 @@ final class LexiRayController: ObservableObject {
     panelState = .error(
       PanelErrorState(
         title: "Checking App Identity",
-        message: "LexiRay is checking for another running copy. Press the shortcut again in a moment."
+        message: "LexiRay is checking for another running copy. Your action will continue automatically."
       )
     )
     floatingPanel.show(activating: false, repositioning: false)
@@ -939,6 +963,16 @@ final class LexiRayController: ObservableObject {
         self.identityValidationRequired = false
         if self.appIdentity != snapshot {
           self.appIdentity = snapshot
+        }
+        let pending = self.pendingPermissionWorkflow
+        self.pendingPermissionWorkflow = nil
+        switch pending {
+        case .selection:
+          self.translateCurrentSelection()
+        case .ocr:
+          self.translateOCRRegion()
+        case nil:
+          break
         }
       }
     }
@@ -1099,6 +1133,7 @@ final class LexiRayController: ObservableObject {
   }
 
   private func cancelTranslationWork(cancelSelectionTask: Bool = true) {
+    pendingPermissionWorkflow = nil
     ocrSelectionOverlay.close()
     stopSpeaking()
     if cancelSelectionTask {
