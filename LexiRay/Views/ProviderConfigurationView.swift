@@ -184,7 +184,9 @@ private struct ProviderConfigurationCard: View {
         SecureField("API key", text: apiKeyBinding)
           .textFieldStyle(.roundedBorder)
 
-        if configuration.providerID == .openAIResponses {
+        if configuration.providerID == .openAIChatCompletions {
+          chatAdvancedSection
+        } else if configuration.providerID == .openAIResponses {
           responsesAdvancedSection
         }
       } else {
@@ -247,13 +249,7 @@ private struct ProviderConfigurationCard: View {
         Text("Disabled parameters are omitted from OpenAI Responses requests.")
           .foregroundStyle(.secondary)
 
-        optionalDoubleControl(
-          title: "Temperature",
-          keyPath: \.temperature,
-          defaultValue: 0.2,
-          range: 0 ... 2,
-          step: 0.1
-        )
+        temperatureControl
 
         optionalIntControl(
           title: "Max output tokens",
@@ -287,6 +283,29 @@ private struct ProviderConfigurationCard: View {
       .padding(.top, 8)
     }
     .font(.caption)
+  }
+
+  private var chatAdvancedSection: some View {
+    DisclosureGroup("Advanced", isExpanded: $showsAdvancedParameters) {
+      VStack(alignment: .leading, spacing: 9) {
+        Text("Disabled parameters are omitted from OpenAI Chat Completions requests.")
+          .foregroundStyle(.secondary)
+
+        temperatureControl
+      }
+      .padding(.top, 8)
+    }
+    .font(.caption)
+  }
+
+  private var temperatureControl: some View {
+    optionalDoubleControl(
+      title: "Temperature",
+      keyPath: \.temperature,
+      defaultValue: 0.2,
+      range: 0 ... 2,
+      step: 0.1
+    )
   }
 
   private func optionalDoubleControl(

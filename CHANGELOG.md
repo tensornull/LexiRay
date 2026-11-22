@@ -15,6 +15,19 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Removed CodeQL and automatic Copilot review from the delivery loop; formal
   review is limited to Codex P0/P1 findings on release pull requests.
 
+## [0.4.6] - 2026-11-23
+
+### Added
+
+- Added an optional Temperature control under Advanced for OpenAI Chat
+  Completions providers.
+
+### Fixed
+
+- Omit the Chat Completions `temperature` parameter when the control is
+  disabled, allowing models that only support their default value to accept
+  requests.
+
 ## [0.4.5] - 2026-11-07
 
 ### Fixed

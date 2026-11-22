@@ -47,7 +47,7 @@ struct OpenAIChatCompletionsProvider: TranslationProvider {
         .init(role: "system", content: TranslationPrompt.instructions(targetLanguage: request.targetLanguage)),
         .init(role: "user", content: TranslationPrompt.userContent(text: text, targetLanguage: request.targetLanguage))
       ],
-      temperature: 0.2
+      advancedParameters: configuration.advancedParameters
     )
 
     let response: OpenAIChatResponse = try await performJSONRequest(
@@ -77,7 +77,7 @@ struct OpenAIChatCompletionsProvider: TranslationProvider {
         .init(role: "system", content: TranslationPrompt.instructions(targetLanguage: request.targetLanguage)),
         .init(role: "user", content: TranslationPrompt.userContent(text: text, targetLanguage: request.targetLanguage))
       ],
-      temperature: 0.2,
+      advancedParameters: configuration.advancedParameters,
       stream: true
     )
 
@@ -954,13 +954,18 @@ private func isFailureEvent(_ object: [String: Any], fallbackEventName: String?)
 private struct OpenAIChatRequest: Encodable {
   let model: String
   let messages: [OpenAIChatMessage]
-  let temperature: Double
+  let temperature: Double?
   let stream: Bool?
 
-  init(model: String, messages: [OpenAIChatMessage], temperature: Double, stream: Bool? = nil) {
+  init(
+    model: String,
+    messages: [OpenAIChatMessage],
+    advancedParameters: ProviderAdvancedParameters,
+    stream: Bool? = nil
+  ) {
     self.model = model
     self.messages = messages
-    self.temperature = temperature
+    temperature = advancedParameters.temperature.map { min(max($0, 0), 2) }
     self.stream = stream
   }
 }
