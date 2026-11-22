@@ -16,6 +16,7 @@ final class LLMProviderTests: XCTestCase {
     XCTAssertEqual(client.request?.url?.absoluteString, "https://api.example.test/v1/chat/completions")
     XCTAssertEqual(client.request?.value(forHTTPHeaderField: "Authorization"), "Bearer test-key")
     XCTAssertEqual(try client.stringBodyValue("model"), "test-model")
+    XCTAssertNil(try client.jsonBody()["temperature"])
     // The user turn must restate the translate task so chat models translate the
     // text instead of replying to it conversationally.
     let messages = try XCTUnwrap(try client.jsonBody()["messages"] as? [[String: Any]])
@@ -38,7 +39,10 @@ final class LLMProviderTests: XCTestCase {
       ]
     )
     let provider = OpenAIChatCompletionsProvider(
-      configuration: makeConfiguration(provider: .openAIChatCompletions),
+      configuration: makeConfiguration(
+        provider: .openAIChatCompletions,
+        advancedParameters: ProviderAdvancedParameters(temperature: 0.7)
+      ),
       client: client
     )
 
@@ -47,6 +51,7 @@ final class LLMProviderTests: XCTestCase {
     XCTAssertEqual(partials, ["你", "你好"])
     XCTAssertEqual(result?.translatedText, "你好")
     XCTAssertEqual(try client.boolBodyValue("stream"), true)
+    XCTAssertEqual(try XCTUnwrap(client.jsonBody()["temperature"] as? NSNumber).doubleValue, 0.7, accuracy: 0.001)
   }
 
   func testOpenAIResponsesRequestAndResponse() async throws {
